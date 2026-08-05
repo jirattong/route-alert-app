@@ -1,16 +1,43 @@
 # route_alert
 
-A new Flutter project.
+**Route Alert** เป็นแอปพลิเคชัน Flutter ที่พัฒนาขึ้นเพื่อช่วยอำนวยความสะดวกในการจราจรเมื่อมีรถพยาบาลฉุกเฉิน และเป็นช่องทางแจ้งเหตุอุบัติเหตุไปยังหน่วยงานที่เกี่ยวข้องโดยตรง 
 
-## Getting Started
+> ⚠️ **หมายเหตุ:** ปัจจุบันโครงการอยู่ในขั้นตอน **งานออกแบบหน้าจออินเทอร์เฟซ (UI Only)** ยังไม่ได้เชื่อมต่อระบบฐานข้อมูล (Backend) และการส่งข้อมูลตำแหน่งจริง (Real-time Tracking)
 
-This project is a starting point for a Flutter application.
+---
 
-A few resources to get you started if this is your first Flutter project:
+## 🌟 คุณสมบัติหลัก (Features)
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+* **ระบบแจ้งเตือนรถพยาบาลใกล้เคียง (Ambulance Proximity Alert)**
+  * แจ้งเตือนผู้ใช้ทางถนนเมื่อมีรถพยาบาลกำลังเข้าใกล้ เพื่อให้ผู้ขับขี่สามารถเตรียมหลบทางได้อย่างทันท่วงที
+* **ระบบแจ้งเหตุอุบัติเหตุ (Accident Reporting)**
+  * รายงานเหตุฉุกเฉินหรืออุบัติเหตุพร้อมระบุพิกัดตำแหน่ง รายละเอียด และรูปภาพ ส่งตรงไปยังหน่วยงานรับแจ้งเหตุ
+* **แผนที่แสดงผล (Interactive Map)**
+  * หน้าจอแผนที่สำหรับแสดงตำแหน่งรถพยาบาล จุดเกิดอุบัติเหตุ และสภาพการจราจร
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+---
+
+## 👥 สิทธิ์การใช้งาน 3 กลุ่มผู้ใช้ (User Roles)
+
+หน้าจอและฟังก์ชันการทำงานจะปรับเปลี่ยนตามสิทธิ์ของผู้ใช้งาน:
+
+1. **ผู้ใช้ทั่วไป / ผู้ขับขี่ (General User / Driver)**
+   * รับแจ้งเตือนเมื่อมีรถพยาบาลฉุกเฉินวิ่งเข้ามาใกล้
+   * ดูตำแหน่งเหตุการณ์บนแผนที่รอบตัว
+   * กดแจ้งอุบัติเหตุพร้อมส่งพิกัดไปยังหน่วยงาน
+2. **เจ้าหน้าที่รถพยาบาล (Ambulance Team)**
+   * เปิด/ปิด สถานะการปฏิบัติงานและส่งพิกัดตำแหน่ง
+   * ดูเส้นทางนำทางไปยังจุดเกิดเหตุและโรงพยาบาล
+3. **หน่วยงาน / ผู้ควบคุมระบบ (Agency / Dispatcher)**
+   * แดชบอร์ดภาพรวมแผนที่ ตรวจสอบจุดแจ้งเหตุทั้งหมด
+   * บริหารจัดการและมอบหมายงานให้รถพยาบาลที่อยู่ใกล้ที่สุด
+
+---
+
+## 🚀 การเริ่มต้นใช้งาน (Getting Started)
+
+โครงการนี้สร้างด้วย **Flutter Framework**
+
+1. Clone Repository นี้ลงเครื่อง:
+   ```bash
+   git clone [https://github.com/your-username/route_alert.git](https://github.com/your-username/route_alert.git)
