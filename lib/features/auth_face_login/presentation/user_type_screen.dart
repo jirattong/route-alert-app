@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../driver_radar/presentation/driver_main_screen.dart';
 import '../../ambulance/presentation/ambulance_main_screen.dart';
-import '../../driver_radar/presentation/driver_home_screen.dart';
-import '../../ambulance/presentation/ambulance_home_screen.dart';
+import '../../agency/presentation/agency_main_screen.dart'; // 👈 นำเข้าไฟล์ AgencyMainScreen ที่พึ่งสร้าง
 
 class UserTypeScreen extends StatelessWidget {
   const UserTypeScreen({super.key});
@@ -85,7 +84,7 @@ class UserTypeScreen extends StatelessWidget {
                           context,
                           roleName: 'ผู้ใช้ทั่วไป',
                           roleColor: const Color(0xFF5B9EE1),
-                          targetScreen: const DriverMainScreen(), // 🔗 ปลายทางหน้าผู้ใช้ทั่วไป
+                          targetScreen: const DriverMainScreen(),
                         );
                       },
                     ),
@@ -103,7 +102,7 @@ class UserTypeScreen extends StatelessWidget {
                           context,
                           roleName: 'รถ Ambulance',
                           roleColor: const Color(0xFFEB5757),
-                          targetScreen: const AmbulanceMainScreen(), // 🔗 ปลายทางหน้ารถ Ambulance
+                          targetScreen: const AmbulanceMainScreen(),
                         );
                       },
                     ),
@@ -121,7 +120,7 @@ class UserTypeScreen extends StatelessWidget {
                           context,
                           roleName: 'หน่วยงาน/โรงพยาบาล',
                           roleColor: const Color(0xFF52E197),
-                          targetScreen: const DriverHomeScreen(), // สามารถสลับเป็นหน้า Hospital เมื่อสร้างในอนาคต
+                          targetScreen: const AgencyMainScreen(), // 👈 เปลี่ยนปลายทางเป็น AgencyMainScreen อย่างถูกต้อง
                         );
                       },
                     ),
@@ -269,7 +268,7 @@ class UserTypeScreen extends StatelessWidget {
     BuildContext context, {
     required String roleName,
     required Color roleColor,
-    required Widget targetScreen, // 👈 เพิ่ม Parameter รับ Widget หน้าเป้าหมาย
+    required Widget targetScreen,
   }) {
     final TextEditingController phoneController = TextEditingController();
     final TextEditingController otpController = TextEditingController();
@@ -390,7 +389,7 @@ class UserTypeScreen extends StatelessWidget {
                               ),
                             );
 
-                            // 🔗 นำพาไปยังหน้าหลักตามบทบาทผู้ใช้ที่ส่งเข้ามา
+                            // นำพาไปยังหน้าหลักตามบทบาทผู้ใช้ที่ส่งเข้ามา
                             Navigator.pushReplacement(
                               context,
                               MaterialPageRoute(
