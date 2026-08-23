@@ -1,133 +1,434 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
-import '../../../core/constants/app_settings.dart';
-import 'sos_report_screen.dart';
+import '../../../core/services/location_service.dart';
+import '../../../core/services/driver_storage_service.dart';
 
 class DriverHomeScreen extends StatefulWidget {
-  const DriverHomeScreen({super.key});
+  final VoidCallback? onOpenSos;
+
+  const DriverHomeScreen({
+    super.key,
+    this.onOpenSos,
+  });
 
   @override
   State<DriverHomeScreen> createState() => _DriverHomeScreenState();
 }
 
-class _DriverHomeScreenState extends State<DriverHomeScreen> {
-  int _currentSpeed = 67;
+class _DriverHomeScreenState extends State<DriverHomeScreen>
+    with SingleTickerProviderStateMixin {
+  final MapController _mapController = MapController();
 
-  // พิกัดผู้ใช้ (หน้า ม.พะเยา)
-  final LatLng _userLocation = const LatLng(19.0284, 99.8962);
+  LatLng _currentLocation = const LatLng(19.0284, 99.8962);
+  bool _isLoadingGps = true;
 
-  // พิกัดรถพยาบาลจำลอง
-  LatLng _ambulanceLocation = const LatLng(19.0400, 99.8962);
-  int _simStep = 0;
+  late LatLng _ambulanceLocation;
+  late LatLng _initialAmbulanceLocation;
 
-  // คำนวณระยะห่างระหว่างผู้ใช้กับรถพยาบาล (กิโลเมตร)
-  double _calculateDistance() {
-    const Distance distance = Distance();
-    return distance.as(LengthUnit.Kilometer, _userLocation, _ambulanceLocation);
+  // หน่วยเมตรทั้งหมด
+  double _outerRadarMeters = 1500.0;
+  double _innerAlertMeters = 400.0;
+  bool _isBackgroundActive = true;
+
+  double _currentDistanceMeters = 99999.0;
+  bool _isInBlueZone = false;
+  bool _isInRedZone = false;
+  bool _hasVibrated = false;
+
+  StreamSubscription<LatLng>? _locationSubscription;
+  Timer? _simulationTimer;
+  bool _isSimulating = false;
+
+  late AnimationController _pulseController;
+  late Animation<double> _glowAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _ambulanceLocation = const LatLng(19.0480, 99.9150);
+    _initialAmbulanceLocation = _ambulanceLocation;
+
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..repeat(reverse: true);
+
+    _glowAnimation = Tween<double>(begin: 0.12, end: 0.45).animate(
+      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
+    );
+
+    _listenToSettingsChanges();
+    _initLiveLocation();
   }
 
-  // ฟังก์ชันจำลองรถพยาบาลวิ่งเข้าหาผู้ใช้
-  void _simulateAmbulanceApproach() {
-    setState(() {
-      _simStep = (_simStep + 1) % 4;
-      if (_simStep == 0) {
-        // อยู่นอกวง (1.5 KM)
-        _ambulanceLocation = const LatLng(19.0420, 99.8962);
-      } else if (_simStep == 1) {
-        // เข้าสู่วงนอก - สีฟ้า (1.0 KM)
-        _ambulanceLocation = const LatLng(19.0370, 99.8962);
-      } else if (_simStep == 2) {
-        // เข้าสู่วงใน - สีแดง (0.4 KM / 400 M)
-        _ambulanceLocation = const LatLng(19.0320, 99.8962);
-      } else if (_simStep == 3) {
-        // แซงผ่านไปแล้ว
-        _ambulanceLocation = const LatLng(19.0230, 99.8962);
-      }
+  void _listenToSettingsChanges() {
+    final current = DriverStorageService.settingsNotifier.value;
+    _outerRadarMeters = current['outerMeters'] ?? 1500.0;
+    _innerAlertMeters = current['innerMeters'] ?? 400.0;
+    _isBackgroundActive = current['background'] ?? true;
+
+    DriverStorageService.settingsNotifier.addListener(() {
+      if (!mounted) return;
+      final val = DriverStorageService.settingsNotifier.value;
+      setState(() {
+        _outerRadarMeters = val['outerMeters'] ?? 1500.0;
+        _innerAlertMeters = val['innerMeters'] ?? 400.0;
+        _isBackgroundActive = val['background'] ?? true;
+      });
+      _checkGeofence();
     });
   }
 
   @override
+  void dispose() {
+    _locationSubscription?.cancel();
+    _simulationTimer?.cancel();
+    _pulseController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _initLiveLocation() async {
+    final initialPos = await LocationService.getCurrentLocation();
+    if (initialPos != null && mounted) {
+      setState(() {
+        _currentLocation = initialPos;
+        _isLoadingGps = false;
+        // จัดให้รถพยาบาลอยู่นอกวงเรดาร์เริ่มต้น
+        _ambulanceLocation = LatLng(
+          initialPos.latitude + 0.022,
+          initialPos.longitude + 0.022,
+        );
+        _initialAmbulanceLocation = _ambulanceLocation;
+      });
+      _mapController.move(_currentLocation, 14.0);
+      _checkGeofence();
+    } else {
+      if (mounted) setState(() => _isLoadingGps = false);
+      _checkGeofence();
+    }
+
+    _locationSubscription =
+        LocationService.getLiveLocationStream().listen((newPos) {
+      if (!mounted) return;
+      setState(() => _currentLocation = newPos);
+      _checkGeofence();
+    });
+  }
+
+  void _toggleSimulation() {
+    if (_isSimulating) {
+      _simulationTimer?.cancel();
+      setState(() => _isSimulating = false);
+    } else {
+      setState(() {
+        _isSimulating = true;
+        _hasVibrated = false;
+      });
+
+      _simulationTimer =
+          Timer.periodic(const Duration(milliseconds: 600), (timer) {
+        if (!mounted) return;
+
+        double latDiff =
+            _currentLocation.latitude - _ambulanceLocation.latitude;
+        double lngDiff =
+            _currentLocation.longitude - _ambulanceLocation.longitude;
+
+        if (latDiff.abs() < 0.00008 && lngDiff.abs() < 0.00008) {
+          timer.cancel();
+          setState(() => _isSimulating = false);
+          return;
+        }
+
+        setState(() {
+          _ambulanceLocation = LatLng(
+            _ambulanceLocation.latitude + (latDiff * 0.07),
+            _ambulanceLocation.longitude + (lngDiff * 0.07),
+          );
+        });
+
+        _checkGeofence();
+      });
+    }
+  }
+
+  void _resetSimulation() {
+    _simulationTimer?.cancel();
+    setState(() {
+      _isSimulating = false;
+      _hasVibrated = false;
+      _ambulanceLocation = _initialAmbulanceLocation;
+    });
+    _checkGeofence();
+  }
+
+  void _checkGeofence() {
+    // คำนวณระยะห่างเป็นหน่วยเมตรอย่างแม่นยำ
+    final meters = LocationService.calculateDistanceInMeters(
+      _currentLocation,
+      _ambulanceLocation,
+    );
+
+    final inBlue = meters <= _outerRadarMeters;
+    final inRed = meters <= _innerAlertMeters;
+
+    if (inRed && !_hasVibrated) {
+      _hasVibrated = true;
+      HapticFeedback.heavyImpact();
+    } else if (!inBlue) {
+      _hasVibrated = false;
+    }
+
+    setState(() {
+      _currentDistanceMeters = meters;
+      _isInBlueZone = inBlue;
+      _isInRedZone = inRed;
+    });
+  }
+
+  void _onYieldAcknowledge() async {
+    await DriverStorageService.incrementYieldCount();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('🎉 บันทึกสถิติการเปิดทางช่วยเหลือสำเร็จ (+1 แต้ม)'),
+          backgroundColor: Color(0xFF10B981),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      _resetSimulation();
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    double distanceKm = _calculateDistance();
-    bool isInBlueZone = distanceKm <= AppSettings.detectionZone;
-    bool isInRedZone = distanceKm <= AppSettings.alertDistance;
+    int displayMeters = _currentDistanceMeters.round();
 
     return Scaffold(
-      // เมื่ออยู่ในวงเตือนสีแดง สีพื้นหลังจะติดโทนแดงอ่อนๆ
-      backgroundColor: isInRedZone ? const Color(0xFFFFC1C1) : Colors.white,
+      backgroundColor: const Color(0xFFF8FAFC),
       body: SafeArea(
         child: Column(
           children: [
-            _buildHeader(isInRedZone),
-
+            _buildHeader(),
             Expanded(
               child: Stack(
-                alignment: Alignment.center,
                 children: [
-                  // --- 1. แผนที่ + วงกลม 2 ระยะ ---
-                  _buildMapView(isInBlueZone, isInRedZone),
+                  _buildMapView(),
 
-                  // --- 2. ฟิลเตอร์สีแดงทับแผนที่เมื่อเกิดเหตุฉุกเฉิน ---
-                  if (isInRedZone)
-                    IgnorePointer(
-                      child: Container(
-                        color: Colors.red.withOpacity(0.15),
+                  if (_isLoadingGps)
+                    Container(
+                      color: Colors.black26,
+                      child: const Center(
+                        child:
+                            CircularProgressIndicator(color: Color(0xFF5B9EE1)),
                       ),
                     ),
 
-                  // --- 3. ปุ่ม SOS ---
+                  // 1. แสงเตือนรอบขอบจอเมื่อเข้าสู่วงในสีแดง
+                  if (_isInRedZone)
+                    Positioned.fill(
+                      child: IgnorePointer(
+                        child: AnimatedBuilder(
+                          animation: _glowAnimation,
+                          builder: (context, child) {
+                            return Container(
+                              decoration: BoxDecoration(
+                                gradient: RadialGradient(
+                                  center: Alignment.center,
+                                  radius: 0.9,
+                                  colors: [
+                                    Colors.transparent,
+                                    const Color(0xFFEB5757)
+                                        .withOpacity(_glowAnimation.value),
+                                  ],
+                                  stops: const [0.6, 1.0],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+
+                  // 2. ป้ายแจ้งเตือนด้านบน (แสดงเมื่อเข้าสู่วงฟ้า)
+                  if (_isInBlueZone)
+                    Positioned(
+                      top: 14,
+                      left: 16,
+                      right: 16,
+                      child: _buildModernAlertBanner(
+                          displayMeters, _isInRedZone),
+                    ),
+
+                  // 3. ปุ่ม SOS ขวาล่าง
                   Positioned(
                     right: 20,
-                    bottom: 110,
-                    child: _buildSosButton(),
-                  ),
-
-                  // --- 4. แผง Speedometer & สวิตช์ Background ---
-                  Positioned(
-                    left: 16,
-                    right: 16,
-                    bottom: 16,
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        _buildSpeedGauge(),
-                        const SizedBox(width: 12),
-                        Expanded(child: _buildBackgroundToggleCard()),
-                      ],
+                    bottom: 84,
+                    child: InkWell(
+                      onTap: widget.onOpenSos,
+                      borderRadius: BorderRadius.circular(35),
+                      child: Container(
+                        width: 66,
+                        height: 66,
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                              color: const Color(0xFFEB5757), width: 3),
+                          boxShadow: [
+                            BoxShadow(
+                              color:
+                                  const Color(0xFFEB5757).withOpacity(0.35),
+                              blurRadius: 14,
+                              spreadRadius: 2,
+                            ),
+                          ],
+                        ),
+                        child: const Center(
+                          child: Text(
+                            'SOS',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w900,
+                              color: Color(0xFFEB5757),
+                            ),
+                          ),
+                        ),
+                      ),
                     ),
                   ),
 
-                  // --- 5. ปุ่มจำลองรถพยาบาล (มุมขวาบน) ---
+                  // 4. แถบสวิตช์ทำงานเบื้องหลัง
                   Positioned(
-                    top: 16,
-                    right: 16,
-                    child: _buildSimulationButton(),
+                    left: 20,
+                    right: 20,
+                    bottom: 16,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(24),
+                        border: Border.all(
+                            color: const Color(0xFF5B9EE1), width: 1.6),
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFF5B9EE1).withOpacity(0.18),
+                            blurRadius: 10,
+                            offset: const Offset(0, 3),
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                'ทำงานเบื้องหลัง',
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.black87,
+                                ),
+                              ),
+                              Text(
+                                '(Background)',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: Color(0xFF5B9EE1),
+                                ),
+                              ),
+                            ],
+                          ),
+                          Transform.scale(
+                            scale: 0.9,
+                            child: Switch(
+                              value: _isBackgroundActive,
+                              activeColor: Colors.white,
+                              activeTrackColor: const Color(0xFF5B9EE1),
+                              onChanged: (val) {
+                                setState(() => _isBackgroundActive = val);
+                                final current =
+                                    DriverStorageService.settingsNotifier.value;
+                                DriverStorageService.saveSettings(
+                                  background: val,
+                                  volume: current['volume'],
+                                  outerMeters: current['outerMeters'],
+                                  innerMeters: current['innerMeters'],
+                                );
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
 
-                  // 🚨 --- 6. หน้าต่างแจ้งเตือนฉุกเฉินกลางจอ --- 🚨
-                  if (isInRedZone)
-                    _buildCenterEmergencyAlert(distanceKm),
+                  // 5. ปุ่มจำลองรถพยาบาลวิ่ง
+                  Positioned(
+                    top: 14,
+                    right: 14,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.95),
+                        borderRadius: BorderRadius.circular(20),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.1),
+                            blurRadius: 6,
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            icon: Icon(
+                              _isSimulating
+                                  ? Icons.pause_circle_filled
+                                  : Icons.play_circle_fill,
+                              color: _isSimulating
+                                  ? const Color(0xFFEF4444)
+                                  : Colors.orange,
+                              size: 30,
+                            ),
+                            onPressed: _toggleSimulation,
+                            tooltip: 'จำลองรถวิ่งเข้าหา',
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.refresh_rounded, size: 22),
+                            onPressed: _resetSimulation,
+                            tooltip: 'รีเซ็ตพิกัดรถพยาบาล',
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),
           ],
         ),
       ),
-      // ❌ ถอด bottomNavigationBar ออกเพื่อใช้ Shell ร่วมกันใน DriverMainScreen
     );
   }
 
-  // --- Header Bar (ปรับสีพื้นตามสถานะฉุกเฉิน) ---
-  Widget _buildHeader(bool isRed) {
+  Widget _buildHeader() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
       decoration: BoxDecoration(
-        color: isRed ? const Color(0xFFFFB3B3) : Colors.white,
+        color: Colors.white,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.06),
-            blurRadius: 4,
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 6,
             offset: const Offset(0, 2),
           ),
         ],
@@ -136,27 +437,33 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Container(
-            width: 36,
-            height: 36,
+            width: 34,
+            height: 34,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              border: Border.all(color: const Color(0xFF2C3E50), width: 2),
+              border: Border.all(color: const Color(0xFF2C3E50), width: 1.8),
             ),
             child: Stack(
               alignment: Alignment.center,
               children: [
-                const Icon(Icons.airport_shuttle_outlined, size: 20, color: Color(0xFF2C3E50)),
-                Positioned(top: 4, right: 4, child: Icon(Icons.wifi, size: 9, color: Colors.redAccent.shade700)),
+                const Icon(Icons.airport_shuttle_outlined,
+                    size: 18, color: Color(0xFF2C3E50)),
+                Positioned(
+                  top: 3,
+                  right: 3,
+                  child: Icon(Icons.wifi,
+                      size: 8, color: Colors.redAccent.shade700),
+                ),
               ],
             ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 10),
           const Text(
             'RouteAlert',
             style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: Colors.black87,
+              fontSize: 19,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF1E293B),
             ),
           ),
         ],
@@ -164,250 +471,208 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
     );
   }
 
-  // --- แผนที่ + วงกลมเรดาร์ 2 สี ---
-  Widget _buildMapView(bool showAmbulanceMarker, bool isRedZone) {
+  Widget _buildModernAlertBanner(int meters, bool isCritical) {
+    Color themeColor =
+        isCritical ? const Color(0xFFEF4444) : const Color(0xFFF59E0B);
+    Color bgColor =
+        isCritical ? const Color(0xFFFEF2F2) : const Color(0xFFFFFBEB);
+
+    return InkWell(
+      onTap: _onYieldAcknowledge,
+      borderRadius: BorderRadius.circular(22),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(color: themeColor.withOpacity(0.8), width: 1.8),
+          boxShadow: [
+            BoxShadow(
+              color: themeColor.withOpacity(0.25),
+              blurRadius: 16,
+              spreadRadius: 2,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: bgColor,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: themeColor.withOpacity(0.3)),
+              ),
+              child: Icon(
+                isCritical
+                    ? Icons.warning_rounded
+                    : Icons.notifications_active_rounded,
+                color: themeColor,
+                size: 24,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    isCritical
+                        ? 'มีรถพยาบาลฉุกเฉินใกล้ถึง!'
+                        : 'ตรวจพบรถพยาบาลในรัศมี',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: themeColor,
+                    ),
+                  ),
+                  const Text(
+                    'แตะเมื่อหลบทางแล้ว (+1 แต้ม)',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: Color(0xFF64748B),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: themeColor,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    meters >= 1000
+                        ? '${(meters / 1000).toStringAsFixed(1)}'
+                        : '$meters',
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.white,
+                      height: 1,
+                    ),
+                  ),
+                  Text(
+                    meters >= 1000 ? 'KM' : 'M',
+                    style: const TextStyle(
+                      fontSize: 9,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white70,
+                      height: 1,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMapView() {
     return FlutterMap(
+      mapController: _mapController,
       options: MapOptions(
-        initialCenter: _userLocation,
-        initialZoom: 14.8,
+        initialCenter: _currentLocation,
+        initialZoom: 14.0,
       ),
       children: [
         TileLayer(
           urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
           userAgentPackageName: 'com.routealert.app',
         ),
+
+        // วงกลม Geofence อิงหน่วยเมตร (useRadiusInMeter: true)
         CircleLayer(
           circles: [
             // วงนอกสีฟ้า
             CircleMarker(
-              point: _userLocation,
-              radius: AppSettings.detectionZone * 1000,
+              point: _currentLocation,
+              radius: _outerRadarMeters,
               useRadiusInMeter: true,
-              color: const Color(0xFF5B9EE1).withOpacity(0.12),
-              borderColor: const Color(0xFF5B9EE1),
-              borderStrokeWidth: 2.0,
+              color: const Color(0xFF5B9EE1).withOpacity(0.08),
+              borderColor: const Color(0xFF5B9EE1).withOpacity(0.45),
+              borderStrokeWidth: 1.6,
             ),
             // วงในสีแดง
             CircleMarker(
-              point: _userLocation,
-              radius: AppSettings.alertDistance * 1000,
+              point: _currentLocation,
+              radius: _innerAlertMeters,
               useRadiusInMeter: true,
-              color: const Color(0xFFEB5757).withOpacity(0.22),
-              borderColor: const Color(0xFFEB5757),
-              borderStrokeWidth: 2.5,
+              color: const Color(0xFFEF4444).withOpacity(0.12),
+              borderColor: const Color(0xFFEF4444).withOpacity(0.65),
+              borderStrokeWidth: 1.8,
             ),
           ],
         ),
+
         MarkerLayer(
           markers: [
             Marker(
-              point: _userLocation,
-              width: 42,
-              height: 42,
+              point: _currentLocation,
+              width: 44,
+              height: 44,
               child: Container(
-                decoration: const BoxDecoration(
+                decoration: BoxDecoration(
                   color: Colors.white,
                   shape: BoxShape.circle,
-                  boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 6)],
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFF5B9EE1).withOpacity(0.4),
+                      blurRadius: 10,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
                 ),
-                child: const Icon(Icons.navigation_rounded, color: Color(0xFF5B9EE1), size: 28),
+                child: Center(
+                  child: Container(
+                    width: 30,
+                    height: 30,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFF3B82F6),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.navigation_rounded,
+                      color: Colors.white,
+                      size: 16,
+                    ),
+                  ),
+                ),
               ),
             ),
-            if (showAmbulanceMarker)
-              Marker(
-                point: _ambulanceLocation,
-                width: 48,
-                height: 48,
-                child: Container(
-                  padding: const EdgeInsets.all(4),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    shape: BoxShape.circle,
-                    border: Border.all(color: Colors.red, width: 2),
-                    boxShadow: const [BoxShadow(color: Colors.redAccent, blurRadius: 8)],
-                  ),
-                  child: const Center(
-                    child: Text('🚑', style: TextStyle(fontSize: 24)),
-                  ),
+            Marker(
+              point: _ambulanceLocation,
+              width: 44,
+              height: 44,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: const Color(0xFFEF4444), width: 2),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFFEF4444).withOpacity(0.3),
+                      blurRadius: 8,
+                    ),
+                  ],
+                ),
+                child: const Center(
+                  child: Text('🚑', style: TextStyle(fontSize: 20)),
                 ),
               ),
+            ),
           ],
         ),
       ],
-    );
-  }
-
-  // 🚨 --- การ์ดเตือนภัยกลางจอ --- 🚨
-  Widget _buildCenterEmergencyAlert(double distanceKm) {
-    int distanceMeter = (distanceKm * 1000).round();
-
-    return Center(
-      child: Container(
-        width: MediaQuery.of(context).size.width * 0.82,
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(32),
-          border: Border.all(color: const Color(0xFFEB5757), width: 3),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.redAccent.withOpacity(0.35),
-              blurRadius: 20,
-              spreadRadius: 4,
-            ),
-          ],
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(
-              Icons.warning_rounded,
-              size: 88,
-              color: Color(0xFFFFB800),
-            ),
-            const SizedBox(height: 12),
-            const Text(
-              'แจ้งเตือน',
-              style: TextStyle(
-                fontSize: 28,
-                fontWeight: FontWeight.bold,
-                color: Colors.black87,
-                height: 1.2,
-              ),
-            ),
-            const SizedBox(height: 4),
-            const Text(
-              'มีรถพยาบาล',
-              style: TextStyle(
-                fontSize: 26,
-                fontWeight: FontWeight.bold,
-                color: Colors.black87,
-                height: 1.2,
-              ),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'ระยะ $distanceMeter M',
-              style: const TextStyle(
-                fontSize: 26,
-                fontWeight: FontWeight.bold,
-                color: Colors.black87,
-                height: 1.2,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // --- ปุ่มทดสอบการจำลอง ---
-  Widget _buildSimulationButton() {
-    return FloatingActionButton.extended(
-      heroTag: 'simBtnHome',
-      onPressed: _simulateAmbulanceApproach,
-      backgroundColor: Colors.white,
-      elevation: 4,
-      icon: const Icon(Icons.play_circle_fill_rounded, color: Color(0xFF5B9EE1)),
-      label: Text(
-        _simStep == 0
-            ? 'ทดสอบ: รถเข้าวงฟ้า'
-            : _simStep == 1
-                ? 'ทดสอบ: รถเข้าวงแดง (เตือน!)'
-                : _simStep == 2
-                    ? 'ทดสอบ: รถแซงผ่าน'
-                    : 'รีเซ็ต',
-        style: const TextStyle(color: Colors.black87, fontWeight: FontWeight.bold, fontSize: 12),
-      ),
-    );
-  }
-
-  Widget _buildSpeedGauge() {
-    return Container(
-      width: 80,
-      height: 80,
-      decoration: BoxDecoration(
-        color: Colors.white,
-        shape: BoxShape.circle,
-        border: Border.all(color: const Color(0xFF5B9EE1), width: 3),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.12), blurRadius: 8, offset: const Offset(0, 3))],
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text('$_currentSpeed', style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Color(0xFF5B9EE1), height: 1.0)),
-          const SizedBox(height: 2),
-          const Text('KM/H', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF5B9EE1))),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildBackgroundToggleCard() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(25),
-        border: Border.all(color: const Color(0xFF5B9EE1), width: 1.5),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 8, offset: const Offset(0, 3))],
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          const Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text('ทำงานเบื้องหลัง', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.black87)),
-              Text('(Background)', style: TextStyle(fontSize: 12, color: Color(0xFF5B9EE1), fontWeight: FontWeight.w600)),
-            ],
-          ),
-          Transform.scale(
-            scale: 0.9,
-            child: Switch(
-              value: AppSettings.isBackgroundMode,
-              activeColor: Colors.white,
-              activeTrackColor: const Color(0xFF5B9EE1),
-              inactiveThumbColor: Colors.white,
-              inactiveTrackColor: Colors.grey.shade300,
-              onChanged: (value) {
-                setState(() => AppSettings.isBackgroundMode = value);
-              },
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSosButton() {
-    return Container(
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        boxShadow: [BoxShadow(color: const Color(0xFFEB5757).withOpacity(0.45), blurRadius: 12, spreadRadius: 2, offset: const Offset(0, 4))],
-      ),
-      child: Material(
-        color: Colors.white,
-        shape: const CircleBorder(),
-        child: InkWell(
-          customBorder: const CircleBorder(),
-          onTap: () {
-            Navigator.push(context, MaterialPageRoute(builder: (context) => const SosReportScreen()));
-          },
-          child: Container(
-            width: 68,
-            height: 68,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(color: const Color(0xFFEB5757), width: 3),
-            ),
-            child: const Center(
-              child: Text('SOS', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFFEB5757))),
-            ),
-          ),
-        ),
-      ),
     );
   }
 }

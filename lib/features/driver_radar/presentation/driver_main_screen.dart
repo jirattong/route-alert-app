@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'driver_home_screen.dart';
 import 'incident_list_screen.dart';
+import 'sos_report_screen.dart';
 import 'driver_settings_screen.dart';
 import 'driver_profile_screen.dart';
 
@@ -13,25 +14,47 @@ class DriverMainScreen extends StatefulWidget {
 
 class _DriverMainScreenState extends State<DriverMainScreen> {
   int _currentIndex = 0;
+  bool _isShowingSosScreen = false;
 
-  // รวมหน้าทั้ง 4 หน้าไว้ใน IndexedStack เพื่อสลับหน้าได้ลื่นไหล ไร้การกระตุก
-  final List<Widget> _pages = const [
-    DriverHomeScreen(),       // Index 0: หน้า Map
-    IncidentListScreen(),     // Index 1: หน้า Incident
-    DriverSettingsScreen(),   // Index 2: หน้า Settings
-    DriverProfileScreen(),    // Index 3: หน้า Profile
-  ];
+  void _onSelectTab(int index) {
+    setState(() {
+      _currentIndex = index;
+      _isShowingSosScreen = false; // ปิดหน้า SOS เมื่อสลับแท็บ
+    });
+  }
+
+  void _openSosScreen() {
+    setState(() {
+      _isShowingSosScreen = true;
+    });
+  }
+
+  void _closeSosScreen() {
+    setState(() {
+      _isShowingSosScreen = false;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      // 🚀 ใช้ IndexedStack เพื่อโหลดทุกหน้าไว้ใน Memory สลับได้ทันที 60-120 FPS
-      body: IndexedStack(
-        index: _currentIndex,
-        children: _pages,
+    final List<Widget> basePages = [
+      DriverHomeScreen(
+        onOpenSos: _openSosScreen,
       ),
+      IncidentListScreen(
+        onOpenSos: _openSosScreen,
+      ),
+      const DriverSettingsScreen(),
+      const DriverProfileScreen(),
+    ];
 
-      // แถบเมนูน้านล่างรวมไว้ที่นี่ที่เดียว
+    return Scaffold(
+      body: _isShowingSosScreen
+          ? SosReportScreen(onClose: _closeSosScreen)
+          : IndexedStack(
+              index: _currentIndex,
+              children: basePages,
+            ),
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
           color: Colors.white,
@@ -39,14 +62,10 @@ class _DriverMainScreenState extends State<DriverMainScreen> {
         ),
         child: BottomNavigationBar(
           currentIndex: _currentIndex,
-          onTap: (index) {
-            setState(() {
-              _currentIndex = index;
-            });
-          },
+          onTap: _onSelectTab,
           type: BottomNavigationBarType.fixed,
           backgroundColor: Colors.white,
-          selectedItemColor: const Color(0xFF2C3E50),
+          selectedItemColor: const Color(0xFF5B9EE1),
           unselectedItemColor: Colors.grey.shade400,
           showSelectedLabels: false,
           showUnselectedLabels: false,
@@ -60,7 +79,7 @@ class _DriverMainScreenState extends State<DriverMainScreen> {
             BottomNavigationBarItem(
               icon: Icon(Icons.airport_shuttle_outlined, size: 28),
               activeIcon: Icon(Icons.airport_shuttle_rounded, size: 28),
-              label: 'Ambulance',
+              label: 'Incident',
             ),
             BottomNavigationBarItem(
               icon: Icon(Icons.settings_outlined, size: 28),

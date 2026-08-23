@@ -1,6 +1,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-<!-- 👈 เพิ่มบรรทัดขอสิทธิ์ใช้อินเทอร์เน็ตตรงนี้ -->
+
+    <!-- 👈 เพิ่มบรรทัดขอสิทธิ์ใช้อินเทอร์เน็ตตรงนี้ -->
     <uses-permission android:name="android.permission.INTERNET"/>
+
+    <!-- 📍 สิทธิ์ขอเข้าถึง GPS สำหรับตรวจจับ Geofence และนำทาง -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     
     <application
         android:label="route_alert"

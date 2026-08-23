@@ -38,7 +38,7 @@ dependencies:
   # --- Map & Geolocation ---
   flutter_map: ^6.1.0 # แผนที่ OpenStreetMap
   latlong2: ^0.9.0 # คำนวณพิกัด Lat/Lng
-  geolocator: ^11.0.0 # ดึงพิกัด GPS ของเครื่อง
+  geolocator: ^13.0.2 # ดึงพิกัด GPS ของเครื่อง
 
   # --- MQTT & Background Notification ---
   mqtt_client: ^10.2.0 # รับส่งข้อมูลเรียลไทม์
@@ -48,6 +48,9 @@ dependencies:
   camera: ^0.10.5+9 # เปิดกล้องสแกนใบหน้า
 
   image_picker: ^1.0.7
+  permission_handler: ^11.3.1
+  just_audio: ^0.9.46
+  shared_preferences: ^2.3.3
 
 dev_dependencies:
   flutter_test:
