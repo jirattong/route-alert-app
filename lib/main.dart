@@ -1,10 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'firebase_options.dart';
 import 'features/auth_face_login/presentation/face_login_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // 1. Load private environment variables securely from .env
+  try {
+    await dotenv.load(fileName: ".env");
+  } catch (e) {
+    debugPrint('DotEnv load warning: $e');
+  }
+
+  // 2. Initialize Firebase with dynamic options from .env
   try {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
@@ -12,6 +22,7 @@ void main() async {
   } catch (e) {
     debugPrint('Firebase init error: $e');
   }
+
   runApp(const RouteAlertApp());
 }
 
