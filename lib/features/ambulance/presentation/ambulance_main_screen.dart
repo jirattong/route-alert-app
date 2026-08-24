@@ -3,8 +3,6 @@ import 'ambulance_home_screen.dart';
 import 'ambulance_settings_screen.dart';
 import 'ambulance_incident_list_screen.dart';
 import 'ambulance_profile_screen.dart';
-import '../../driver_radar/presentation/driver_settings_screen.dart';
-import '../../driver_radar/presentation/driver_profile_screen.dart';
 
 class AmbulanceMainScreen extends StatefulWidget {
   const AmbulanceMainScreen({super.key});

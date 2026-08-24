@@ -56,7 +56,7 @@ class _AmbulanceHomeScreenState extends State<AmbulanceHomeScreen> {
         color: Colors.white,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.06),
+            color: Colors.black.withValues(alpha: 0.06),
             blurRadius: 4,
             offset: const Offset(0, 2),
           ),
@@ -135,7 +135,7 @@ class _AmbulanceHomeScreenState extends State<AmbulanceHomeScreen> {
                   border: Border.all(color: const Color(0xFFEB5757), width: 2),
                   boxShadow: [
                     BoxShadow(
-                      color: const Color(0xFFEB5757).withOpacity(0.4),
+                      color: const Color(0xFFEB5757).withValues(alpha: 0.4),
                       blurRadius: 8,
                     ),
                   ],
@@ -171,7 +171,7 @@ class _AmbulanceHomeScreenState extends State<AmbulanceHomeScreen> {
         border: Border.all(color: const Color(0xFFEB5757), width: 2),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFFEB5757).withOpacity(0.15),
+            color: const Color(0xFFEB5757).withValues(alpha: 0.15),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),
@@ -214,7 +214,7 @@ class _AmbulanceHomeScreenState extends State<AmbulanceHomeScreen> {
                 scale: 1.0,
                 child: Switch(
                   value: _isNotificationAlert,
-                  activeColor: Colors.white,
+                  activeThumbColor: Colors.white,
                   activeTrackColor: const Color(0xFFEB5757),
                   inactiveThumbColor: Colors.white,
                   inactiveTrackColor: Colors.grey.shade400,

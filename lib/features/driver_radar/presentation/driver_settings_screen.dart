@@ -80,7 +80,7 @@ class _DriverSettingsScreenState extends State<DriverSettingsScreen> {
                         ),
                         Switch(
                           value: _isBackgroundMode,
-                          activeColor: Colors.white,
+                          activeThumbColor: Colors.white,
                           activeTrackColor: const Color(0xFF5B9EE1),
                           onChanged: (val) {
                             setState(() => _isBackgroundMode = val);
@@ -258,7 +258,7 @@ class _DriverSettingsScreenState extends State<DriverSettingsScreen> {
         border: Border.all(color: borderColor, width: 1.5),
         boxShadow: [
           BoxShadow(
-            color: borderColor.withOpacity(0.12),
+            color: borderColor.withValues(alpha: 0.12),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -274,7 +274,7 @@ class _DriverSettingsScreenState extends State<DriverSettingsScreen> {
       decoration: BoxDecoration(
         color: Colors.white,
         boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 4, offset: const Offset(0, 2)),
+          BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 4, offset: const Offset(0, 2)),
         ],
       ),
       child: const Center(

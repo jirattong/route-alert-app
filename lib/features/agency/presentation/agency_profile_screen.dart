@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import '../../auth_face_login/data/models/user_face_profile.dart';
+import '../../auth_face_login/data/services/face_auth_repository.dart';
 import '../../auth_face_login/presentation/face_login_screen.dart';
+import '../../auth_face_login/presentation/face_scan_screen.dart';
 
 class AgencyProfileScreen extends StatefulWidget {
   const AgencyProfileScreen({super.key});
@@ -9,12 +12,52 @@ class AgencyProfileScreen extends StatefulWidget {
 }
 
 class _AgencyProfileScreenState extends State<AgencyProfileScreen> {
-  // ข้อมูลจำลองของโรงพยาบาล
+  UserFaceProfile? _currentUser;
   String _hospitalName = 'โรงพยาบาลมหาราชนครเชียงใหม่';
   String _contactNumber = '053-999-999 (เบอร์สายตรง ER)';
-  
-  // สถานะความพร้อมของห้องฉุกเฉิน (ER Divert Status)
-  bool _isErAvailable = true; // true = รับเคสได้, false = เตียงเต็ม(Bypass)
+  bool _isErAvailable = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUserData();
+  }
+
+  Future<void> _loadUserData() async {
+    final user = await FaceAuthRepository.getCurrentUser();
+    if (mounted && user != null) {
+      setState(() {
+        _currentUser = user;
+        _hospitalName = user.name;
+      });
+    }
+  }
+
+  void _onReEnrollFace() async {
+    final newEmbedding = await Navigator.push<List<double>>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => FaceScanScreen(
+          mode: FaceScanMode.register,
+          registrationEmail: _currentUser?.email,
+          registrationName: _currentUser?.name,
+        ),
+      ),
+    );
+
+    if (newEmbedding != null && newEmbedding.isNotEmpty && _currentUser != null) {
+      await FaceAuthRepository.updateUserFaceEmbedding(_currentUser!.email, newEmbedding);
+      await _loadUserData();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            backgroundColor: Color(0xFF00A896),
+            content: Text('อัปเดตข้อมูลใบหน้า Face ID สำเร็จเรียบร้อย'),
+          ),
+        );
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -50,10 +93,16 @@ class _AgencyProfileScreenState extends State<AgencyProfileScreen> {
                       onTap: () => _showEditInfoModal(context),
                     ),
 
+                    // --- เมนูจัดการ Face ID ---
+                    _buildOptionTile(
+                      title: 'จัดการระบบจดจำใบหน้า (Face ID Security)',
+                      onTap: _onReEnrollFace,
+                    ),
+
                     // --- เมนูแก้ไขรหัสผ่าน ---
                     _buildOptionTile(
                       title: 'แก้ไขรหัสผ่าน (Password)',
-                      onTap: () {}, // เรียกใช้ Modal คล้ายฝั่ง Driver ได้
+                      onTap: () {},
                     ),
 
                     const SizedBox(height: 32),
@@ -79,7 +128,7 @@ class _AgencyProfileScreenState extends State<AgencyProfileScreen> {
       decoration: BoxDecoration(
         color: Colors.white,
         boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 4, offset: const Offset(0, 2)),
+          BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 4, offset: const Offset(0, 2)),
         ],
       ),
       child: Row(
@@ -118,7 +167,7 @@ class _AgencyProfileScreenState extends State<AgencyProfileScreen> {
         border: Border.all(color: const Color(0xFF69F0AE), width: 2.5),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF69F0AE).withOpacity(0.3), // แสงเรืองรองสีเขียว
+            color: const Color(0xFF69F0AE).withValues(alpha: 0.3), // แสงเรืองรองสีเขียว
             blurRadius: 16,
             spreadRadius: 2,
             offset: const Offset(0, 0),
@@ -277,7 +326,7 @@ class _AgencyProfileScreenState extends State<AgencyProfileScreen> {
             scale: 0.9,
             child: Switch(
               value: _isErAvailable,
-              activeColor: Colors.white,
+              activeThumbColor: Colors.white,
               activeTrackColor: const Color(0xFF2E7D32),
               inactiveThumbColor: Colors.white,
               inactiveTrackColor: const Color(0xFFEB5757),
@@ -324,7 +373,7 @@ class _AgencyProfileScreenState extends State<AgencyProfileScreen> {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(25),
         boxShadow: [
-          BoxShadow(color: const Color(0xFF1B5E20).withOpacity(0.35), blurRadius: 10, offset: const Offset(0, 4)),
+          BoxShadow(color: const Color(0xFF1B5E20).withValues(alpha: 0.35), blurRadius: 10, offset: const Offset(0, 4)),
         ],
       ),
       child: ElevatedButton(

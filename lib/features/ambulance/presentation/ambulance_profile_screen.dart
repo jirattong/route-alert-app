@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import '../../auth_face_login/data/models/user_face_profile.dart';
+import '../../auth_face_login/data/services/face_auth_repository.dart';
 import '../../auth_face_login/presentation/face_login_screen.dart';
+import '../../auth_face_login/presentation/face_scan_screen.dart';
 
 class AmbulanceProfileScreen extends StatefulWidget {
   const AmbulanceProfileScreen({super.key});
@@ -9,14 +12,57 @@ class AmbulanceProfileScreen extends StatefulWidget {
 }
 
 class _AmbulanceProfileScreenState extends State<AmbulanceProfileScreen> {
-  // ข้อมูลเจ้าหน้าที่และรถพยาบาล
-  String _userEmail = 'username@gmail.com';
+  UserFaceProfile? _currentUser;
+  String _userEmail = 'ambulance@routealert.com';
   String _username = 'นายสมชาย กู้ชีพ';
   String _vehiclePlate = 'กขค123 (เชียงใหม่)';
-  String _hospitalUnit = 'รพ.มหาราชนครเชียงใหม่';
+  final String _hospitalUnit = 'รพ.มหาราชนครเชียงใหม่';
   String _phone = '099XXXXXXX';
-  int _completedCases = 128; // จำนวนเคสที่ปฏิบัติการสำเร็จ
-  bool _isOnDuty = true; // สถานะพร้อมปฏิบัติงาน (On Duty)
+  final int _completedCases = 128;
+  bool _isOnDuty = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUserData();
+  }
+
+  Future<void> _loadUserData() async {
+    final user = await FaceAuthRepository.getCurrentUser();
+    if (mounted && user != null) {
+      setState(() {
+        _currentUser = user;
+        _username = user.name;
+        _userEmail = user.email;
+      });
+    }
+  }
+
+  void _onReEnrollFace() async {
+    final newEmbedding = await Navigator.push<List<double>>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => FaceScanScreen(
+          mode: FaceScanMode.register,
+          registrationEmail: _currentUser?.email,
+          registrationName: _currentUser?.name,
+        ),
+      ),
+    );
+
+    if (newEmbedding != null && newEmbedding.isNotEmpty && _currentUser != null) {
+      await FaceAuthRepository.updateUserFaceEmbedding(_currentUser!.email, newEmbedding);
+      await _loadUserData();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            backgroundColor: Color(0xFF00A896),
+            content: Text('อัปเดตข้อมูลใบหน้า Face ID สำเร็จเรียบร้อย'),
+          ),
+        );
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -53,6 +99,12 @@ class _AmbulanceProfileScreenState extends State<AmbulanceProfileScreen> {
                       onTap: () => _showEditProfileModal(context),
                     ),
 
+                    // --- เมนูจัดการ Face ID ---
+                    _buildOptionTile(
+                      title: 'จัดการระบบจดจำใบหน้า (Face ID Security)',
+                      onTap: _onReEnrollFace,
+                    ),
+
                     // --- เมนูแก้ไขรหัสผ่าน ---
                     _buildOptionTile(
                       title: 'แก้ไขรหัสผ่าน (Password)',
@@ -83,7 +135,7 @@ class _AmbulanceProfileScreenState extends State<AmbulanceProfileScreen> {
         color: Colors.white,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.06),
+            color: Colors.black.withValues(alpha: 0.06),
             blurRadius: 4,
             offset: const Offset(0, 2),
           ),
@@ -138,7 +190,7 @@ class _AmbulanceProfileScreenState extends State<AmbulanceProfileScreen> {
         border: Border.all(color: const Color(0xFFEB5757), width: 1.8), // ขอบสีแดงตามรูป
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFFEB5757).withOpacity(0.15),
+            color: const Color(0xFFEB5757).withValues(alpha: 0.15),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),
@@ -161,7 +213,7 @@ class _AmbulanceProfileScreenState extends State<AmbulanceProfileScreen> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFEB5757).withOpacity(0.12),
+                  color: const Color(0xFFEB5757).withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(
@@ -204,14 +256,14 @@ class _AmbulanceProfileScreenState extends State<AmbulanceProfileScreen> {
                   child: Stack(
                     alignment: Alignment.center,
                     children: [
-                      SizedBox(
+                      const SizedBox(
                         width: 120,
                         height: 120,
                         child: CircularProgressIndicator(
                           value: 0.85,
                           strokeWidth: 12,
-                          backgroundColor: const Color(0xFFFFEAEA),
-                          valueColor: const AlwaysStoppedAnimation<Color>(
+                          backgroundColor: Color(0xFFFFEAEA),
+                          valueColor: AlwaysStoppedAnimation<Color>(
                               Color(0xFFEB5757)), // วงกลมสีแดงสด
                         ),
                       ),
@@ -303,7 +355,7 @@ class _AmbulanceProfileScreenState extends State<AmbulanceProfileScreen> {
             scale: 0.9,
             child: Switch(
               value: _isOnDuty,
-              activeColor: Colors.white,
+              activeThumbColor: Colors.white,
               activeTrackColor: const Color(0xFFEB5757),
               inactiveThumbColor: Colors.white,
               inactiveTrackColor: Colors.grey.shade400,
@@ -357,7 +409,7 @@ class _AmbulanceProfileScreenState extends State<AmbulanceProfileScreen> {
         borderRadius: BorderRadius.circular(25),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFFEB5757).withOpacity(0.35),
+            color: const Color(0xFFEB5757).withValues(alpha: 0.35),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),

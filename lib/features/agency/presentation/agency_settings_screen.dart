@@ -143,7 +143,7 @@ class _AgencySettingsScreenState extends State<AgencySettingsScreen> {
         color: Colors.white,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.06),
+            color: Colors.black.withValues(alpha: 0.06),
             blurRadius: 4,
             offset: const Offset(0, 2),
           ),
@@ -189,7 +189,7 @@ class _AgencySettingsScreenState extends State<AgencySettingsScreen> {
         border: Border.all(color: const Color(0xFF69F0AE), width: 2), // ขอบสีเขียวสว่าง
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF69F0AE).withOpacity(0.2), // แสงเรืองรองสีเขียว
+            color: const Color(0xFF69F0AE).withValues(alpha: 0.2), // แสงเรืองรองสีเขียว
             blurRadius: 12,
             spreadRadius: 2,
             offset: const Offset(0, 0),
@@ -227,7 +227,7 @@ class _AgencySettingsScreenState extends State<AgencySettingsScreen> {
             scale: 0.95,
             child: Switch(
               value: value,
-              activeColor: Colors.white,
+              activeThumbColor: Colors.white,
               activeTrackColor: Colors.grey.shade400, // ใน Figma สวิตช์ปิด-เปิดใช้สีเทาเหมือนกัน
               inactiveThumbColor: Colors.white,
               inactiveTrackColor: Colors.grey.shade400,
@@ -255,7 +255,7 @@ class _AgencySettingsScreenState extends State<AgencySettingsScreen> {
         border: Border.all(color: const Color(0xFF69F0AE), width: 2),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF69F0AE).withOpacity(0.2),
+            color: const Color(0xFF69F0AE).withValues(alpha: 0.2),
             blurRadius: 12,
             spreadRadius: 2,
             offset: const Offset(0, 0),

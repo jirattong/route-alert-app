@@ -122,7 +122,7 @@ class _AmbulanceSettingsScreenState extends State<AmbulanceSettingsScreen> {
         color: Colors.white,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.06),
+            color: Colors.black.withValues(alpha: 0.06),
             blurRadius: 4,
             offset: const Offset(0, 2),
           ),
@@ -181,7 +181,7 @@ class _AmbulanceSettingsScreenState extends State<AmbulanceSettingsScreen> {
         border: Border.all(color: const Color(0xFFEB5757), width: 1.8), // ขอบแดงตามรูป
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFFEB5757).withOpacity(0.12),
+            color: const Color(0xFFEB5757).withValues(alpha: 0.12),
             blurRadius: 10,
             offset: const Offset(0, 3),
           ),
@@ -218,7 +218,7 @@ class _AmbulanceSettingsScreenState extends State<AmbulanceSettingsScreen> {
             scale: 0.95,
             child: Switch(
               value: value,
-              activeColor: Colors.white,
+              activeThumbColor: Colors.white,
               activeTrackColor: const Color(0xFFEB5757), // สวิตช์สีแดง
               inactiveThumbColor: Colors.white,
               inactiveTrackColor: Colors.grey.shade300,
@@ -246,7 +246,7 @@ class _AmbulanceSettingsScreenState extends State<AmbulanceSettingsScreen> {
         border: Border.all(color: const Color(0xFFEB5757), width: 1.8),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFFEB5757).withOpacity(0.12),
+            color: const Color(0xFFEB5757).withValues(alpha: 0.12),
             blurRadius: 10,
             offset: const Offset(0, 3),
           ),

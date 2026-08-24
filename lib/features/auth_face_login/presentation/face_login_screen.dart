@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
-import 'user_type_screen.dart'; // 👈 นำเข้าหน้าเลือกประเภทผู้ใช้
+import '../data/models/user_face_profile.dart';
+import '../data/services/face_auth_repository.dart';
+import 'face_scan_screen.dart';
+import 'user_type_screen.dart';
 
 class FaceLoginScreen extends StatefulWidget {
   const FaceLoginScreen({super.key});
@@ -9,29 +12,137 @@ class FaceLoginScreen extends StatefulWidget {
 }
 
 class _FaceLoginScreenState extends State<FaceLoginScreen> {
-  // สลับสถานะระหว่าง Login (true) และ Register (false)
   bool isLogin = true;
-
-  // ควบคุมการ ซ่อน/แสดง รหัสผ่าน
   bool obscurePassword = true;
   bool obscureRePassword = true;
 
-  // Controllers สำหรับดึงข้อมูลจากช่องกรอก
+  final TextEditingController _nameController = TextEditingController();
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   final TextEditingController _rePasswordController = TextEditingController();
 
+  List<double>? _registeredFaceEmbedding;
+
   @override
   void dispose() {
+    _nameController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
     _rePasswordController.dispose();
     super.dispose();
   }
 
+  void _onNormalLogin() async {
+    final email = _emailController.text.trim();
+    final password = _passwordController.text.trim();
+
+    if (email.isEmpty || password.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('กรุณากรอกอีเมลและรหัสผ่านให้ครบถ้วน')),
+      );
+      return;
+    }
+
+    final user = UserFaceProfile(
+      id: 'USER_${DateTime.now().millisecondsSinceEpoch}',
+      email: email,
+      name: email.split('@').first,
+      role: 'driver',
+      faceEmbedding: [],
+      registeredAt: DateTime.now(),
+    );
+    await FaceAuthRepository.setCurrentUser(user);
+
+    if (!mounted) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const UserTypeScreen()),
+    );
+  }
+
+  void _onFaceLogin() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const FaceScanScreen(mode: FaceScanMode.login),
+      ),
+    );
+  }
+
+  void _onScanFaceForRegistration() async {
+    final result = await Navigator.push<List<double>>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => FaceScanScreen(
+          mode: FaceScanMode.register,
+          registrationEmail: _emailController.text.trim(),
+          registrationName: _nameController.text.trim(),
+        ),
+      ),
+    );
+
+    if (result != null && result.isNotEmpty) {
+      setState(() {
+        _registeredFaceEmbedding = result;
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            backgroundColor: Color(0xFF00A896),
+            content: Text('บันทึกข้อมูลใบหน้าสำเร็จ (Face Enrolled)'),
+          ),
+        );
+      }
+    }
+  }
+
+  void _onRegister() async {
+    final name = _nameController.text.trim().isEmpty ? 'ผู้ใช้งาน' : _nameController.text.trim();
+    final email = _emailController.text.trim();
+    final password = _passwordController.text.trim();
+    final rePassword = _rePasswordController.text.trim();
+
+    if (email.isEmpty || password.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('กรุณากรอกอีเมลและรหัสผ่าน')),
+      );
+      return;
+    }
+
+    if (password != rePassword) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('รหัสผ่านและการยืนยันรหัสผ่านไม่ตรงกัน')),
+      );
+      return;
+    }
+
+    final newProfile = UserFaceProfile(
+      id: 'USER_${DateTime.now().millisecondsSinceEpoch}',
+      email: email,
+      name: name,
+      role: 'driver',
+      faceEmbedding: _registeredFaceEmbedding ?? [],
+      registeredAt: DateTime.now(),
+    );
+
+    await FaceAuthRepository.registerUser(newProfile);
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        backgroundColor: Color(0xFF00A896),
+        content: Text('ลงทะเบียนสำเร็จ ยินดีต้อนรับสู่ RouteAlert'),
+      ),
+    );
+
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (_) => const UserTypeScreen()),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    // ปรับสีพื้นหลังตาม Figma (ฟ้าอ่อนเมื่อ Login / เขียวอ่อนเมื่อ Register)
     final Color backgroundColor =
         isLogin ? const Color(0xFFE2F0FE) : const Color(0xFFE3F8EB);
 
@@ -44,7 +155,6 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // --- โลโก้แอป RouteAlert ---
                 _buildAppLogo(),
                 const SizedBox(height: 12),
                 const Text(
@@ -57,12 +167,8 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
                   ),
                 ),
                 const SizedBox(height: 24),
-
-                // --- ปุ่มสลับ Tab (Login | Register) ---
                 _buildTabToggle(),
                 const SizedBox(height: 28),
-
-                // --- ฟอร์มแสดงผลตาม Tab ที่เลือก ---
                 AnimatedSwitcher(
                   duration: const Duration(milliseconds: 250),
                   child: isLogin ? _buildLoginForm() : _buildRegisterForm(),
@@ -75,11 +181,10 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
     );
   }
 
-  // --- ส่วนสร้างโลโก้แอปพลิเคชัน ---
   Widget _buildAppLogo() {
     return Container(
-      width: 100,
-      height: 100,
+      width: 96,
+      height: 96,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         border: Border.all(color: const Color(0xFF2C3E50), width: 3),
@@ -89,17 +194,17 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
         children: [
           const Icon(
             Icons.airport_shuttle_outlined,
-            size: 52,
+            size: 50,
             color: Color(0xFF2C3E50),
           ),
           Positioned(
-            top: 18,
-            right: 18,
-            child: Icon(Icons.wifi, size: 22, color: Colors.redAccent.shade700),
+            top: 16,
+            right: 16,
+            child: Icon(Icons.wifi, size: 20, color: Colors.redAccent.shade700),
           ),
           Positioned(
-            bottom: 38,
-            left: 42,
+            bottom: 34,
+            left: 40,
             child: Icon(Icons.add, size: 16, color: Colors.redAccent.shade700),
           ),
         ],
@@ -107,7 +212,6 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
     );
   }
 
-  // --- ปุ่ม Toggle สลับ Login / Register แบบ Capsule ---
   Widget _buildTabToggle() {
     return Container(
       padding: const EdgeInsets.all(4),
@@ -116,7 +220,7 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
         borderRadius: BorderRadius.circular(30),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            color: Colors.black.withValues(alpha: 0.04),
             blurRadius: 8,
             offset: const Offset(0, 3),
           ),
@@ -174,7 +278,6 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
     );
   }
 
-  // --- ฟอร์ม LOGIN ---
   Widget _buildLoginForm() {
     return Column(
       key: const ValueKey('login_form'),
@@ -184,6 +287,7 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
         _buildTextField(
           controller: _emailController,
           hintText: 'Email@gmail.com',
+          icon: Icons.email_outlined,
         ),
         const SizedBox(height: 16),
         _buildInputLabel('Password'),
@@ -192,6 +296,7 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
           hintText: 'Password',
           isPassword: true,
           obscureText: obscurePassword,
+          icon: Icons.lock_outline_rounded,
           onToggleVisibility: () {
             setState(() => obscurePassword = !obscurePassword);
           },
@@ -199,9 +304,7 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
         Align(
           alignment: Alignment.centerRight,
           child: TextButton(
-            onPressed: () {
-              // TODO: ลิงก์ไปหน้าลืมรหัสผ่าน
-            },
+            onPressed: () {},
             child: const Text(
               'forgot password?',
               style: TextStyle(
@@ -216,15 +319,7 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
         _buildActionButton(
           text: 'LOGIN',
           color: const Color(0xFF5B9EE1),
-          onPressed: () {
-            // ล็อกอินผ่าน Email/Password -> นำพาไปหน้าเลือกประเภทผู้ใช้
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => const UserTypeScreen(),
-              ),
-            );
-          },
+          onPressed: _onNormalLogin,
         ),
         const SizedBox(height: 20),
         Row(
@@ -244,7 +339,6 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
           ],
         ),
         const SizedBox(height: 16),
-        // Social Logins
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
@@ -256,64 +350,102 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
           ],
         ),
         const SizedBox(height: 20),
-        // --- ปุ่ม FACE LOGIN ---
         _buildFaceLoginButton(),
       ],
     );
   }
 
-  // --- ฟอร์ม REGISTER ---
   Widget _buildRegisterForm() {
     return Column(
       key: const ValueKey('register_form'),
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        _buildInputLabel('Full Name'),
+        _buildTextField(
+          controller: _nameController,
+          hintText: 'John Doe',
+          icon: Icons.person_outline_rounded,
+        ),
+        const SizedBox(height: 14),
         _buildInputLabel('Email'),
         _buildTextField(
           controller: _emailController,
           hintText: 'Email@gmail.com',
+          icon: Icons.email_outlined,
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 14),
         _buildInputLabel('Password'),
         _buildTextField(
           controller: _passwordController,
           hintText: 'Password',
           isPassword: true,
           obscureText: obscurePassword,
+          icon: Icons.lock_outline_rounded,
           onToggleVisibility: () {
             setState(() => obscurePassword = !obscurePassword);
           },
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 14),
         _buildInputLabel('Re-Password'),
         _buildTextField(
           controller: _rePasswordController,
           hintText: 'Re-Password',
           isPassword: true,
           obscureText: obscureRePassword,
+          icon: Icons.lock_reset_rounded,
           onToggleVisibility: () {
             setState(() => obscureRePassword = !obscureRePassword);
           },
         ),
-        const SizedBox(height: 28),
+        const SizedBox(height: 16),
+        OutlinedButton.icon(
+          onPressed: _onScanFaceForRegistration,
+          icon: Icon(
+            _registeredFaceEmbedding != null
+                ? Icons.check_circle_rounded
+                : Icons.face_retouching_natural_rounded,
+            color: _registeredFaceEmbedding != null
+                ? const Color(0xFF00A896)
+                : const Color(0xFF2C3E50),
+          ),
+          label: Text(
+            _registeredFaceEmbedding != null
+                ? 'ผูกใบหน้าเรียบร้อย (กดเพื่อสแกนใหม่)'
+                : 'สแกนใบหน้าเพื่อผูกบัญชี (Face Register)',
+            style: TextStyle(
+              color: _registeredFaceEmbedding != null
+                  ? const Color(0xFF00A896)
+                  : const Color(0xFF2C3E50),
+              fontWeight: FontWeight.w600,
+              fontSize: 13,
+            ),
+          ),
+          style: OutlinedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            side: BorderSide(
+              color: _registeredFaceEmbedding != null
+                  ? const Color(0xFF00A896)
+                  : Colors.grey.shade400,
+              width: 1.5,
+            ),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            backgroundColor: _registeredFaceEmbedding != null
+                ? const Color(0xFF00A896).withValues(alpha: 0.08)
+                : Colors.white,
+          ),
+        ),
+        const SizedBox(height: 24),
         _buildActionButton(
           text: 'REGISTER',
           color: const Color(0xFF52E197),
-          onPressed: () {
-            // 🔗 เชื่อมต่อหน้าเลือกประเภทผู้ใช้ (UserTypeScreen) หลังจากกด REGISTER
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => const UserTypeScreen(),
-              ),
-            );
-          },
+          onPressed: _onRegister,
         ),
       ],
     );
   }
 
-  // --- Helper: ป้ายชื่อหัวข้อช่องกรอก ---
   Widget _buildInputLabel(String label) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 6.0, left: 4.0),
@@ -328,10 +460,10 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
     );
   }
 
-  // --- Helper: ช่องกรอกข้อความ (TextField) ---
   Widget _buildTextField({
     required TextEditingController controller,
     required String hintText,
+    IconData? icon,
     bool isPassword = false,
     bool obscureText = false,
     VoidCallback? onToggleVisibility,
@@ -342,7 +474,7 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
         borderRadius: BorderRadius.circular(14),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.02),
+            color: Colors.black.withValues(alpha: 0.02),
             blurRadius: 6,
             offset: const Offset(0, 2),
           ),
@@ -352,6 +484,7 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
         controller: controller,
         obscureText: isPassword ? obscureText : false,
         decoration: InputDecoration(
+          prefixIcon: icon != null ? Icon(icon, color: Colors.grey.shade500, size: 20) : null,
           hintText: hintText,
           hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 14),
           contentPadding:
@@ -385,7 +518,6 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
     );
   }
 
-  // --- Helper: ปุ่มกดหลัก (LOGIN / REGISTER) ---
   Widget _buildActionButton({
     required String text,
     required Color color,
@@ -396,7 +528,7 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
         borderRadius: BorderRadius.circular(28),
         boxShadow: [
           BoxShadow(
-            color: color.withOpacity(0.4),
+            color: color.withValues(alpha: 0.4),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -425,29 +557,20 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
     );
   }
 
-  // --- Helper: ปุ่ม FACE LOGIN สแกนใบหน้าด้วย Deep Learning ---
   Widget _buildFaceLoginButton() {
     return Container(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(28),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.08),
+            color: Colors.black.withValues(alpha: 0.08),
             blurRadius: 8,
             offset: const Offset(0, 3),
           ),
         ],
       ),
       child: ElevatedButton.icon(
-        onPressed: () {
-          // กด Face Login ก็สามารเปิดไปยังหน้าเลือกประเภทผู้ใช้ได้ชั่วคราวในการ Demo
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => const UserTypeScreen(),
-            ),
-          );
-        },
+        onPressed: _onFaceLogin,
         icon: const Icon(Icons.face_retouching_natural_rounded,
             color: Colors.white, size: 22),
         label: const Text(
@@ -460,7 +583,7 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
           ),
         ),
         style: ElevatedButton.styleFrom(
-          backgroundColor: const Color(0xFF8E9AAF),
+          backgroundColor: const Color(0xFF00A896),
           padding: const EdgeInsets.symmetric(vertical: 13),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(28),
@@ -471,7 +594,6 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
     );
   }
 
-  // --- Helper: ปุ่ม Social Login ---
   Widget _buildSocialButton(
       IconData icon, Color color, VoidCallback onTap) {
     return InkWell(
@@ -485,7 +607,7 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
           border: Border.all(color: Colors.grey.shade200),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.04),
+              color: Colors.black.withValues(alpha: 0.04),
               blurRadius: 6,
               offset: const Offset(0, 2),
             ),

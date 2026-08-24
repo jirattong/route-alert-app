@@ -177,7 +177,7 @@ class _IncidentListScreenState extends State<IncidentListScreen> {
                     border: Border.all(color: const Color(0xFFEB5757), width: 3),
                     boxShadow: [
                       BoxShadow(
-                        color: const Color(0xFFEB5757).withOpacity(0.35),
+                        color: const Color(0xFFEB5757).withValues(alpha: 0.35),
                         blurRadius: 14,
                         spreadRadius: 2,
                       ),
@@ -212,7 +212,7 @@ class _IncidentListScreenState extends State<IncidentListScreen> {
         border: Border.all(color: const Color(0xFF5B9EE1), width: 1.8),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF5B9EE1).withOpacity(0.12),
+            color: const Color(0xFF5B9EE1).withValues(alpha: 0.12),
             blurRadius: 10,
             offset: const Offset(0, 3),
           ),
@@ -283,7 +283,7 @@ class _IncidentListScreenState extends State<IncidentListScreen> {
         color: Colors.white,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            color: Colors.black.withValues(alpha: 0.04),
             blurRadius: 6,
             offset: const Offset(0, 2),
           ),

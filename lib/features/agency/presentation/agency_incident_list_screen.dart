@@ -86,7 +86,7 @@ class _AgencyIncidentListScreenState extends State<AgencyIncidentListScreen> {
         border: Border.all(color: const Color(0xFF69F0AE), width: 2), // ขอบสีเขียวสว่าง
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF69F0AE).withOpacity(0.15),
+            color: const Color(0xFF69F0AE).withValues(alpha: 0.15),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -123,10 +123,10 @@ class _AgencyIncidentListScreenState extends State<AgencyIncidentListScreen> {
                 children: [
                   Text(
                     item['status'],
-                    style: TextStyle(
+                    style: const TextStyle(
                       fontSize: 15,
                       fontWeight: FontWeight.bold,
-                      color: const Color(0xFF2E7D32), // ตัวหนังสือเขียวเข้ม
+                      color: Color(0xFF2E7D32), // ตัวหนังสือเขียวเข้ม
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -199,7 +199,7 @@ class _AgencyIncidentListScreenState extends State<AgencyIncidentListScreen> {
       decoration: BoxDecoration(
         color: Colors.white,
         boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 4, offset: const Offset(0, 2)),
+          BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 4, offset: const Offset(0, 2)),
         ],
       ),
       child: Row(

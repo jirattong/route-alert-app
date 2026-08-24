@@ -17,8 +17,8 @@ class IncidentDetailScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     // พิกัดจำลองจุดเกิดเหตุ และ ตำแหน่งรถพยาบาล
-    final LatLng incidentLocation = const LatLng(19.0284, 99.8962);
-    final LatLng ambulanceLocation = const LatLng(19.0350, 99.8962);
+    const LatLng incidentLocation = LatLng(19.0284, 99.8962);
+    const LatLng ambulanceLocation = LatLng(19.0350, 99.8962);
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -38,7 +38,7 @@ class IncidentDetailScreen extends StatelessWidget {
                       child: Stack(
                         children: [
                           FlutterMap(
-                            options: MapOptions(
+                            options: const MapOptions(
                               initialCenter: ambulanceLocation,
                               initialZoom: 15.0,
                             ),
@@ -83,11 +83,11 @@ class IncidentDetailScreen extends StatelessWidget {
                                     ),
                                   ),
                                   // หมุดจุดเกิดเหตุ
-                                  Marker(
+                                  const Marker(
                                     point: incidentLocation,
                                     width: 36,
                                     height: 36,
-                                    child: const Icon(
+                                    child: Icon(
                                       Icons.location_on_rounded,
                                       color: Color(0xFFEB5757),
                                       size: 38,
@@ -127,7 +127,7 @@ class IncidentDetailScreen extends StatelessWidget {
                         borderRadius: BorderRadius.circular(25),
                         boxShadow: [
                           BoxShadow(
-                            color: const Color(0xFF8BB7F0).withOpacity(0.4),
+                            color: const Color(0xFF8BB7F0).withValues(alpha: 0.4),
                             blurRadius: 8,
                             offset: const Offset(0, 3),
                           ),
@@ -206,7 +206,7 @@ class IncidentDetailScreen extends StatelessWidget {
         color: Colors.white,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.06),
+            color: Colors.black.withValues(alpha: 0.06),
             blurRadius: 4,
             offset: const Offset(0, 2),
           ),

@@ -5,6 +5,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import '../../../core/services/location_service.dart';
 import '../../../core/services/driver_storage_service.dart';
+import '../../../core/services/emergency_mqtt_service.dart';
 
 class DriverHomeScreen extends StatefulWidget {
   final VoidCallback? onOpenSos;
@@ -39,6 +40,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
   bool _hasVibrated = false;
 
   StreamSubscription<LatLng>? _locationSubscription;
+  StreamSubscription<EmergencyVehicleData>? _mqttSubscription;
   Timer? _simulationTimer;
   bool _isSimulating = false;
 
@@ -62,6 +64,18 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
 
     _listenToSettingsChanges();
     _initLiveLocation();
+    _initMqttRadar();
+  }
+
+  void _initMqttRadar() async {
+    await EmergencyMqttService().initialize();
+    _mqttSubscription = EmergencyMqttService().emergencyStream.listen((data) {
+      if (!mounted) return;
+      setState(() {
+        _ambulanceLocation = LatLng(data.latitude, data.longitude);
+      });
+      _checkGeofence();
+    });
   }
 
   void _listenToSettingsChanges() {
@@ -85,6 +99,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
   @override
   void dispose() {
     _locationSubscription?.cancel();
+    _mqttSubscription?.cancel();
     _simulationTimer?.cancel();
     _pulseController.dispose();
     super.dispose();
@@ -242,7 +257,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                                   colors: [
                                     Colors.transparent,
                                     const Color(0xFFEB5757)
-                                        .withOpacity(_glowAnimation.value),
+                                        .withValues(alpha: _glowAnimation.value),
                                   ],
                                   stops: const [0.6, 1.0],
                                 ),
@@ -281,7 +296,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                           boxShadow: [
                             BoxShadow(
                               color:
-                                  const Color(0xFFEB5757).withOpacity(0.35),
+                                  const Color(0xFFEB5757).withValues(alpha: 0.35),
                               blurRadius: 14,
                               spreadRadius: 2,
                             ),
@@ -316,7 +331,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                             color: const Color(0xFF5B9EE1), width: 1.6),
                         boxShadow: [
                           BoxShadow(
-                            color: const Color(0xFF5B9EE1).withOpacity(0.18),
+                            color: const Color(0xFF5B9EE1).withValues(alpha: 0.18),
                             blurRadius: 10,
                             offset: const Offset(0, 3),
                           ),
@@ -351,7 +366,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                             scale: 0.9,
                             child: Switch(
                               value: _isBackgroundActive,
-                              activeColor: Colors.white,
+                              activeThumbColor: Colors.white,
                               activeTrackColor: const Color(0xFF5B9EE1),
                               onChanged: (val) {
                                 setState(() => _isBackgroundActive = val);
@@ -377,11 +392,11 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                     right: 14,
                     child: Container(
                       decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.95),
+                        color: Colors.white.withValues(alpha: 0.95),
                         borderRadius: BorderRadius.circular(20),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withOpacity(0.1),
+                            color: Colors.black.withValues(alpha: 0.1),
                             blurRadius: 6,
                           ),
                         ],
@@ -427,7 +442,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
         color: Colors.white,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            color: Colors.black.withValues(alpha: 0.04),
             blurRadius: 6,
             offset: const Offset(0, 2),
           ),
@@ -485,10 +500,10 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(22),
-          border: Border.all(color: themeColor.withOpacity(0.8), width: 1.8),
+          border: Border.all(color: themeColor.withValues(alpha: 0.8), width: 1.8),
           boxShadow: [
             BoxShadow(
-              color: themeColor.withOpacity(0.25),
+              color: themeColor.withValues(alpha: 0.25),
               blurRadius: 16,
               spreadRadius: 2,
               offset: const Offset(0, 4),
@@ -503,7 +518,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
               decoration: BoxDecoration(
                 color: bgColor,
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: themeColor.withOpacity(0.3)),
+                border: Border.all(color: themeColor.withValues(alpha: 0.3)),
               ),
               child: Icon(
                 isCritical
@@ -550,7 +565,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                 children: [
                   Text(
                     meters >= 1000
-                        ? '${(meters / 1000).toStringAsFixed(1)}'
+                        ? (meters / 1000).toStringAsFixed(1)
                         : '$meters',
                     style: const TextStyle(
                       fontSize: 15,
@@ -598,8 +613,8 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
               point: _currentLocation,
               radius: _outerRadarMeters,
               useRadiusInMeter: true,
-              color: const Color(0xFF5B9EE1).withOpacity(0.08),
-              borderColor: const Color(0xFF5B9EE1).withOpacity(0.45),
+              color: const Color(0xFF5B9EE1).withValues(alpha: 0.08),
+              borderColor: const Color(0xFF5B9EE1).withValues(alpha: 0.45),
               borderStrokeWidth: 1.6,
             ),
             // วงในสีแดง
@@ -607,8 +622,8 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
               point: _currentLocation,
               radius: _innerAlertMeters,
               useRadiusInMeter: true,
-              color: const Color(0xFFEF4444).withOpacity(0.12),
-              borderColor: const Color(0xFFEF4444).withOpacity(0.65),
+              color: const Color(0xFFEF4444).withValues(alpha: 0.12),
+              borderColor: const Color(0xFFEF4444).withValues(alpha: 0.65),
               borderStrokeWidth: 1.8,
             ),
           ],
@@ -626,7 +641,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                   shape: BoxShape.circle,
                   boxShadow: [
                     BoxShadow(
-                      color: const Color(0xFF5B9EE1).withOpacity(0.4),
+                      color: const Color(0xFF5B9EE1).withValues(alpha: 0.4),
                       blurRadius: 10,
                       offset: const Offset(0, 2),
                     ),
@@ -660,7 +675,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                   border: Border.all(color: const Color(0xFFEF4444), width: 2),
                   boxShadow: [
                     BoxShadow(
-                      color: const Color(0xFFEF4444).withOpacity(0.3),
+                      color: const Color(0xFFEF4444).withValues(alpha: 0.3),
                       blurRadius: 8,
                     ),
                   ],

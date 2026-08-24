@@ -88,7 +88,7 @@ class _AgencyHomeScreenState extends State<AgencyHomeScreen> {
         color: Colors.white,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.06),
+            color: Colors.black.withValues(alpha: 0.06),
             blurRadius: 4,
             offset: const Offset(0, 2),
           ),
@@ -137,12 +137,12 @@ class _AgencyHomeScreenState extends State<AgencyHomeScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.95),
+        color: Colors.white.withValues(alpha: 0.95),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: const Color(0xFF2E7D32), width: 1.5),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.1),
+            color: Colors.black.withValues(alpha: 0.1),
             blurRadius: 8,
             offset: const Offset(0, 3),
           ),
@@ -195,7 +195,7 @@ class _AgencyHomeScreenState extends State<AgencyHomeScreen> {
               boxShadow: [
                 if (isSelected)
                   BoxShadow(
-                    color: const Color(0xFF69F0AE).withOpacity(0.6),
+                    color: const Color(0xFF69F0AE).withValues(alpha: 0.6),
                     blurRadius: 12,
                   ),
               ],
@@ -250,7 +250,7 @@ class _AgencyHomeScreenState extends State<AgencyHomeScreen> {
                   shape: BoxShape.circle,
                   border: Border.all(color: const Color(0xFF2E7D32), width: 2.5),
                   boxShadow: [
-                    BoxShadow(color: const Color(0xFF2E7D32).withOpacity(0.4), blurRadius: 10),
+                    BoxShadow(color: const Color(0xFF2E7D32).withValues(alpha: 0.4), blurRadius: 10),
                   ],
                 ),
                 child: const Center(
@@ -279,7 +279,7 @@ class _AgencyHomeScreenState extends State<AgencyHomeScreen> {
         border: Border.all(color: const Color(0xFF69F0AE), width: 2.5), // ขอบสีเขียวสว่างแบบ Figma
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF69F0AE).withOpacity(0.2),
+            color: const Color(0xFF69F0AE).withValues(alpha: 0.2),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),

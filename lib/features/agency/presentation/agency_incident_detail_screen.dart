@@ -25,8 +25,8 @@ class _AgencyIncidentDetailScreenState
 
   @override
   Widget build(BuildContext context) {
-    final LatLng hospitalLocation = const LatLng(19.0284, 99.8962);
-    final LatLng ambulanceLocation = const LatLng(19.0350, 99.8962);
+    const LatLng hospitalLocation = LatLng(19.0284, 99.8962);
+    const LatLng ambulanceLocation = LatLng(19.0350, 99.8962);
     bool isPrepared = widget.incidentData['isErPrepared'] ?? false;
 
     return Scaffold(
@@ -46,7 +46,7 @@ class _AgencyIncidentDetailScreenState
                       child: Stack(
                         children: [
                           FlutterMap(
-                            options: MapOptions(
+                            options: const MapOptions(
                               initialCenter: ambulanceLocation,
                               initialZoom: 15.0,
                             ),
@@ -63,19 +63,19 @@ class _AgencyIncidentDetailScreenState
                                   ),
                                 ],
                               ),
-                              MarkerLayer(
+                              const MarkerLayer(
                                 markers: [
                                   Marker(
                                     point: ambulanceLocation,
                                     width: 44,
                                     height: 44,
-                                    child: const Center(child: Text('🚑', style: TextStyle(fontSize: 26))),
+                                    child: Center(child: Text('🚑', style: TextStyle(fontSize: 26))),
                                   ),
                                   Marker(
                                     point: hospitalLocation,
                                     width: 44,
                                     height: 44,
-                                    child: const Center(
+                                    child: Center(
                                       child: Icon(Icons.local_hospital_rounded, color: Color(0xFF2E7D32), size: 38),
                                     ),
                                   ),
@@ -109,7 +109,7 @@ class _AgencyIncidentDetailScreenState
                         borderRadius: BorderRadius.circular(25),
                         boxShadow: [
                           BoxShadow(
-                            color: const Color(0xFF69F0AE).withOpacity(0.4),
+                            color: const Color(0xFF69F0AE).withValues(alpha: 0.4),
                             blurRadius: 8,
                             offset: const Offset(0, 3),
                           ),
@@ -267,7 +267,7 @@ class _AgencyIncidentDetailScreenState
       decoration: BoxDecoration(
         color: Colors.white,
         boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 4, offset: const Offset(0, 2)),
+          BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 4, offset: const Offset(0, 2)),
         ],
       ),
       child: Row(

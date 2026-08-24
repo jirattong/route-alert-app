@@ -4,22 +4,22 @@
 *.pyc
 *.swp
 .DS_Store
+*/.DS_Store
+**/.DS_Store
 .atom/
+.build/
 .buildlog/
 .history
 .svn/
+.swiftpm/
 migrate_working_dir/
 
-# IntelliJ related
+# IntelliJ & IDE related
 *.iml
 *.ipr
 *.iws
 .idea/
-
-# The .vscode folder contains launch configuration and tasks you configure in
-# VS Code which you may wish to be included in version control, so this line
-# is commented out by default.
-#.vscode/
+.vscode/
 
 # Flutter/Dart/Pub related
 **/doc/api/
@@ -31,13 +31,52 @@ migrate_working_dir/
 .pub/
 /build/
 
-# Symbolication related
-app.*.symbols
+# iOS & macOS CocoaPods & Ephemeral
+**/ios/Flutter/ephemeral/
+**/macos/Flutter/ephemeral/
+**/ios/Pods/
+**/macos/Pods/
+**/ios/.symlinks/
+**/macos/.symlinks/
+**/ios/Flutter/Generated.xcconfig
+**/macos/Flutter/Generated.xcconfig
+**/ios/Flutter/flutter_export_environment.sh
+**/macos/Flutter/flutter_export_environment.sh
 
-# Obfuscation related
-app.*.map.json
-
-# Android Studio will place build artifacts here
+# Android Studio & Gradle build artifacts
 /android/app/debug
 /android/app/profile
 /android/app/release
+/android/.gradle/
+/android/captures/
+/android/gradlew
+/android/gradlew.bat
+/android/local.properties
+/android/key.properties
+
+# Security, Certificates & Environment Secrets
+.env
+.env.*
+!.env.example
+secrets.json
+env.json
+*.keystore
+*.jks
+*.p12
+*.key
+*.mobileprovision
+*.cer
+*.crt
+*.pem
+
+# Firebase Credentials & Debug Logs
+**/android/app/google-services.json
+**/ios/Runner/GoogleService-Info.plist
+**/macos/Runner/GoogleService-Info.plist
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+
+# Symbolication & Obfuscation
+app.*.symbols
+app.*.map.json

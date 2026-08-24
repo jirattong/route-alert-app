@@ -1,10 +1,47 @@
 import 'package:flutter/material.dart';
 import '../../driver_radar/presentation/driver_main_screen.dart';
 import '../../ambulance/presentation/ambulance_main_screen.dart';
-import '../../agency/presentation/agency_main_screen.dart'; // 👈 นำเข้าไฟล์ AgencyMainScreen ที่พึ่งสร้าง
+import '../../agency/presentation/agency_main_screen.dart';
+import '../data/models/user_face_profile.dart';
+import '../data/services/face_auth_repository.dart';
+import 'face_login_screen.dart';
 
-class UserTypeScreen extends StatelessWidget {
+class UserTypeScreen extends StatefulWidget {
   const UserTypeScreen({super.key});
+
+  @override
+  State<UserTypeScreen> createState() => _UserTypeScreenState();
+}
+
+class _UserTypeScreenState extends State<UserTypeScreen> {
+  UserFaceProfile? _currentUser;
+  bool _isLoadingUser = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCurrentUser();
+  }
+
+  Future<void> _loadCurrentUser() async {
+    final user = await FaceAuthRepository.getCurrentUser();
+    if (mounted) {
+      setState(() {
+        _currentUser = user;
+        _isLoadingUser = false;
+      });
+    }
+  }
+
+  void _onLogout() async {
+    await FaceAuthRepository.logout();
+    if (!mounted) return;
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => const FaceLoginScreen()),
+      (route) => false,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -13,9 +50,7 @@ class UserTypeScreen extends StatelessWidget {
       body: SafeArea(
         child: Column(
           children: [
-            // --- Header Bar ด้านบน ---
             _buildHeader(),
-
             Expanded(
               child: SingleChildScrollView(
                 padding:
@@ -23,7 +58,90 @@ class UserTypeScreen extends StatelessWidget {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const SizedBox(height: 10),
+                    const SizedBox(height: 8),
+
+                    // User Profile Identification Card
+                    if (!_isLoadingUser && _currentUser != null)
+                      Container(
+                        margin: const EdgeInsets.only(bottom: 20),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 12),
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(
+                            colors: [Color(0xFF00A896), Color(0xFF028090)],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                          borderRadius: BorderRadius.circular(18),
+                          boxShadow: [
+                            BoxShadow(
+                              color: const Color(0xFF00A896).withValues(alpha: 0.3),
+                              blurRadius: 10,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.2),
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(
+                                Icons.face_retouching_natural_rounded,
+                                color: Colors.white,
+                                size: 26,
+                              ),
+                            ),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Text(
+                                        'สวัสดีคุณ ${_currentUser!.name}',
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    _currentUser!.email,
+                                    style: TextStyle(
+                                      color: Colors.white.withValues(alpha: 0.85),
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 10, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.25),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: const Text(
+                                'เข้าสู่ระบบแล้ว',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
 
                     // Badge เตือนว่าเป็นการเลือกครั้งแรก
                     Container(
@@ -120,7 +238,7 @@ class UserTypeScreen extends StatelessWidget {
                           context,
                           roleName: 'หน่วยงาน/โรงพยาบาล',
                           roleColor: const Color(0xFF52E197),
-                          targetScreen: const AgencyMainScreen(), // 👈 เปลี่ยนปลายทางเป็น AgencyMainScreen อย่างถูกต้อง
+                          targetScreen: const AgencyMainScreen(),
                         );
                       },
                     ),
@@ -136,51 +254,62 @@ class UserTypeScreen extends StatelessWidget {
     );
   }
 
-  // --- Header แถบบนพร้อมโลโก้และชื่อ RouteAlert ---
   Widget _buildHeader() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       decoration: BoxDecoration(
         color: Colors.white,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 4,
             offset: const Offset(0, 2),
           ),
         ],
       ),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(color: const Color(0xFF2C3E50), width: 2),
-            ),
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                const Icon(Icons.airport_shuttle_outlined,
-                    size: 20, color: Color(0xFF2C3E50)),
-                Positioned(
-                  top: 4,
-                  right: 4,
-                  child: Icon(Icons.wifi,
-                      size: 9, color: Colors.redAccent.shade700),
+          Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: const Color(0xFF2C3E50), width: 2),
                 ),
-              ],
-            ),
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    const Icon(Icons.airport_shuttle_outlined,
+                        size: 20, color: Color(0xFF2C3E50)),
+                    Positioned(
+                      top: 4,
+                      right: 4,
+                      child: Icon(Icons.wifi,
+                          size: 9, color: Colors.redAccent.shade700),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              const Text(
+                'RouteAlert',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.black87,
+                ),
+              ),
+            ],
           ),
-          const SizedBox(width: 12),
-          const Text(
-            'RouteAlert',
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: Colors.black87,
+          TextButton.icon(
+            onPressed: _onLogout,
+            icon: const Icon(Icons.logout_rounded, size: 18, color: Colors.redAccent),
+            label: const Text(
+              'ออกจากระบบ',
+              style: TextStyle(color: Colors.redAccent, fontSize: 13),
             ),
           ),
         ],
@@ -188,7 +317,6 @@ class UserTypeScreen extends StatelessWidget {
     );
   }
 
-  // --- Helper: การ์ดปุ่มกดเลือกประเภทผู้ใช้ ---
   Widget _buildRoleCard({
     required String title,
     required String subtitle,
@@ -202,7 +330,7 @@ class UserTypeScreen extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: color.withOpacity(0.35),
+            color: color.withValues(alpha: 0.35),
             blurRadius: 12,
             offset: const Offset(0, 5),
           ),
@@ -221,7 +349,7 @@ class UserTypeScreen extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.2),
+                    color: Colors.white.withValues(alpha: 0.2),
                     shape: BoxShape.circle,
                   ),
                   child: Icon(icon, color: Colors.white, size: 32),
@@ -244,17 +372,14 @@ class UserTypeScreen extends StatelessWidget {
                         subtitle,
                         style: TextStyle(
                           fontSize: 12,
-                          color: Colors.white.withOpacity(0.9),
+                          color: Colors.white.withValues(alpha: 0.9),
                         ),
                       ),
                     ],
                   ),
                 ),
-                const Icon(
-                  Icons.arrow_forward_ios_rounded,
-                  color: Colors.white,
-                  size: 20,
-                ),
+                const Icon(Icons.arrow_forward_ios_rounded,
+                    color: Colors.white70, size: 20),
               ],
             ),
           ),
@@ -263,163 +388,63 @@ class UserTypeScreen extends StatelessWidget {
     );
   }
 
-  // --- Modal หน้าต่างกรอกเบอร์โทรศัพท์และรับ OTP ---
   void _showOtpVerificationDialog(
     BuildContext context, {
     required String roleName,
     required Color roleColor,
     required Widget targetScreen,
   }) {
-    final TextEditingController phoneController = TextEditingController();
-    final TextEditingController otpController = TextEditingController();
-    bool isOtpSent = false;
-
-    showModalBottomSheet(
+    showDialog(
       context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            Icon(Icons.lock_person_rounded, color: roleColor, size: 28),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'ยืนยันสิทธิ์ $roleName',
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'คุณกำลังเลือกผูกบัญชีเป็น "$roleName"\nเมื่อกดยืนยันแล้ว คุณจะสามารถเข้าถึงระบบงานสำหรับบทบาทนี้ได้ทันที',
+              style: TextStyle(color: Colors.grey.shade700, fontSize: 13),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('ยกเลิก', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              Navigator.pushReplacement(
+                context,
+                MaterialPageRoute(builder: (context) => targetScreen),
+              );
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: roleColor,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20)),
+            ),
+            child: const Text('เข้าใช้งาน', style: TextStyle(color: Colors.white)),
+          ),
+        ],
       ),
-      builder: (BuildContext ctx) {
-        return StatefulBuilder(
-          builder: (BuildContext context, StateSetter setModalState) {
-            return Padding(
-              padding: EdgeInsets.only(
-                bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
-                top: 24,
-                left: 24,
-                right: 24,
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Center(
-                    child: Container(
-                      width: 40,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: Colors.grey.shade300,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'ยืนยันตัวตนสำหรับสิทธิ์ "$roleName"',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: roleColor,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'กรุณากรอกเบอร์โทรศัพท์เพื่อรับรหัส OTP ยืนยันการลงทะเบียน',
-                    style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 20),
-
-                  // ช่องกรอกเบอร์โทรศัพท์
-                  TextField(
-                    controller: phoneController,
-                    keyboardType: TextInputType.phone,
-                    decoration: InputDecoration(
-                      labelText: 'เบอร์โทรศัพท์',
-                      hintText: '08X-XXX-XXXX',
-                      prefixIcon: const Icon(Icons.phone_android_rounded),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      suffixIcon: !isOtpSent
-                          ? TextButton(
-                              onPressed: () {
-                                if (phoneController.text.isNotEmpty) {
-                                  setModalState(() => isOtpSent = true);
-                                  ScaffoldMessenger.of(ctx).showSnackBar(
-                                    const SnackBar(
-                                      content: Text('ส่งรหัส OTP 123456 ไปยังเบอร์ของคุณแล้ว'),
-                                      duration: Duration(seconds: 2),
-                                    ),
-                                  );
-                                }
-                              },
-                              child: const Text('รับ OTP'),
-                            )
-                          : const Icon(Icons.check_circle, color: Colors.green),
-                    ),
-                  ),
-
-                  if (isOtpSent) ...[
-                    const SizedBox(height: 16),
-                    // ช่องกรอก OTP (เมื่อกดรับ OTP แล้ว)
-                    TextField(
-                      controller: otpController,
-                      keyboardType: TextInputType.number,
-                      maxLength: 6,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        fontSize: 20,
-                        letterSpacing: 8,
-                        fontWeight: FontWeight.bold,
-                      ),
-                      decoration: InputDecoration(
-                        labelText: 'รหัส OTP (ทดสอบ: 123456)',
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                      ),
-                    ),
-                  ],
-
-                  const SizedBox(height: 20),
-
-                  // ปุ่มยืนยันสิทธิ์
-                  ElevatedButton(
-                    onPressed: isOtpSent
-                        ? () {
-                            Navigator.pop(ctx); // ปิด Modal OTP
-
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text('ยืนยันสิทธิ์บัญชีเป็น "$roleName" สำเร็จ!'),
-                                backgroundColor: Colors.green,
-                              ),
-                            );
-
-                            // นำพาไปยังหน้าหลักตามบทบาทผู้ใช้ที่ส่งเข้ามา
-                            Navigator.pushReplacement(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => targetScreen,
-                              ),
-                            );
-                          }
-                        : null,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: roleColor,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(28),
-                      ),
-                    ),
-                    child: const Text(
-                      'ยืนยันและเริ่มใช้งาน',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
     );
   }
 }

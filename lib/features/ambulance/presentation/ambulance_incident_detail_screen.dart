@@ -207,8 +207,8 @@ class _AmbulanceIncidentDetailScreenState
 
   @override
   Widget build(BuildContext context) {
-    final LatLng incidentLocation = const LatLng(19.0284, 99.8962);
-    final LatLng ambulanceLocation = const LatLng(19.0350, 99.8962);
+    const LatLng incidentLocation = LatLng(19.0284, 99.8962);
+    const LatLng ambulanceLocation = LatLng(19.0350, 99.8962);
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -227,7 +227,7 @@ class _AmbulanceIncidentDetailScreenState
                       child: Stack(
                         children: [
                           FlutterMap(
-                            options: MapOptions(
+                            options: const MapOptions(
                               initialCenter: ambulanceLocation,
                               initialZoom: 15.0,
                             ),
@@ -245,20 +245,20 @@ class _AmbulanceIncidentDetailScreenState
                                   ),
                                 ],
                               ),
-                              MarkerLayer(
+                              const MarkerLayer(
                                 markers: [
                                   Marker(
                                     point: ambulanceLocation,
                                     width: 44,
                                     height: 44,
-                                    child: const Center(
+                                    child: Center(
                                         child: Text('🚑', style: TextStyle(fontSize: 26))),
                                   ),
                                   Marker(
                                     point: incidentLocation,
                                     width: 36,
                                     height: 36,
-                                    child: const Icon(
+                                    child: Icon(
                                       Icons.location_on_rounded,
                                       color: Color(0xFFEB5757),
                                       size: 38,
@@ -295,7 +295,7 @@ class _AmbulanceIncidentDetailScreenState
                         borderRadius: BorderRadius.circular(25),
                         boxShadow: [
                           BoxShadow(
-                            color: const Color(0xFFEB5757).withOpacity(0.35),
+                            color: const Color(0xFFEB5757).withValues(alpha: 0.35),
                             blurRadius: 8,
                             offset: const Offset(0, 3),
                           ),
@@ -537,7 +537,7 @@ class _AmbulanceIncidentDetailScreenState
         color: Colors.white,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.06),
+            color: Colors.black.withValues(alpha: 0.06),
             blurRadius: 4,
             offset: const Offset(0, 2),
           ),

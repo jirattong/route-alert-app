@@ -102,7 +102,7 @@ class _AmbulanceIncidentListScreenState
         color: Colors.white,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.06),
+            color: Colors.black.withValues(alpha: 0.06),
             blurRadius: 4,
             offset: const Offset(0, 2),
           ),
@@ -171,7 +171,7 @@ class _AmbulanceIncidentListScreenState
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
             decoration: BoxDecoration(
-              color: const Color(0xFFEB5757).withOpacity(0.12),
+              color: const Color(0xFFEB5757).withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(20),
               border: Border.all(color: const Color(0xFFEB5757), width: 1.2),
             ),
@@ -217,7 +217,7 @@ class _AmbulanceIncidentListScreenState
         border: Border.all(color: const Color(0xFFEB5757), width: 1.8), // ขอบสีแดงตามรูป
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFFEB5757).withOpacity(0.08),
+            color: const Color(0xFFEB5757).withValues(alpha: 0.08),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
