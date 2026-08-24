@@ -6,6 +6,8 @@ import 'package:latlong2/latlong.dart';
 import '../../../core/services/location_service.dart';
 import '../../../core/services/driver_storage_service.dart';
 import '../../../core/services/emergency_mqtt_service.dart';
+import '../../../core/services/voice_alert_service.dart';
+import '../../../core/services/critical_notification_service.dart';
 
 class DriverHomeScreen extends StatefulWidget {
   final VoidCallback? onOpenSos;
@@ -193,6 +195,19 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
     if (inRed && !_hasVibrated) {
       _hasVibrated = true;
       HapticFeedback.heavyImpact();
+      VoiceAlertService().speakRedAlert();
+      CriticalNotificationService().showRadarAlert(
+        title: '🚨 คำเตือนฉุกเฉินระดับวิกฤต!',
+        body: 'รถพยาบาลกำลังเข้าใกล้ในระยะ ${meters.toInt()} เมตร โปรดชะลอความเร็วและเปิดทาง',
+        isCritical: true,
+      );
+    } else if (inBlue && !_isInBlueZone && !inRed) {
+      VoiceAlertService().speakOuterRadarAlert();
+      CriticalNotificationService().showRadarAlert(
+        title: '📡 สัญญาณเรดาร์ตรวจพบรถฉุกเฉิน',
+        body: 'มีรถพยาบาลปฏิบัติการในรัศมี ${(meters / 1000).toStringAsFixed(1)} กม.',
+        isCritical: false,
+      );
     } else if (!inBlue) {
       _hasVibrated = false;
     }
@@ -206,6 +221,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
 
   void _onYieldAcknowledge() async {
     await DriverStorageService.incrementYieldCount();
+    VoiceAlertService().speakYieldSuccess();
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
