@@ -1,15 +1,32 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- 👈 เพิ่มบรรทัดขอสิทธิ์ใช้อินเทอร์เน็ตตรงนี้ -->
+    <!-- 🌐 อินเทอร์เน็ตสำหรับ Firebase, MQTT & แผนที่ -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
 
-    <!-- 📍 สิทธิ์ขอเข้าถึง GPS สำหรับตรวจจับ Geofence และนำทาง -->
+    <!-- 📷 กล้องสำหรับระบบ AI Face Login & อัปโหลดรูปภาพ -->
+    <uses-permission android:name="android.permission.CAMERA"/>
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.front" android:required="false" />
+
+    <!-- 📍 สิทธิ์ GPS ตรวจจับเรดาร์ Geofence และนำทางฉุกเฉิน -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
-    
+
+    <!-- 🚨 การแจ้งเตือนฉุกเฉินระดับสูง & ระบบสั่นไซเรน -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <uses-permission android:name="android.permission.VIBRATE"/>
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+
+    <!-- 🖼️ สิทธิ์อ่านไฟล์รูปภาพ -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
+
     <application
-        android:label="route_alert"
+        android:label="RouteAlert"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
