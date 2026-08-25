@@ -27,10 +27,13 @@ class GoogleAuthResult {
 
 class GoogleAuthService {
   static final GoogleSignIn _googleSignIn = GoogleSignIn(
+    clientId: defaultTargetPlatform == TargetPlatform.iOS
+        ? '596203064480-lrcpt32blt7k4kh18bjb36ckpun841t7.apps.googleusercontent.com'
+        : null,
     scopes: ['email', 'profile'],
   );
 
-  /// Performs Google Sign-In with safe fallbacks to prevent native iOS crashes
+  /// Performs Google Sign-In with official OAuth client
   static Future<GoogleAuthResult> signInWithGoogle() async {
     try {
       GoogleSignInAccount? googleAccount;
@@ -39,12 +42,10 @@ class GoogleAuthService {
         googleAccount = await _googleSignIn.signIn();
       } catch (nativeError) {
         debugPrint('[GoogleAuthService] Native SDK warning: $nativeError');
-        // Native iOS OAuth scheme not configured yet in Google Cloud Console
         return GoogleAuthResult(
           isSuccess: false,
           requiresManualInput: true,
-          message:
-              'ยังไม่ได้กำหนดค่า Client ID บน Google Console กรุณากรอก Gmail เพื่อยืนยันตัวตน',
+          message: 'กรุณากรอกบัญชี Google เพื่อยืนยันตัวตน',
         );
       }
 
@@ -59,7 +60,8 @@ class GoogleAuthService {
       final String name = googleAccount.displayName ?? email.split('@').first;
       final String? photoUrl = googleAccount.photoUrl;
 
-      return await processGoogleUser(email: email, name: name, photoUrl: photoUrl);
+      return await processGoogleUser(
+          email: email, name: name, photoUrl: photoUrl);
     } catch (e) {
       debugPrint('[GoogleAuthService] Exception: $e');
       return GoogleAuthResult(

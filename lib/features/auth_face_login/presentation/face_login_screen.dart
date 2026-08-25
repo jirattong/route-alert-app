@@ -135,8 +135,26 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
     );
   }
 
-  void _onGoogleLogin() {
-    _showGoogleInputModal();
+  void _onGoogleLogin() async {
+    setState(() => _isLoading = true);
+    final result = await GoogleAuthService.signInWithGoogle();
+    setState(() => _isLoading = false);
+
+    if (!mounted) return;
+
+    if (result.requiresManualInput) {
+      _showGoogleInputModal();
+      return;
+    }
+
+    if (!result.isSuccess) {
+      if (result.message != 'ยกเลิกการเข้าสู่ระบบด้วย Google') {
+        _showGoogleInputModal();
+      }
+      return;
+    }
+
+    _handleGoogleUser(result);
   }
 
   void _handleGoogleUser(GoogleAuthResult result) async {
