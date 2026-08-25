@@ -4,17 +4,23 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'firebase_options.dart';
 import 'features/auth_face_login/presentation/face_login_screen.dart';
 
-void main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
   
-  // 1. Load private environment variables securely from .env
+  // Launch the App UI immediately (Prevents any blank screen / splash freeze)
+  runApp(const RouteAlertApp());
+
+  // Initialize background services (DotEnv & Firebase) asynchronously
+  _initServices();
+}
+
+Future<void> _initServices() async {
   try {
     await dotenv.load(fileName: ".env");
   } catch (e) {
     debugPrint('DotEnv load warning: $e');
   }
 
-  // 2. Initialize Firebase safely without crashing or hanging UI
   try {
     if (Firebase.apps.isEmpty) {
       await Firebase.initializeApp(
@@ -24,8 +30,6 @@ void main() async {
   } catch (e) {
     debugPrint('Firebase init error: $e');
   }
-
-  runApp(const RouteAlertApp());
 }
 
 class RouteAlertApp extends StatelessWidget {
