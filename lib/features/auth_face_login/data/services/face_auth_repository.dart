@@ -99,6 +99,25 @@ class FaceAuthRepository {
     }).whereType<UserFaceProfile>().toList();
   }
 
+  /// Checks if an email is already registered in Cloud Firestore or Local Cache
+  static Future<bool> isEmailRegistered(String email) async {
+    final cleanEmail = email.trim().toLowerCase();
+    try {
+      final doc = await _firestore.collection(_firestoreCollection).doc(cleanEmail).get();
+      if (doc.exists) return true;
+    } catch (_) {}
+
+    final users = await getAllUsers();
+    return users.any((u) => u.email.trim().toLowerCase() == cleanEmail);
+  }
+
+  /// Checks if a username/fullname is already registered
+  static Future<bool> isUsernameRegistered(String name) async {
+    final cleanName = name.trim().toLowerCase();
+    final users = await getAllUsers();
+    return users.any((u) => u.name.trim().toLowerCase() == cleanName);
+  }
+
   /// Matches live scanned face embedding with registered users
   static Future<FaceAuthMatchResult> authenticateWithFace(List<double> scannedEmbedding) async {
     final users = await getAllUsers();
