@@ -1,4 +1,7 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import '../../../core/services/email_otp_service.dart';
 import '../../agency/presentation/agency_main_screen.dart';
 import '../../ambulance/presentation/ambulance_main_screen.dart';
 import '../../driver_radar/presentation/driver_main_screen.dart';
@@ -19,6 +22,10 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
   bool obscureRePassword = true;
   bool _isLoading = false;
 
+  // Email OTP Verification State
+  bool _isEmailVerified = false;
+  String? _verifiedEmail;
+
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
@@ -32,6 +39,16 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
     _passwordController.addListener(() {
       if (!isLogin && mounted) {
         setState(() {});
+      }
+    });
+
+    _emailController.addListener(() {
+      // If user changes email text after verifying, reset verified state
+      if (_isEmailVerified && _emailController.text.trim().toLowerCase() != _verifiedEmail) {
+        setState(() {
+          _isEmailVerified = false;
+          _verifiedEmail = null;
+        });
       }
     });
   }
@@ -119,6 +136,95 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
     );
   }
 
+  // --- Request Email OTP ---
+  void _onRequestEmailOtp() async {
+    final email = _emailController.text.trim();
+
+    if (email.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          backgroundColor: Colors.orangeAccent,
+          content: Text('⚠️ กรุณากรอกอีเมลก่อนขอรับรหัส OTP'),
+        ),
+      );
+      return;
+    }
+
+    final bool isValidEmail =
+        RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(email);
+    if (!isValidEmail) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          backgroundColor: Colors.redAccent,
+          content: Text('⚠️ รูปแบบอีเมลไม่ถูกต้อง กรุณาตรวจสอบอีเมลอีกครั้ง'),
+        ),
+      );
+      return;
+    }
+
+    // Check duplicate email
+    setState(() => _isLoading = true);
+    final isDuplicate = await FaceAuthRepository.isEmailRegistered(email);
+    setState(() => _isLoading = false);
+
+    if (!mounted) return;
+
+    if (isDuplicate) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          backgroundColor: Colors.redAccent,
+          content: Text('⚠️ อีเมลนี้มีอยู่ในระบบแล้ว กรุณาใช้อีเมลอื่น หรือสลับไปเข้าสู่ระบบ'),
+          duration: Duration(seconds: 4),
+        ),
+      );
+      return;
+    }
+
+    // Send OTP
+    setState(() => _isLoading = true);
+    final result = await EmailOtpService.sendOtp(email: email);
+    setState(() => _isLoading = false);
+
+    if (!mounted) return;
+
+    if (result.isSuccess) {
+      _showOtpModal(email, result.debugOtpCode);
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: Colors.redAccent,
+          content: Text(result.message),
+        ),
+      );
+    }
+  }
+
+  // --- Show 6-Digit OTP Modal Sheet ---
+  void _showOtpModal(String email, String? debugOtp) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => _OtpVerificationSheet(
+        email: email,
+        debugOtp: debugOtp,
+        onVerified: () {
+          Navigator.pop(ctx);
+          setState(() {
+            _isEmailVerified = true;
+            _verifiedEmail = email.toLowerCase();
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              backgroundColor: Color(0xFF00A896),
+              content: Text('🛡️ ยืนยันอีเมลสำเร็จเรียบร้อย!'),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   void _onScanFaceForRegistration() async {
     final name = _nameController.text.trim();
     final email = _emailController.text.trim();
@@ -134,42 +240,11 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
       return;
     }
 
-    // Check email format
-    final bool isValidEmail =
-        RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(email);
-    if (!isValidEmail) {
+    if (!_isEmailVerified || _verifiedEmail != email.toLowerCase()) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          backgroundColor: Colors.redAccent,
-          content: Text('⚠️ รูปแบบอีเมลไม่ถูกต้อง กรุณาตรวจสอบอีเมลอีกครั้ง'),
-        ),
-      );
-      return;
-    }
-
-    setState(() => _isLoading = true);
-    final isDuplicateEmail = await FaceAuthRepository.isEmailRegistered(email);
-    final isDuplicateUser = await FaceAuthRepository.isUsernameRegistered(name);
-    setState(() => _isLoading = false);
-
-    if (!mounted) return;
-
-    if (isDuplicateEmail) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          backgroundColor: Colors.redAccent,
-          content: Text('⚠️ อีเมลนี้มีอยู่ในระบบแล้ว กรุณาใช้อีเมลอื่น หรือสลับไปเข้าสู่ระบบ'),
-          duration: Duration(seconds: 4),
-        ),
-      );
-      return;
-    }
-
-    if (isDuplicateUser) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          backgroundColor: Colors.redAccent,
-          content: Text('⚠️ ชื่อผู้ใช้นี้ถูกใช้งานแล้ว กรุณาเปลี่ยนชื่อผู้ใช้'),
+          backgroundColor: Colors.orangeAccent,
+          content: Text('⚠️ กรุณากดปุ่ม "ขอ OTP" เพื่อยืนยันอีเมลก่อนทำการสแกนหน้า'),
           duration: Duration(seconds: 4),
         ),
       );
@@ -216,14 +291,13 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
       return;
     }
 
-    // 1. Email format check
-    final bool isValidEmail =
-        RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(email);
-    if (!isValidEmail) {
+    // 1. Email OTP verification check
+    if (!_isEmailVerified || _verifiedEmail != email.toLowerCase()) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          backgroundColor: Colors.redAccent,
-          content: Text('⚠️ รูปแบบอีเมลไม่ถูกต้อง (ตัวอย่าง: name@example.com)'),
+          backgroundColor: Colors.orangeAccent,
+          content: Text('⚠️ กรุณากดปุ่ม "ขอ OTP" เพื่อยืนยันอีเมลของคุณก่อนลงทะเบียน'),
+          duration: Duration(seconds: 4),
         ),
       );
       return;
@@ -527,12 +601,9 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
           icon: Icons.person_outline_rounded,
         ),
         const SizedBox(height: 14),
-        _buildInputLabel('Email (อีเมลใช้งาน)'),
-        _buildTextField(
-          controller: _emailController,
-          hintText: 'name@domain.com',
-          icon: Icons.email_outlined,
-        ),
+        _buildInputLabel('Gmail / Email (อีเมลยืนยันตัวตน)'),
+        // Email Field with Integrated OTP Request & Verified Badge
+        _buildEmailWithOtpField(),
         const SizedBox(height: 14),
         _buildInputLabel('Password (รหัสผ่านความปลอดภัยสูง)'),
         _buildTextField(
@@ -612,6 +683,92 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
           onPressed: _isLoading ? () {} : _onRegister,
         ),
       ],
+    );
+  }
+
+  Widget _buildEmailWithOtpField() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.02),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _emailController,
+              keyboardType: TextInputType.emailAddress,
+              decoration: InputDecoration(
+                prefixIcon: const Icon(Icons.email_outlined,
+                    color: Colors.grey, size: 20),
+                hintText: 'name@gmail.com',
+                hintStyle:
+                    TextStyle(color: Colors.grey.shade400, fontSize: 13.5),
+                contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 16, vertical: 14),
+                border: InputBorder.none,
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(right: 8.0),
+            child: _isEmailVerified
+                ? Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE8F8F5),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFF00A896)),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.verified_user_rounded,
+                            size: 14, color: Color(0xFF00A896)),
+                        SizedBox(width: 4),
+                        Text(
+                          'ยืนยันแล้ว',
+                          style: TextStyle(
+                            color: Color(0xFF00A896),
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                : ElevatedButton(
+                    onPressed: _isLoading ? null : _onRequestEmailOtp,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF00A896),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 8),
+                      minimumSize: Size.zero,
+                    ),
+                    child: const Text(
+                      'ขอ OTP',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -872,6 +1029,284 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// 6-Digit Email OTP Verification Bottom Sheet with 60s Countdown
+class _OtpVerificationSheet extends StatefulWidget {
+  final String email;
+  final String? debugOtp;
+  final VoidCallback onVerified;
+
+  const _OtpVerificationSheet({
+    required this.email,
+    this.debugOtp,
+    required this.onVerified,
+  });
+
+  @override
+  State<_OtpVerificationSheet> createState() => _OtpVerificationSheetState();
+}
+
+class _OtpVerificationSheetState extends State<_OtpVerificationSheet> {
+  final List<TextEditingController> _controllers =
+      List.generate(6, (_) => TextEditingController());
+  final List<FocusNode> _focusNodes = List.generate(6, (_) => FocusNode());
+
+  int _countdown = 60;
+  Timer? _timer;
+  String? _errorMessage;
+  bool _isVerifying = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _startCountdown();
+    // Auto focus first pin box
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _focusNodes[0].requestFocus();
+    });
+  }
+
+  void _startCountdown() {
+    _countdown = 60;
+    _timer?.cancel();
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (_countdown > 0) {
+        setState(() => _countdown--);
+      } else {
+        _timer?.cancel();
+      }
+    });
+  }
+
+  void _onResendOtp() async {
+    if (_countdown > 0) return;
+    final result = await EmailOtpService.sendOtp(email: widget.email);
+    if (result.isSuccess) {
+      _startCountdown();
+      setState(() {
+        _errorMessage = null;
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: const Color(0xFF00A896),
+            content: Text(result.message),
+          ),
+        );
+      }
+    }
+  }
+
+  void _submitOtp() {
+    final code = _controllers.map((c) => c.text.trim()).join();
+    if (code.length < 6) {
+      setState(() => _errorMessage = 'กรุณากรอกรหัส OTP ให้ครบทั้ง 6 หลัก');
+      return;
+    }
+
+    setState(() => _isVerifying = true);
+    final result = EmailOtpService.verifyOtp(email: widget.email, inputOtp: code);
+    setState(() => _isVerifying = false);
+
+    if (result.isSuccess) {
+      HapticFeedback.heavyImpact();
+      widget.onVerified();
+    } else {
+      HapticFeedback.vibrate();
+      setState(() {
+        _errorMessage = result.message;
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    for (final c in _controllers) {
+      c.dispose();
+    }
+    for (final f in _focusNodes) {
+      f.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.only(
+        top: 28,
+        left: 24,
+        right: 24,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 28,
+      ),
+      decoration: const BoxDecoration(
+        color: Color(0xFF1C1C1E),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 44,
+            height: 4,
+            decoration: BoxDecoration(
+              color: Colors.white24,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(height: 18),
+          Container(
+            width: 58,
+            height: 58,
+            decoration: BoxDecoration(
+              color: const Color(0xFF00A896).withValues(alpha: 0.18),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.mark_email_read_rounded,
+                color: Color(0xFF00A896), size: 32),
+          ),
+          const SizedBox(height: 14),
+          const Text(
+            'ยืนยันรหัส OTP 6 หลัก',
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'ระบบได้ส่งรหัสยืนยันไปยัง\n${widget.email}',
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: Colors.white70, fontSize: 13.5),
+          ),
+          if (widget.debugOtp != null) ...[
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.white10,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                'รหัสทดสอบ: ${widget.debugOtp}',
+                style: const TextStyle(color: Color(0xFF34D399), fontSize: 12),
+              ),
+            ),
+          ],
+          const SizedBox(height: 24),
+
+          // 6 PIN Input Boxes
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: List.generate(6, (index) {
+              return SizedBox(
+                width: 44,
+                height: 52,
+                child: TextField(
+                  controller: _controllers[index],
+                  focusNode: _focusNodes[index],
+                  textAlign: TextAlign.center,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [
+                    LengthLimitingTextInputFormatter(1),
+                    FilteringTextInputFormatter.digitsOnly,
+                  ],
+                  style: const TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                  decoration: InputDecoration(
+                    contentPadding: EdgeInsets.zero,
+                    filled: true,
+                    fillColor: Colors.white.withValues(alpha: 0.08),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: Colors.white24),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(
+                          color: Color(0xFF00A896), width: 2),
+                    ),
+                  ),
+                  onChanged: (val) {
+                    if (val.isNotEmpty && index < 5) {
+                      _focusNodes[index + 1].requestFocus();
+                    } else if (val.isEmpty && index > 0) {
+                      _focusNodes[index - 1].requestFocus();
+                    }
+                    if (index == 5 && val.isNotEmpty) {
+                      _submitOtp();
+                    }
+                  },
+                ),
+              );
+            }),
+          ),
+
+          if (_errorMessage != null) ...[
+            const SizedBox(height: 12),
+            Text(
+              _errorMessage!,
+              style: const TextStyle(color: Colors.redAccent, fontSize: 12.5),
+            ),
+          ],
+
+          const SizedBox(height: 20),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                _countdown > 0
+                    ? 'ขอรหัสใหม่ได้ใน ($_countdown วินาที)'
+                    : 'ไม่ได้รับรหัส OTP?',
+                style: const TextStyle(color: Colors.white60, fontSize: 13),
+              ),
+              if (_countdown == 0)
+                TextButton(
+                  onPressed: _onResendOtp,
+                  child: const Text(
+                    'ส่งรหัสใหม่อีกครั้ง',
+                    style: TextStyle(
+                      color: Color(0xFF00A896),
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            height: 48,
+            child: ElevatedButton(
+              onPressed: _isVerifying ? null : _submitOtp,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF00A896),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(24),
+                ),
+                elevation: 0,
+              ),
+              child: Text(
+                _isVerifying ? 'กำลังตรวจสอบ...' : 'ยืนยันรหัส OTP',
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
