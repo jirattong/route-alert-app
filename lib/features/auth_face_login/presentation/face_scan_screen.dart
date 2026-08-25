@@ -168,15 +168,15 @@ class _FaceScanScreenState extends State<FaceScanScreen>
     if (widget.mode == FaceScanMode.register) {
       switch (_currentEnrollStep) {
         case 0:
-          _statusText = 'มองตรงไปยังกล้อง';
+          _statusText = 'มุมที่ 1/3: มองตรงไปยังกล้อง';
           _statusColor = Colors.white;
           break;
         case 1:
-          _statusText = 'หันศีรษะไปทางซ้ายช้าๆ';
+          _statusText = 'มุมที่ 2/3: หันศีรษะไปทางซ้ายช้าๆ 👈';
           _statusColor = const Color(0xFF60A5FA);
           break;
         case 2:
-          _statusText = 'หันศีรษะไปทางขวาช้าๆ';
+          _statusText = 'มุมที่ 3/3: หันศีรษะไปทางขวาช้าๆ 👉';
           _statusColor = const Color(0xFF60A5FA);
           break;
       }
@@ -210,7 +210,9 @@ class _FaceScanScreenState extends State<FaceScanScreen>
       // 1. Check face presence
       if (faces.isEmpty) {
         setState(() {
-          _statusText = 'วางใบหน้าให้อยู่ในกรอบ';
+          _statusText = widget.mode == FaceScanMode.register
+              ? 'วางใบหน้าให้อยู่ในกรอบเพื่อเริ่มลงทะเบียน'
+              : 'วางใบหน้าให้อยู่ในกรอบ';
           _statusColor = Colors.white70;
           _scanProgress = 0.0;
           _loginFrameEmbeddings.clear();
@@ -414,7 +416,9 @@ class _FaceScanScreenState extends State<FaceScanScreen>
             ),
             const SizedBox(height: 18),
             Text(
-              isNewRegistration ? 'ลงทะเบียน Face ID สำเร็จ' : 'ปลดล็อก Face ID สำเร็จ',
+              isNewRegistration
+                  ? 'บันทึกใบหน้า 3D สำเร็จ!'
+                  : 'ปลดล็อก Face ID สำเร็จ',
               style: const TextStyle(
                 fontSize: 22,
                 fontWeight: FontWeight.bold,
@@ -439,7 +443,9 @@ class _FaceScanScreenState extends State<FaceScanScreen>
                 borderRadius: BorderRadius.circular(16),
               ),
               child: Text(
-                'AI Match ${(score * 100).toStringAsFixed(1)}% • ${user.role.toUpperCase()}',
+                isNewRegistration
+                    ? 'บันทึกมิติ 3 มุมมองครบถ้วน • อีเมล: ${user.email}'
+                    : 'AI Match ${(score * 100).toStringAsFixed(1)}% • ${user.role.toUpperCase()}',
                 style: const TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
@@ -453,26 +459,31 @@ class _FaceScanScreenState extends State<FaceScanScreen>
               height: 52,
               child: ElevatedButton(
                 onPressed: () {
-                  Navigator.pop(ctx);
-                  Widget targetScreen;
-                  switch (user.role) {
-                    case 'ambulance':
-                      targetScreen = const AmbulanceMainScreen();
-                      break;
-                    case 'agency':
-                      targetScreen = const AgencyMainScreen();
-                      break;
-                    case 'driver':
-                      targetScreen = const DriverMainScreen();
-                      break;
-                    default:
-                      targetScreen = const DriverMainScreen();
-                  }
+                  if (widget.mode == FaceScanMode.register) {
+                    Navigator.pop(ctx);
+                    Navigator.pop(context, user.faceEmbedding);
+                  } else {
+                    Navigator.pop(ctx);
+                    Widget targetScreen;
+                    switch (user.role) {
+                      case 'ambulance':
+                        targetScreen = const AmbulanceMainScreen();
+                        break;
+                      case 'agency':
+                        targetScreen = const AgencyMainScreen();
+                        break;
+                      case 'driver':
+                        targetScreen = const DriverMainScreen();
+                        break;
+                      default:
+                        targetScreen = const DriverMainScreen();
+                    }
 
-                  Navigator.pushReplacement(
-                    context,
-                    MaterialPageRoute(builder: (_) => targetScreen),
-                  );
+                    Navigator.pushReplacement(
+                      context,
+                      MaterialPageRoute(builder: (_) => targetScreen),
+                    );
+                  }
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF00A896),
@@ -481,9 +492,11 @@ class _FaceScanScreenState extends State<FaceScanScreen>
                   ),
                   elevation: 0,
                 ),
-                child: const Text(
-                  'เข้าสู่ระบบ',
-                  style: TextStyle(
+                child: Text(
+                  widget.mode == FaceScanMode.register
+                      ? 'บันทึกข้อมูลใบหน้า'
+                      : 'เข้าสู่ระบบ',
+                  style: const TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
                       color: Colors.white),
@@ -725,10 +738,10 @@ class _FaceScanScreenState extends State<FaceScanScreen>
             },
           ),
 
-          // 4. Sleek Top Glassmorphic Navigation Bar
+          // 4. Prominent Top Header Bar with Big Registration Guidance
           SafeArea(
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               child: Column(
                 children: [
                   Row(
@@ -745,16 +758,16 @@ class _FaceScanScreenState extends State<FaceScanScreen>
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           const Icon(Icons.face_rounded,
-                              color: Colors.white, size: 20),
+                              color: Colors.white, size: 22),
                           const SizedBox(width: 8),
                           Text(
                             widget.mode == FaceScanMode.login
-                                ? 'Face ID'
-                                : 'ลงทะเบียนใบหน้า',
+                                ? 'Face ID Login'
+                                : 'ลงทะเบียน Face ID',
                             style: const TextStyle(
                               color: Colors.white,
-                              fontSize: 18,
-                              fontWeight: FontWeight.w600,
+                              fontSize: 19,
+                              fontWeight: FontWeight.bold,
                               letterSpacing: -0.3,
                             ),
                           ),
@@ -772,25 +785,69 @@ class _FaceScanScreenState extends State<FaceScanScreen>
                     ],
                   ),
 
-                  // Minimalist Step Indicators for Registration
+                  // Big Prominent Registration Guidance Banner
                   if (widget.mode == FaceScanMode.register)
                     Container(
-                      margin: const EdgeInsets.only(top: 16),
+                      margin: const EdgeInsets.only(top: 14),
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 8),
+                          horizontal: 18, vertical: 14),
                       decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.45),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: Colors.white12),
+                        color: Colors.black.withValues(alpha: 0.65),
+                        borderRadius: BorderRadius.circular(24),
+                        border: Border.all(
+                            color: const Color(0xFF00A896).withValues(alpha: 0.6),
+                            width: 1.5),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.4),
+                            blurRadius: 16,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
                       ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
+                      child: Column(
                         children: [
-                          _buildStepDot(0, 'หน้าตรง'),
-                          _buildStepLine(),
-                          _buildStepDot(1, 'หันซ้าย'),
-                          _buildStepLine(),
-                          _buildStepDot(2, 'หันขวา'),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              _buildBigStepChip(
+                                0,
+                                '1. หน้าตรง',
+                                Icons.face_rounded,
+                              ),
+                              _buildStepArrow(),
+                              _buildBigStepChip(
+                                1,
+                                '2. หันซ้าย',
+                                Icons.arrow_back_rounded,
+                              ),
+                              _buildStepArrow(),
+                              _buildBigStepChip(
+                                2,
+                                '3. หันขวา',
+                                Icons.arrow_forward_rounded,
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+                          Text(
+                            _getBigStepTitle(),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'ผู้ลงทะเบียน: ${widget.effectiveName} (${widget.effectiveEmail})',
+                            style: const TextStyle(
+                              color: Colors.white60,
+                              fontSize: 12,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ],
                       ),
                     ),
@@ -799,7 +856,7 @@ class _FaceScanScreenState extends State<FaceScanScreen>
             ),
           ),
 
-          // 5. Floating Clean Apple Status Pill (Positioned right below oval)
+          // 5. Floating Clean Apple Status Pill
           Positioned(
             left: 24,
             right: 24,
@@ -866,6 +923,19 @@ class _FaceScanScreenState extends State<FaceScanScreen>
     );
   }
 
+  String _getBigStepTitle() {
+    switch (_currentEnrollStep) {
+      case 0:
+        return '👁️ ขั้นตอนที่ 1: มองตรงไปยังกล้อง';
+      case 1:
+        return '👈 ขั้นตอนที่ 2: หันศีรษะไปทางซ้ายช้าๆ';
+      case 2:
+        return '👉 ขั้นตอนที่ 3: หันศีรษะไปทางขวาช้าๆ';
+      default:
+        return 'กำลังประมวลผลข้อมูลใบหน้า 3D...';
+    }
+  }
+
   Widget _buildGlassIconButton(
       {required IconData icon, required VoidCallback onTap}) {
     return ClipRRect(
@@ -890,44 +960,58 @@ class _FaceScanScreenState extends State<FaceScanScreen>
     );
   }
 
-  Widget _buildStepDot(int stepIndex, String label) {
+  Widget _buildBigStepChip(int stepIndex, String label, IconData icon) {
     final bool isDone = _currentEnrollStep > stepIndex;
     final bool isCurrent = _currentEnrollStep == stepIndex;
 
-    return Row(
-      children: [
-        Container(
-          width: 14,
-          height: 14,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: isCurrent
-                ? const Color(0xFF00A896)
-                : (isDone ? const Color(0xFF34D399) : Colors.white24),
+    Color bgColor = Colors.white.withValues(alpha: 0.08);
+    Color borderColor = Colors.white12;
+    Color textColor = Colors.white54;
+
+    if (isCurrent) {
+      bgColor = const Color(0xFF00A896).withValues(alpha: 0.35);
+      borderColor = const Color(0xFF00A896);
+      textColor = Colors.white;
+    } else if (isDone) {
+      bgColor = const Color(0xFF34D399).withValues(alpha: 0.25);
+      borderColor = const Color(0xFF34D399);
+      textColor = const Color(0xFF34D399);
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: borderColor, width: 1.2),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            isDone ? Icons.check_circle_rounded : icon,
+            size: 14,
+            color: textColor,
           ),
-          child: isDone
-              ? const Icon(Icons.check, size: 10, color: Colors.black)
-              : null,
-        ),
-        const SizedBox(width: 6),
-        Text(
-          label,
-          style: TextStyle(
-            color: isCurrent ? Colors.white : Colors.white54,
-            fontSize: 12,
-            fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal,
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: TextStyle(
+              color: textColor,
+              fontSize: 12,
+              fontWeight: isCurrent ? FontWeight.bold : FontWeight.w500,
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
-  Widget _buildStepLine() {
-    return Container(
-      width: 16,
-      height: 1.5,
-      margin: const EdgeInsets.symmetric(horizontal: 6),
-      color: Colors.white24,
+  Widget _buildStepArrow() {
+    return const Padding(
+      padding: EdgeInsets.symmetric(horizontal: 4),
+      child: Icon(Icons.arrow_forward_ios_rounded,
+          color: Colors.white24, size: 10),
     );
   }
 }
@@ -951,7 +1035,7 @@ class AppleFaceIdCleanPainter extends CustomPainter {
       ..style = PaintingStyle.fill;
 
     final ovalRect = Rect.fromCenter(
-      center: Offset(size.width / 2, size.height * 0.43),
+      center: Offset(size.width / 2, size.height * 0.44),
       width: size.width * 0.70 * pulseScale,
       height: size.height * 0.42 * pulseScale,
     );

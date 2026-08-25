@@ -70,13 +70,28 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
   }
 
   void _onScanFaceForRegistration() async {
+    final name = _nameController.text.trim();
+    final email = _emailController.text.trim();
+
+    if (name.isEmpty || email.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          backgroundColor: Colors.orangeAccent,
+          content: Text('⚠️ กรุณากรอก "ชื่อ" และ "อีเมล" ก่อนทำการสแกนใบหน้า'),
+          duration: Duration(seconds: 3),
+        ),
+      );
+      return;
+    }
+
     final result = await Navigator.push<List<double>>(
       context,
       MaterialPageRoute(
         builder: (_) => FaceScanScreen(
           mode: FaceScanMode.register,
-          registrationEmail: _emailController.text.trim(),
-          registrationName: _nameController.text.trim(),
+          registrationEmail: email,
+          registrationName: name,
+          registrationRole: 'driver',
         ),
       ),
     );
@@ -89,7 +104,7 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             backgroundColor: Color(0xFF00A896),
-            content: Text('บันทึกข้อมูลใบหน้าสำเร็จ (Face Enrolled)'),
+            content: Text('🎉 บันทึกข้อมูลใบหน้า 3D ลงฐานข้อมูลเรียบร้อย'),
           ),
         );
       }
@@ -116,12 +131,22 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
       return;
     }
 
+    if (_registeredFaceEmbedding == null || _registeredFaceEmbedding!.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          backgroundColor: Colors.redAccent,
+          content: Text('⚠️ กรุณากดปุ่ม "สแกนใบหน้า (Face ID)" เพื่อบันทึกใบหน้าก่อนลงทะเบียน'),
+        ),
+      );
+      return;
+    }
+
     final newProfile = UserFaceProfile(
-      id: 'USER_${DateTime.now().millisecondsSinceEpoch}',
+      id: email,
       email: email,
       name: name,
       role: 'driver',
-      faceEmbedding: _registeredFaceEmbedding ?? [],
+      faceEmbedding: _registeredFaceEmbedding!,
       registeredAt: DateTime.now(),
     );
 
