@@ -1596,24 +1596,10 @@ class _OtpVerificationSheetState extends State<_OtpVerificationSheet> {
           ),
           const SizedBox(height: 6),
           Text(
-            'ระบบได้ส่งรหัสยืนยันไปยัง\n${widget.email}',
+            'ระบบได้ส่งรหัสยืนยันไปยัง\n${widget.email}\n(กรุณาตรวจสอบในกล่องจดหมาย Inbox หรือ Junk Mail)',
             textAlign: TextAlign.center,
-            style: const TextStyle(color: Colors.white70, fontSize: 13.5),
+            style: const TextStyle(color: Colors.white70, fontSize: 13),
           ),
-          if (widget.debugOtp != null) ...[
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: Colors.white10,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                'รหัสทดสอบ: ${widget.debugOtp}',
-                style: const TextStyle(color: Color(0xFF34D399), fontSize: 12),
-              ),
-            ),
-          ],
           const SizedBox(height: 24),
 
           // 6 PIN Input Boxes
@@ -1755,7 +1741,6 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
   final List<FocusNode> _otpFocusNodes = List.generate(6, (_) => FocusNode());
   int _countdown = 60;
   Timer? _timer;
-  String? _debugOtp;
 
   // Step 3: New Password
   final TextEditingController _newPasswordController = TextEditingController();
@@ -1846,7 +1831,6 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
     if (result.isSuccess) {
       setState(() {
         _step = 2;
-        _debugOtp = result.debugOtpCode;
       });
       _startCountdown();
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -2076,24 +2060,10 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
         ),
         const SizedBox(height: 6),
         Text(
-          'รหัสถูกส่งไปยังอีเมล\n${_emailController.text.trim()}',
+          'รหัสถูกส่งไปยังอีเมล\n${_emailController.text.trim()}\n(กรุณาตรวจสอบในกล่องจดหมาย Inbox หรือ Junk Mail)',
           textAlign: TextAlign.center,
           style: const TextStyle(color: Colors.white70, fontSize: 13),
         ),
-        if (_debugOtp != null) ...[
-          const SizedBox(height: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            decoration: BoxDecoration(
-              color: Colors.white10,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Text(
-              'รหัสทดสอบ: $_debugOtp',
-              style: const TextStyle(color: Color(0xFF34D399), fontSize: 12),
-            ),
-          ),
-        ],
         const SizedBox(height: 20),
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
