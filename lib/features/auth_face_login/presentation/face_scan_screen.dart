@@ -56,6 +56,7 @@ class _FaceScanScreenState extends State<FaceScanScreen>
   bool _isCameraInitialized = false;
   bool _isProcessingFrame = false;
   bool _isAuthenticating = false;
+  bool _hasCameraError = false;
 
   final FaceDetectorService _detectorService = FaceDetectorService();
   final AntiSpoofingService _antiSpoofingService = AntiSpoofingService();
@@ -659,8 +660,23 @@ class _FaceScanScreenState extends State<FaceScanScreen>
           else
             Container(
               color: Colors.black,
-              child: const Center(
-                child: CircularProgressIndicator(color: Color(0xFF00A896)),
+              child: Center(
+                child: _hasCameraError
+                    ? const Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.videocam_off_rounded,
+                              color: Colors.white54, size: 56),
+                          SizedBox(height: 12),
+                          Text(
+                            'กล้องไม่พร้อมใช้งาน (เลือกภาพทดสอบด้านล่างได้)',
+                            style:
+                                TextStyle(color: Colors.white70, fontSize: 13),
+                          ),
+                        ],
+                      )
+                    : const CircularProgressIndicator(
+                        color: Color(0xFF00A896)),
               ),
             ),
 
