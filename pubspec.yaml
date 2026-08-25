@@ -60,6 +60,7 @@ dependencies:
   cloud_firestore: ^5.4.4
   flutter_dotenv: ^5.2.1
   flutter_tts: ^4.2.0
+  mailer: ^6.1.4
 
 dev_dependencies:
   flutter_test:
