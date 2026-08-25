@@ -261,6 +261,21 @@ class FaceAuthRepository {
     return await updateUserFaceEmbedding(email, []);
   }
 
+  /// Updates user password in Firestore and Local Storage Cache
+  static Future<bool> updateUserPassword(String email, String newPassword) async {
+    final cleanEmail = email.trim().toLowerCase();
+    try {
+      await _firestore.collection(_firestoreCollection).doc(cleanEmail).update({
+        'password': newPassword,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    } catch (_) {}
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('pwd_$cleanEmail', newPassword);
+    return true;
+  }
+
   /// Logs out current user
   static Future<void> logout() async {
     final prefs = await SharedPreferences.getInstance();

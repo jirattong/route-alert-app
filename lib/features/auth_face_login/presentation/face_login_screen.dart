@@ -355,6 +355,32 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
     );
   }
 
+  // --- Show Forgot & Reset Password Modal Sheet ---
+  void _showForgotPasswordModal() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => _ForgotPasswordSheet(
+        initialEmail: _emailController.text.trim(),
+        onPasswordResetSuccess: (email, newPassword) {
+          Navigator.pop(ctx);
+          setState(() {
+            _emailController.text = email;
+            _passwordController.text = newPassword;
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              backgroundColor: Color(0xFF00A896),
+              content: Text('🎉 รีเซ็ตรหัสผ่านใหม่สำเร็จ! กรุณากดเข้าสู่ระบบ'),
+              duration: Duration(seconds: 4),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   void _onScanFaceForRegistration() async {
     final name = _nameController.text.trim();
     final email = _emailController.text.trim();
@@ -690,7 +716,26 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
             setState(() => obscurePassword = !obscurePassword);
           },
         ),
-        const SizedBox(height: 18),
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton(
+            onPressed: _showForgotPasswordModal,
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.only(top: 6, bottom: 6),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            child: Text(
+              'ลืมรหัสผ่าน?',
+              style: TextStyle(
+                color: Colors.grey.shade700,
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
         _buildActionButton(
           text: _isLoading ? 'กำลังเข้าสู่ระบบ...' : 'LOGIN',
           color: const Color(0xFF5B9EE1),
@@ -1587,6 +1632,663 @@ class _OtpVerificationSheetState extends State<_OtpVerificationSheet> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// 3-Step Apple-Style Forgot & Reset Password Sheet
+class _ForgotPasswordSheet extends StatefulWidget {
+  final String initialEmail;
+  final Function(String email, String newPassword) onPasswordResetSuccess;
+
+  const _ForgotPasswordSheet({
+    required this.initialEmail,
+    required this.onPasswordResetSuccess,
+  });
+
+  @override
+  State<_ForgotPasswordSheet> createState() => _ForgotPasswordSheetState();
+}
+
+class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
+  int _step = 1; // 1: Email, 2: OTP, 3: New Password
+  bool _isLoading = false;
+  String? _errorMessage;
+
+  // Step 1: Email
+  late final TextEditingController _emailController;
+
+  // Step 2: OTP
+  final List<TextEditingController> _otpControllers =
+      List.generate(6, (_) => TextEditingController());
+  final List<FocusNode> _otpFocusNodes = List.generate(6, (_) => FocusNode());
+  int _countdown = 60;
+  Timer? _timer;
+  String? _debugOtp;
+
+  // Step 3: New Password
+  final TextEditingController _newPasswordController = TextEditingController();
+  final TextEditingController _confirmPasswordController =
+      TextEditingController();
+  bool _obscureNewPassword = true;
+  bool _obscureConfirmPassword = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _emailController = TextEditingController(text: widget.initialEmail);
+    _newPasswordController.addListener(() {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _emailController.dispose();
+    for (final c in _otpControllers) {
+      c.dispose();
+    }
+    for (final f in _otpFocusNodes) {
+      f.dispose();
+    }
+    _newPasswordController.dispose();
+    _confirmPasswordController.dispose();
+    super.dispose();
+  }
+
+  // --- Password Strength Rules ---
+  bool get _hasMinLength => _newPasswordController.text.length >= 8;
+  bool get _hasUpperLower =>
+      _newPasswordController.text.contains(RegExp(r'[A-Z]')) &&
+      _newPasswordController.text.contains(RegExp(r'[a-z]'));
+  bool get _hasNumber => _newPasswordController.text.contains(RegExp(r'[0-9]'));
+  bool get _hasSpecialChar => _newPasswordController.text
+      .contains(RegExp(r'[!@#$%^&*(),.?":{}|<>\-_=+]'));
+
+  int get _passwordStrengthScore {
+    int score = 0;
+    if (_hasMinLength) score++;
+    if (_newPasswordController.text.contains(RegExp(r'[A-Z]'))) score++;
+    if (_newPasswordController.text.contains(RegExp(r'[a-z]'))) score++;
+    if (_hasNumber) score++;
+    if (_hasSpecialChar) score++;
+    return score;
+  }
+
+  bool get _isPasswordSecure =>
+      _hasMinLength && _hasUpperLower && _hasNumber && _hasSpecialChar;
+
+  // --- Step 1: Send OTP ---
+  void _sendResetOtp() async {
+    final email = _emailController.text.trim();
+    if (email.isEmpty) {
+      setState(() => _errorMessage = 'กรุณากรอกอีเมลของคุณ');
+      return;
+    }
+
+    final bool isValidEmail =
+        RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(email);
+    if (!isValidEmail) {
+      setState(() => _errorMessage = 'รูปแบบอีเมลไม่ถูกต้อง');
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    final isRegistered = await FaceAuthRepository.isEmailRegistered(email);
+    if (!isRegistered) {
+      setState(() {
+        _isLoading = false;
+        _errorMessage =
+            'ไม่พบอีเมลนี้ในระบบ กรุณาตรวจสอบอีเมลหรือสมัครสมาชิกใหม่';
+      });
+      return;
+    }
+
+    final result = await EmailOtpService.sendOtp(email: email);
+    setState(() => _isLoading = false);
+
+    if (result.isSuccess) {
+      setState(() {
+        _step = 2;
+        _debugOtp = result.debugOtpCode;
+      });
+      _startCountdown();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _otpFocusNodes[0].requestFocus();
+      });
+    } else {
+      setState(() => _errorMessage = result.message);
+    }
+  }
+
+  void _startCountdown() {
+    _countdown = 60;
+    _timer?.cancel();
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (_countdown > 0) {
+        setState(() => _countdown--);
+      } else {
+        _timer?.cancel();
+      }
+    });
+  }
+
+  // --- Step 2: Verify OTP ---
+  void _verifyResetOtp() {
+    final code = _otpControllers.map((c) => c.text.trim()).join();
+    if (code.length < 6) {
+      setState(() => _errorMessage = 'กรุณากรอกรหัส OTP ให้ครบทั้ง 6 หลัก');
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    final result = EmailOtpService.verifyOtp(
+        email: _emailController.text.trim(), inputOtp: code);
+    setState(() => _isLoading = false);
+
+    if (result.isSuccess) {
+      HapticFeedback.heavyImpact();
+      setState(() {
+        _step = 3;
+        _errorMessage = null;
+      });
+    } else {
+      HapticFeedback.vibrate();
+      setState(() => _errorMessage = result.message);
+    }
+  }
+
+  // --- Step 3: Save New Password ---
+  void _saveNewPassword() async {
+    final newPassword = _newPasswordController.text.trim();
+    final confirmPassword = _confirmPasswordController.text.trim();
+
+    if (newPassword.isEmpty || confirmPassword.isEmpty) {
+      setState(() => _errorMessage = 'กรุณากรอกรหัสผ่านให้ครบถ้วน');
+      return;
+    }
+
+    if (!_isPasswordSecure) {
+      setState(() => _errorMessage =
+          'รหัสผ่านต้องมีความยาวอย่างน้อย 8 ตัวอักษร และมีตัวพิมพ์ใหญ่ พิมพ์เล็ก ตัวเลข และอักขระพิเศษ');
+      return;
+    }
+
+    if (newPassword != confirmPassword) {
+      setState(() => _errorMessage = 'รหัสผ่านและการยืนยันรหัสผ่านไม่ตรงกัน');
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    final email = _emailController.text.trim();
+    await FaceAuthRepository.updateUserPassword(email, newPassword);
+
+    setState(() => _isLoading = false);
+    HapticFeedback.heavyImpact();
+    widget.onPasswordResetSuccess(email, newPassword);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.only(
+        top: 28,
+        left: 24,
+        right: 24,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 28,
+      ),
+      decoration: const BoxDecoration(
+        color: Color(0xFF1C1C1E),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
+      ),
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 250),
+        child: _buildCurrentStep(),
+      ),
+    );
+  }
+
+  Widget _buildCurrentStep() {
+    switch (_step) {
+      case 1:
+        return _buildStep1Email();
+      case 2:
+        return _buildStep2Otp();
+      case 3:
+        return _buildStep3NewPassword();
+      default:
+        return const SizedBox.shrink();
+    }
+  }
+
+  // --- Step 1: Input Email Layout ---
+  Widget _buildStep1Email() {
+    return Column(
+      key: const ValueKey('step_1_email'),
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _buildHandleBar(),
+        const SizedBox(height: 18),
+        Container(
+          width: 58,
+          height: 58,
+          decoration: BoxDecoration(
+            color: const Color(0xFF5B9EE1).withValues(alpha: 0.18),
+            shape: BoxShape.circle,
+          ),
+          child: const Icon(Icons.lock_reset_rounded,
+              color: Color(0xFF5B9EE1), size: 32),
+        ),
+        const SizedBox(height: 14),
+        const Text(
+          'ลืมรหัสผ่าน / รีเซ็ตรหัสผ่าน',
+          style: TextStyle(
+              fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
+        ),
+        const SizedBox(height: 6),
+        const Text(
+          'กรุณากรอกอีเมลของคุณ เราจะส่งรหัส OTP 6 หลัก\nเพื่อใช้ยืนยันตัวตนในการตั้งรหัสผ่านใหม่',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: Colors.white70, fontSize: 13),
+        ),
+        const SizedBox(height: 20),
+        Container(
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: Colors.white24),
+          ),
+          child: TextField(
+            controller: _emailController,
+            keyboardType: TextInputType.emailAddress,
+            style: const TextStyle(color: Colors.white, fontSize: 15),
+            decoration: const InputDecoration(
+              prefixIcon: Icon(Icons.email_outlined, color: Colors.white60),
+              hintText: 'name@gmail.com',
+              hintStyle: TextStyle(color: Colors.white38),
+              contentPadding:
+                  EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              border: InputBorder.none,
+            ),
+          ),
+        ),
+        if (_errorMessage != null) ...[
+          const SizedBox(height: 10),
+          Text(
+            _errorMessage!,
+            style: const TextStyle(color: Colors.redAccent, fontSize: 12.5),
+            textAlign: TextAlign.center,
+          ),
+        ],
+        const SizedBox(height: 20),
+        SizedBox(
+          width: double.infinity,
+          height: 48,
+          child: ElevatedButton(
+            onPressed: _isLoading ? null : _sendResetOtp,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF5B9EE1),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(24)),
+              elevation: 0,
+            ),
+            child: Text(
+              _isLoading ? 'กำลังส่งรหัส OTP...' : 'ขอรหัส OTP เพื่อรีเซ็ต',
+              style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // --- Step 2: Input OTP Layout ---
+  Widget _buildStep2Otp() {
+    return Column(
+      key: const ValueKey('step_2_otp'),
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _buildHandleBar(),
+        const SizedBox(height: 18),
+        Container(
+          width: 58,
+          height: 58,
+          decoration: BoxDecoration(
+            color: const Color(0xFF00A896).withValues(alpha: 0.18),
+            shape: BoxShape.circle,
+          ),
+          child: const Icon(Icons.mark_email_read_rounded,
+              color: Color(0xFF00A896), size: 32),
+        ),
+        const SizedBox(height: 14),
+        const Text(
+          'กรอกรหัส OTP 6 หลัก',
+          style: TextStyle(
+              fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'รหัสถูกส่งไปยังอีเมล\n${_emailController.text.trim()}',
+          textAlign: TextAlign.center,
+          style: const TextStyle(color: Colors.white70, fontSize: 13),
+        ),
+        if (_debugOtp != null) ...[
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: Colors.white10,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              'รหัสทดสอบ: $_debugOtp',
+              style: const TextStyle(color: Color(0xFF34D399), fontSize: 12),
+            ),
+          ),
+        ],
+        const SizedBox(height: 20),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: List.generate(6, (index) {
+            return SizedBox(
+              width: 44,
+              height: 52,
+              child: TextField(
+                controller: _otpControllers[index],
+                focusNode: _otpFocusNodes[index],
+                textAlign: TextAlign.center,
+                keyboardType: TextInputType.number,
+                inputFormatters: [
+                  LengthLimitingTextInputFormatter(1),
+                  FilteringTextInputFormatter.digitsOnly,
+                ],
+                style: const TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+                decoration: InputDecoration(
+                  contentPadding: EdgeInsets.zero,
+                  filled: true,
+                  fillColor: Colors.white.withValues(alpha: 0.08),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: Colors.white24),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide:
+                        const BorderSide(color: Color(0xFF00A896), width: 2),
+                  ),
+                ),
+                onChanged: (val) {
+                  if (val.isNotEmpty && index < 5) {
+                    _otpFocusNodes[index + 1].requestFocus();
+                  } else if (val.isEmpty && index > 0) {
+                    _otpFocusNodes[index - 1].requestFocus();
+                  }
+                  if (index == 5 && val.isNotEmpty) {
+                    _verifyResetOtp();
+                  }
+                },
+              ),
+            );
+          }),
+        ),
+        if (_errorMessage != null) ...[
+          const SizedBox(height: 10),
+          Text(
+            _errorMessage!,
+            style: const TextStyle(color: Colors.redAccent, fontSize: 12.5),
+          ),
+        ],
+        const SizedBox(height: 16),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              _countdown > 0
+                  ? 'ขอรหัสใหม่ได้ใน ($_countdown วินาที)'
+                  : 'ไม่ได้รับรหัส OTP?',
+              style: const TextStyle(color: Colors.white60, fontSize: 13),
+            ),
+            if (_countdown == 0)
+              TextButton(
+                onPressed: _sendResetOtp,
+                child: const Text(
+                  'ส่งรหัสใหม่อีกครั้ง',
+                  style: TextStyle(
+                    color: Color(0xFF00A896),
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        SizedBox(
+          width: double.infinity,
+          height: 48,
+          child: ElevatedButton(
+            onPressed: _isLoading ? null : _verifyResetOtp,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF00A896),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(24)),
+              elevation: 0,
+            ),
+            child: Text(
+              _isLoading ? 'กำลังตรวจสอบ...' : 'ยืนยันรหัส OTP',
+              style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // --- Step 3: Input New Password Layout ---
+  Widget _buildStep3NewPassword() {
+    final score = _passwordStrengthScore;
+    Color barColor;
+    String strengthText;
+    if (score <= 2) {
+      barColor = Colors.redAccent;
+      strengthText = 'ความปลอดภัยต่ำ (Weak)';
+    } else if (score == 3 || score == 4) {
+      barColor = Colors.orangeAccent;
+      strengthText = 'ความปลอดภัยปานกลาง (Medium)';
+    } else {
+      barColor = const Color(0xFF00A896);
+      strengthText = 'ความปลอดภัยสูงมาก (Strong)';
+    }
+
+    return Column(
+      key: const ValueKey('step_3_new_password'),
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildHandleBar(),
+        const SizedBox(height: 18),
+        const Text(
+          'ตั้งรหัสผ่านใหม่ (Reset Password)',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+              fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'สำหรับบัญชี: ${_emailController.text.trim()}',
+          textAlign: TextAlign.center,
+          style: const TextStyle(color: Color(0xFF34D399), fontSize: 13),
+        ),
+        const SizedBox(height: 16),
+        // New Password
+        Container(
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: Colors.white24),
+          ),
+          child: TextField(
+            controller: _newPasswordController,
+            obscureText: _obscureNewPassword,
+            style: const TextStyle(color: Colors.white, fontSize: 14),
+            decoration: InputDecoration(
+              prefixIcon:
+                  const Icon(Icons.lock_outline_rounded, color: Colors.white60),
+              hintText: 'รหัสผ่านใหม่ (อย่างน้อย 8 ตัวอักษร)',
+              hintStyle: const TextStyle(color: Colors.white38, fontSize: 13),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              border: InputBorder.none,
+              suffixIcon: IconButton(
+                icon: Icon(
+                  _obscureNewPassword
+                      ? Icons.visibility_off_outlined
+                      : Icons.visibility_outlined,
+                  color: Colors.white60,
+                  size: 20,
+                ),
+                onPressed: () =>
+                    setState(() => _obscureNewPassword = !_obscureNewPassword),
+              ),
+            ),
+          ),
+        ),
+
+        // Live Strength Meter
+        if (_newPasswordController.text.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text('ระดับความปลอดภัย:',
+                  style: TextStyle(fontSize: 11, color: Colors.white70)),
+              Text(strengthText,
+                  style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: barColor)),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Row(
+            children: List.generate(5, (index) {
+              return Expanded(
+                child: Container(
+                  height: 4,
+                  margin: EdgeInsets.only(right: index < 4 ? 4 : 0),
+                  decoration: BoxDecoration(
+                    color: index < score ? barColor : Colors.white24,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              );
+            }),
+          ),
+        ],
+
+        const SizedBox(height: 12),
+        // Confirm Password
+        Container(
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: Colors.white24),
+          ),
+          child: TextField(
+            controller: _confirmPasswordController,
+            obscureText: _obscureConfirmPassword,
+            style: const TextStyle(color: Colors.white, fontSize: 14),
+            decoration: InputDecoration(
+              prefixIcon:
+                  const Icon(Icons.lock_reset_rounded, color: Colors.white60),
+              hintText: 'ยืนยันรหัสผ่านใหม่อีกครั้ง',
+              hintStyle: const TextStyle(color: Colors.white38, fontSize: 13),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              border: InputBorder.none,
+              suffixIcon: IconButton(
+                icon: Icon(
+                  _obscureConfirmPassword
+                      ? Icons.visibility_off_outlined
+                      : Icons.visibility_outlined,
+                  color: Colors.white60,
+                  size: 20,
+                ),
+                onPressed: () => setState(
+                    () => _obscureConfirmPassword = !_obscureConfirmPassword),
+              ),
+            ),
+          ),
+        ),
+
+        if (_errorMessage != null) ...[
+          const SizedBox(height: 10),
+          Text(
+            _errorMessage!,
+            style: const TextStyle(color: Colors.redAccent, fontSize: 12.5),
+            textAlign: TextAlign.center,
+          ),
+        ],
+
+        const SizedBox(height: 20),
+        SizedBox(
+          width: double.infinity,
+          height: 48,
+          child: ElevatedButton(
+            onPressed: _isLoading ? null : _saveNewPassword,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF00A896),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(24)),
+              elevation: 0,
+            ),
+            child: Text(
+              _isLoading ? 'กำลังบันทึกรหัสผ่านใหม่...' : 'บันทึกรหัสผ่านใหม่',
+              style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildHandleBar() {
+    return Container(
+      width: 44,
+      height: 4,
+      decoration: BoxDecoration(
+        color: Colors.white24,
+        borderRadius: BorderRadius.circular(2),
       ),
     );
   }
