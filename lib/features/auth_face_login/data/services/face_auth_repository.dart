@@ -21,7 +21,7 @@ class FaceAuthMatchResult {
 class FaceAuthRepository {
   static const String _usersKey = 'route_alert_registered_users';
   static const String _currentUserKey = 'route_alert_current_user';
-  static const double _matchThreshold = 0.72; // Cosine similarity threshold for face login
+  static const double _matchThreshold = 0.80; // High accuracy cosine similarity threshold for face login
 
   static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   static const String _firestoreCollection = 'users';

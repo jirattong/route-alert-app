@@ -70,12 +70,12 @@ class AntiSpoofingService {
         return smileProb > 0.60;
 
       case LivenessChallenge.turnLeft:
-        final angleY = face.headEulerAngleY ?? 0.0; // Yaw angle
-        return angleY > 15.0;
+        final angleY = face.headEulerAngleY ?? 0.0; // Yaw angle on front camera
+        return angleY < -12.0;
 
       case LivenessChallenge.turnRight:
-        final angleY = face.headEulerAngleY ?? 0.0; // Yaw angle
-        return angleY < -15.0;
+        final angleY = face.headEulerAngleY ?? 0.0; // Yaw angle on front camera
+        return angleY > 12.0;
     }
   }
 

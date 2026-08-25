@@ -107,7 +107,7 @@ class _FaceScanScreenState extends State<FaceScanScreen>
   Future<void> _initCamera(CameraDescription camera) async {
     _cameraController = CameraController(
       camera,
-      ResolutionPreset.medium,
+      ResolutionPreset.high,
       enableAudio: false,
       imageFormatGroup: Platform.isIOS
           ? ImageFormatGroup.bgra8888
@@ -254,12 +254,12 @@ class _FaceScanScreenState extends State<FaceScanScreen>
         final double angleY = face.headEulerAngleY ?? 0.0;
 
         bool angleMatched = false;
-        if (_currentEnrollStep == 0 && angleY.abs() < 12.0) {
+        if (_currentEnrollStep == 0 && angleY.abs() < 10.0) {
           angleMatched = true; // Looking straight
-        } else if (_currentEnrollStep == 1 && angleY > 10.0) {
-          angleMatched = true; // Turned Left
-        } else if (_currentEnrollStep == 2 && angleY < -10.0) {
-          angleMatched = true; // Turned Right
+        } else if (_currentEnrollStep == 1 && angleY < -10.0) {
+          angleMatched = true; // Turned Left (User turns to their left)
+        } else if (_currentEnrollStep == 2 && angleY > 10.0) {
+          angleMatched = true; // Turned Right (User turns to their right)
         }
 
         if (angleMatched) {
@@ -564,10 +564,28 @@ class _FaceScanScreenState extends State<FaceScanScreen>
       backgroundColor: Colors.black,
       body: Stack(
         children: [
-          // 1. Camera View
+          // 1. Fullscreen Native Quality Camera View (Aspect-Ratio Preserved)
           if (_isCameraInitialized && _cameraController != null)
-            SizedBox.expand(
-              child: CameraPreview(_cameraController!),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final size = constraints.biggest;
+                final cameraAspect = _cameraController!.value.aspectRatio;
+
+                return SizedBox(
+                  width: size.width,
+                  height: size.height,
+                  child: ClipRect(
+                    child: FittedBox(
+                      fit: BoxFit.cover,
+                      child: SizedBox(
+                        width: size.width,
+                        height: size.width * cameraAspect,
+                        child: CameraPreview(_cameraController!),
+                      ),
+                    ),
+                  ),
+                );
+              },
             )
           else
             Container(
