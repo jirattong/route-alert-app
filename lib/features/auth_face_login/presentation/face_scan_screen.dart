@@ -326,6 +326,12 @@ class _FaceScanScreenState extends State<FaceScanScreen>
 
         if (result.isSuccess && result.matchedUser != null) {
           HapticFeedback.heavyImpact();
+          // Adaptive Learning: Continuous Vector Refinement in background
+          FaceAuthRepository.updateAdaptiveFaceEmbedding(
+            user: result.matchedUser!,
+            scannedEmbedding: fusedEmbedding,
+            similarityScore: result.similarityScore,
+          );
           _showSuccessModal(result.matchedUser!, result.similarityScore);
         } else {
           HapticFeedback.vibrate();

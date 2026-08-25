@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:camera/camera.dart';
@@ -122,5 +123,47 @@ class ImageUtils {
       }
     }
     return tensor;
+  }
+
+  /// CLAHE & Auto-Brightness Balance: Normalizes facial illumination and contrast
+  static img.Image enhanceContrastAndLighting(img.Image srcImage) {
+    double totalLuminance = 0.0;
+    final int numPixels = srcImage.width * srcImage.height;
+    if (numPixels == 0) return srcImage;
+
+    for (int y = 0; y < srcImage.height; y++) {
+      for (int x = 0; x < srcImage.width; x++) {
+        final p = srcImage.getPixel(x, y);
+        final lum = 0.299 * p.r + 0.587 * p.g + 0.114 * p.b;
+        totalLuminance += lum;
+      }
+    }
+
+    final double avgLum = totalLuminance / numPixels;
+    // Calculate adaptive gamma factor based on average scene brightness
+    final double gamma = (avgLum > 0)
+        ? (0.693147 / (-(math.log((avgLum / 255.0).clamp(0.08, 0.92))))).clamp(0.65, 1.45)
+        : 1.0;
+    const double contrastFactor = 1.15;
+
+    final img.Image enhanced = img.Image(width: srcImage.width, height: srcImage.height);
+
+    for (int y = 0; y < srcImage.height; y++) {
+      for (int x = 0; x < srcImage.width; x++) {
+        final p = srcImage.getPixel(x, y);
+
+        double rNorm = math.pow((p.r / 255.0).clamp(0.0, 1.0), gamma).toDouble();
+        double gNorm = math.pow((p.g / 255.0).clamp(0.0, 1.0), gamma).toDouble();
+        double bNorm = math.pow((p.b / 255.0).clamp(0.0, 1.0), gamma).toDouble();
+
+        int r = (((rNorm - 0.5) * contrastFactor + 0.5) * 255.0).round().clamp(0, 255);
+        int g = (((gNorm - 0.5) * contrastFactor + 0.5) * 255.0).round().clamp(0, 255);
+        int b = (((bNorm - 0.5) * contrastFactor + 0.5) * 255.0).round().clamp(0, 255);
+
+        enhanced.setPixelRgb(x, y, r, g, b);
+      }
+    }
+
+    return enhanced;
   }
 }

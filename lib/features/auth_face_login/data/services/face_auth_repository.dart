@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' as math;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../core/ml/face_recognition_service.dart';
@@ -140,6 +141,42 @@ class FaceAuthRepository {
         message: 'ไม่พบใบหน้าที่ตรงกันในระบบ (คะแนนความเหมือน: ${(maxSimilarity * 100).toStringAsFixed(1)}%)',
       );
     }
+  }
+
+  /// Adaptive Biometric Learning: Blends high-confidence scan embeddings into the master vector
+  static Future<void> updateAdaptiveFaceEmbedding({
+    required UserFaceProfile user,
+    required List<double> scannedEmbedding,
+    required double similarityScore,
+  }) async {
+    // Only adapt on high-confidence verified scans (>= 0.88)
+    if (similarityScore < 0.88 || user.faceEmbedding.isEmpty || scannedEmbedding.isEmpty) return;
+    if (user.faceEmbedding.length != scannedEmbedding.length) return;
+
+    final int dim = user.faceEmbedding.length;
+    final List<double> blended = List.filled(dim, 0.0);
+    double sumSq = 0.0;
+
+    for (int i = 0; i < dim; i++) {
+      blended[i] = 0.85 * user.faceEmbedding[i] + 0.15 * scannedEmbedding[i];
+      sumSq += blended[i] * blended[i];
+    }
+
+    final double norm = math.sqrt(sumSq);
+    final List<double> normalized = (norm > 0) ? blended.map((v) => v / norm).toList() : blended;
+
+    final updatedProfile = UserFaceProfile(
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      faceEmbedding: normalized,
+      avatarPath: user.avatarPath,
+      registeredAt: user.registeredAt,
+    );
+
+    // Save locally and sync to Cloud Firestore
+    await registerUser(updatedProfile);
   }
 
   /// Sets current active user session

@@ -30,7 +30,8 @@ class FaceRecognitionService {
 
   /// Extracts normalized Face Feature Embedding Vector from cropped face image
   Future<List<double>> extractFaceEmbedding(img.Image croppedFace) async {
-    final resizedFace = img.copyResize(croppedFace, width: inputSize, height: inputSize);
+    final rawResized = img.copyResize(croppedFace, width: inputSize, height: inputSize);
+    final resizedFace = ImageUtils.enhanceContrastAndLighting(rawResized);
 
     if (_isModelLoaded && _interpreter != null) {
       try {
