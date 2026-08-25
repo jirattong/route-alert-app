@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../core/services/email_otp_service.dart';
+import '../../../core/services/google_auth_service.dart';
 import '../data/models/user_face_profile.dart';
 import '../data/services/face_auth_repository.dart';
 import 'face_scan_screen.dart';
@@ -129,6 +130,138 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
       context,
       MaterialPageRoute(
         builder: (_) => const FaceScanScreen(mode: FaceScanMode.login),
+      ),
+    );
+  }
+
+  void _onGoogleLogin() async {
+    setState(() => _isLoading = true);
+    final result = await GoogleAuthService.signInWithGoogle();
+    setState(() => _isLoading = false);
+
+    if (!mounted) return;
+
+    if (!result.isSuccess) {
+      if (result.message != 'ยกเลิกการเข้าสู่ระบบด้วย Google') {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: Colors.redAccent,
+            content: Text(result.message),
+          ),
+        );
+      }
+      return;
+    }
+
+    // Case 1: Existing Google user with registered Face ID
+    if (!result.isNewUser && result.existingUser != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: const Color(0xFF00A896),
+          content: Text('🎉 เข้าสู่ระบบสำเร็จ ยินดีต้อนรับคุณ ${result.googleName}'),
+        ),
+      );
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const UserTypeScreen()),
+      );
+      return;
+    }
+
+    // Case 2: New Google user without Face ID -> Prompt & Navigate to 3D Face ID Enrollment
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1C1C1E),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            Container(
+              width: 64,
+              height: 64,
+              decoration: const BoxDecoration(
+                color: Color(0xFFE8F8F5),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.face_retouching_natural_rounded,
+                  color: Color(0xFF00A896), size: 36),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'ยินดีต้อนรับคุณ ${result.googleName}!',
+              style: const TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'บัญชี Google (${result.googleEmail}) ยืนยันตัวตนสำเร็จแล้ว\nเพื่อความปลอดภัยสูงสุด กรุณาสแกนใบหน้า Face ID 3 มิติเพื่อผูกบัญชี',
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white70, fontSize: 13),
+            ),
+            const SizedBox(height: 22),
+            SizedBox(
+              width: double.infinity,
+              height: 48,
+              child: ElevatedButton.icon(
+                icon: const Icon(Icons.camera_alt_rounded, color: Colors.white, size: 18),
+                label: const Text(
+                  'เริ่มสแกนใบหน้า (Face ID)',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
+                  ),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF00A896),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(24)),
+                ),
+                onPressed: () async {
+                  Navigator.pop(ctx);
+                  final embeddingResult = await Navigator.push<List<double>>(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => FaceScanScreen(
+                        mode: FaceScanMode.register,
+                        registrationName: result.googleName,
+                        registrationEmail: result.googleEmail,
+                        registrationRole: 'driver',
+                      ),
+                    ),
+                  );
+
+                  if (embeddingResult != null && embeddingResult.isNotEmpty) {
+                    final profile = UserFaceProfile(
+                      id: result.googleEmail!,
+                      email: result.googleEmail!,
+                      name: result.googleName!,
+                      role: 'driver',
+                      faceEmbedding: embeddingResult,
+                      avatarPath: result.googlePhotoUrl,
+                      registeredAt: DateTime.now(),
+                    );
+                    await FaceAuthRepository.registerUser(profile);
+                    if (mounted) {
+                      Navigator.pushReplacement(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => const UserTypeScreen()),
+                      );
+                    }
+                  }
+                },
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -582,6 +715,8 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
         ),
         const SizedBox(height: 20),
         _buildFaceLoginButton(),
+        const SizedBox(height: 12),
+        _buildGoogleSignInButton(),
       ],
     );
   }
@@ -682,6 +817,26 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
           color: const Color(0xFF00A896),
           onPressed: _isLoading ? () {} : _onRegister,
         ),
+        const SizedBox(height: 14),
+        Row(
+          children: [
+            Expanded(child: Divider(color: Colors.grey.shade400, thickness: 1)),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Text(
+                'หรือลงทะเบียนด้วย Google',
+                style: TextStyle(
+                  color: Colors.grey.shade600,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+            Expanded(child: Divider(color: Colors.grey.shade400, thickness: 1)),
+          ],
+        ),
+        const SizedBox(height: 14),
+        _buildGoogleSignInButton(),
       ],
     );
   }
@@ -1088,6 +1243,66 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
                     fontSize: 14.5,
                     fontWeight: FontWeight.bold,
                     color: Color(0xFF00A896),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGoogleSignInButton() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.grey.shade300),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: _onGoogleLogin,
+          borderRadius: BorderRadius.circular(20),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 16),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  width: 24,
+                  height: 24,
+                  decoration: const BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Colors.white,
+                  ),
+                  child: const Center(
+                    child: Text(
+                      'G',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w900,
+                        color: Color(0xFF4285F4),
+                        fontFamily: 'Roboto',
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                const Text(
+                  'เข้าสู่ระบบด้วย Google',
+                  style: TextStyle(
+                    fontSize: 14.5,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black87,
                   ),
                 ),
               ],
