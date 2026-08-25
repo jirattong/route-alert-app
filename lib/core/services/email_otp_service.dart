@@ -53,14 +53,16 @@ class EmailOtpService {
       debugPrint('[Resend OTP] Successfully dispatched OTP $otpCode to $cleanEmail');
       return EmailOtpResult(
         isSuccess: true,
-        message: 'ส่งรหัส OTP 6 หลักไปยัง $cleanEmail เรียบร้อยแล้ว',
+        message: '🎉 ส่งรหัส OTP 6 หลักไปยัง $cleanEmail เรียบร้อยแล้ว',
         debugOtpCode: otpCode,
       );
     } else {
       debugPrint('[Resend OTP Fallback] Saved OTP $otpCode locally for $cleanEmail');
       return EmailOtpResult(
         isSuccess: true,
-        message: 'ส่งรหัส OTP 6 หลักไปยัง $cleanEmail สำเร็จ',
+        message: cleanEmail == 'yuttapatandy@gmail.com'
+            ? 'ส่งรหัส OTP เรียบร้อยแล้ว'
+            : '💡 บัญชี Resend ส่งเมลตรงเข้า yuttapatandy@gmail.com (รหัสของคุณคือ $otpCode)',
         debugOtpCode: otpCode,
       );
     }
