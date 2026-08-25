@@ -62,17 +62,20 @@ class _FaceScanScreenState extends State<FaceScanScreen>
   final AntiSpoofingService _antiSpoofingService = AntiSpoofingService();
   final FaceRecognitionService _recognitionService = FaceRecognitionService();
 
-  // Multi-Angle Registration: 0 = Front, 1 = Left, 2 = Right
-  int _currentEnrollStep = 0;
+  // Multi-Angle Registration with Strict Progressive Hold (4 frames per angle)
+  int _currentEnrollStep = 0; // 0 = Front, 1 = Left, 2 = Right
+  double _stepProgress = 0.0; // 0.0 -> 1.0 for the current angle
+  bool _isTransitioningStep = false;
+  final List<List<double>> _currentStepEmbeddings = [];
   final List<List<double>> _collectedEmbeddings = [];
 
   // Instant Attention & Multi-frame Login
-  bool _challengePassed = false;
   final List<List<double>> _loginFrameEmbeddings = [];
   double _scanProgress = 0.0;
 
-  String _statusText = 'วางใบหน้าให้อยู่ในกรอบ';
-  Color _statusColor = Colors.white;
+  String _statusTitle = 'มองตรงมาที่กล้อง';
+  String _statusDetail = 'วางใบหน้าให้อยู่ในกรอบเพื่อเริ่มสแกน';
+  Color _statusColor = const Color(0xFF00A896);
 
   late AnimationController _animController;
   late Animation<double> _scanLineAnimation;
@@ -114,13 +117,15 @@ class _FaceScanScreenState extends State<FaceScanScreen>
       } else {
         setState(() {
           _hasCameraError = true;
-          _statusText = 'ไม่พบกล้อง (เลือกรูปภาพทดสอบแทนได้)';
+          _statusTitle = 'ไม่พบกล้อง';
+          _statusDetail = 'สามารถเลือกรูปภาพทดสอบด้านล่างได้';
         });
       }
     } catch (e) {
       setState(() {
         _hasCameraError = true;
-        _statusText = 'ไม่สามารถเปิดกล้องได้: $e';
+        _statusTitle = 'เปิดกล้องไม่สำเร็จ';
+        _statusDetail = '$e';
       });
     }
   }
@@ -149,7 +154,8 @@ class _FaceScanScreenState extends State<FaceScanScreen>
     } catch (e) {
       setState(() {
         _hasCameraError = true;
-        _statusText = 'เปิดใช้งานกล้องไม่สำเร็จ: $e';
+        _statusTitle = 'เปิดกล้องไม่สำเร็จ';
+        _statusDetail = '$e';
       });
     }
   }
@@ -157,7 +163,11 @@ class _FaceScanScreenState extends State<FaceScanScreen>
   void _resetScanState() {
     _isProcessingFrame = false;
     _isAuthenticating = false;
-    _challengePassed = false;
+    _isTransitioningStep = false;
+    _currentEnrollStep = 0;
+    _stepProgress = 0.0;
+    _currentStepEmbeddings.clear();
+    _collectedEmbeddings.clear();
     _loginFrameEmbeddings.clear();
     _scanProgress = 0.0;
     _antiSpoofingService.resetChallenge();
@@ -168,31 +178,30 @@ class _FaceScanScreenState extends State<FaceScanScreen>
     if (widget.mode == FaceScanMode.register) {
       switch (_currentEnrollStep) {
         case 0:
-          _statusText = 'มุมที่ 1/3: มองตรงไปยังกล้อง';
-          _statusColor = Colors.white;
+          _statusTitle = '1. มองตรงมาที่กล้อง';
+          _statusDetail = 'ถือโทรศัพท์นิ่งๆ ในระดับสายตา';
+          _statusColor = const Color(0xFF00A896);
           break;
         case 1:
-          _statusText = 'มุมที่ 2/3: หันศีรษะไปทางซ้ายช้าๆ 👈';
+          _statusTitle = '2. หันหน้าไปทางซ้าย 15-20°';
+          _statusDetail = 'ค่อยๆ เอียงศีรษะไปทางซ้ายแล้วค้างไว้';
           _statusColor = const Color(0xFF60A5FA);
           break;
         case 2:
-          _statusText = 'มุมที่ 3/3: หันศีรษะไปทางขวาช้าๆ 👉';
+          _statusTitle = '3. หันหน้าไปทางขวา 15-20°';
+          _statusDetail = 'ค่อยๆ เอียงศีรษะไปทางขวาแล้วค้างไว้';
           _statusColor = const Color(0xFF60A5FA);
           break;
       }
     } else {
-      if (!_challengePassed) {
-        _statusText = 'วางใบหน้าให้อยู่ในกรอบ';
-        _statusColor = Colors.white;
-      } else {
-        _statusText = 'กำลังสแกน Face ID (${(_scanProgress * 100).toInt()}%)...';
-        _statusColor = const Color(0xFF34D399);
-      }
+      _statusTitle = 'วางใบหน้าให้อยู่ในกรอบ';
+      _statusDetail = 'มองตรงมายังหน้าจอเพื่อปลดล็อก Face ID';
+      _statusColor = const Color(0xFF00A896);
     }
   }
 
   void _processCameraFrame(CameraImage cameraImage) async {
-    if (_isProcessingFrame || _isAuthenticating || !mounted) return;
+    if (_isProcessingFrame || _isAuthenticating || _isTransitioningStep || !mounted) return;
     _isProcessingFrame = true;
 
     try {
@@ -210,12 +219,15 @@ class _FaceScanScreenState extends State<FaceScanScreen>
       // 1. Check face presence
       if (faces.isEmpty) {
         setState(() {
-          _statusText = widget.mode == FaceScanMode.register
-              ? 'วางใบหน้าให้อยู่ในกรอบเพื่อเริ่มลงทะเบียน'
-              : 'วางใบหน้าให้อยู่ในกรอบ';
+          _statusDetail = 'กรุณาวางใบหน้าให้อยู่กึ่งกลางกรอบ';
           _statusColor = Colors.white70;
-          _scanProgress = 0.0;
-          _loginFrameEmbeddings.clear();
+          if (widget.mode == FaceScanMode.login) {
+            _scanProgress = 0.0;
+            _loginFrameEmbeddings.clear();
+          } else {
+            _stepProgress = 0.0;
+            _currentStepEmbeddings.clear();
+          }
         });
         _isProcessingFrame = false;
         return;
@@ -223,10 +235,15 @@ class _FaceScanScreenState extends State<FaceScanScreen>
 
       if (faces.length > 1) {
         setState(() {
-          _statusText = 'กรุณาอยู่หน้ากล้องคนเดียว';
+          _statusDetail = 'ตรวจพบมากกว่า 1 ใบหน้า กรุณาอยู่หน้ากล้องคนเดียว';
           _statusColor = const Color(0xFFFBBF24);
-          _scanProgress = 0.0;
-          _loginFrameEmbeddings.clear();
+          if (widget.mode == FaceScanMode.login) {
+            _scanProgress = 0.0;
+            _loginFrameEmbeddings.clear();
+          } else {
+            _stepProgress = 0.0;
+            _currentStepEmbeddings.clear();
+          }
         });
         _isProcessingFrame = false;
         return;
@@ -242,14 +259,14 @@ class _FaceScanScreenState extends State<FaceScanScreen>
 
       if (faceRatio < 0.20) {
         setState(() {
-          _statusText = 'ขยับเข้ามาใกล้ขึ้นอีกนิด';
+          _statusDetail = 'ขยับเข้ามาใกล้ขึ้นอีกนิด (ประมาณ 1 ช่วงแขน)';
           _statusColor = const Color(0xFFFBBF24);
         });
         _isProcessingFrame = false;
         return;
       } else if (faceRatio > 0.88) {
         setState(() {
-          _statusText = 'ถอยห่างออกมาอีกนิด';
+          _statusDetail = 'ถอยห่างออกมาอีกนิดให้เห็นใบหน้าเต็มกรอบ';
           _statusColor = const Color(0xFFFBBF24);
         });
         _isProcessingFrame = false;
@@ -268,7 +285,7 @@ class _FaceScanScreenState extends State<FaceScanScreen>
 
       if (!liveness.isReal) {
         setState(() {
-          _statusText = liveness.message;
+          _statusDetail = liveness.message;
           _statusColor = const Color(0xFFF87171);
         });
         _isProcessingFrame = false;
@@ -281,14 +298,13 @@ class _FaceScanScreenState extends State<FaceScanScreen>
 
         if (!isAttentive) {
           setState(() {
-            _statusText = 'มองตรงมายังหน้าจอ';
+            _statusTitle = 'มองตรงมาที่กล้อง';
+            _statusDetail = 'กรุณามองตรงมายังหน้าจอ';
             _statusColor = Colors.white;
           });
           _isProcessingFrame = false;
           return;
         }
-
-        _challengePassed = true;
 
         final embedding =
             await _recognitionService.extractFaceEmbedding(croppedFace);
@@ -298,7 +314,8 @@ class _FaceScanScreenState extends State<FaceScanScreen>
 
         setState(() {
           _scanProgress = currentProgress;
-          _statusText = 'กำลังสแกน Face ID...';
+          _statusTitle = 'กำลังสแกน Face ID';
+          _statusDetail = 'กำลังวิเคราะห์อัตลักษณ์ 3D (${(currentProgress * 100).toInt()}%)...';
           _statusColor = const Color(0xFF34D399);
         });
 
@@ -332,54 +349,123 @@ class _FaceScanScreenState extends State<FaceScanScreen>
           _showErrorModal(result.message);
         }
       }
-      // ================= REGISTER MODE =================
+      // ================= REGISTER MODE (STRICT PROGRESSIVE 3-ANGLE HOLD) =================
       else {
         final double angleY = face.headEulerAngleY ?? 0.0;
 
-        bool angleMatched = false;
-        if (_currentEnrollStep == 0 && angleY.abs() < 10.0) {
-          angleMatched = true;
-        } else if (_currentEnrollStep == 1 && angleY < -10.0) {
-          angleMatched = true;
-        } else if (_currentEnrollStep == 2 && angleY > 10.0) {
-          angleMatched = true;
+        bool inTargetAngle = false;
+        String promptHint = '';
+
+        if (_currentEnrollStep == 0) {
+          // Angle 1: Front Straight (Strict Yaw <= 8.0 degrees)
+          if (angleY.abs() <= 8.5) {
+            inTargetAngle = true;
+            promptHint = 'ค้างไว้นิ่งๆ กำลังบันทึกมิติหน้าตรง...';
+          } else {
+            promptHint = 'มองตรงมาที่กล้อง (ปรับหน้าให้ตรง)';
+          }
+        } else if (_currentEnrollStep == 1) {
+          // Angle 2: Turned Left (Yaw between -12.0 and -38.0)
+          if (angleY <= -11.0 && angleY >= -38.0) {
+            inTargetAngle = true;
+            promptHint = 'มุมซ้ายถูกต้อง! ค้างไว้นิ่งๆ...';
+          } else if (angleY > -11.0) {
+            promptHint = 'หันศีรษะไปทางซ้ายอีกนิด 👈';
+          } else {
+            promptHint = 'หันซ้ายมากเกินไป ค่อยๆ ปรับกลับมานิดนึง';
+          }
+        } else if (_currentEnrollStep == 2) {
+          // Angle 3: Turned Right (Yaw between +11.0 and +38.0)
+          if (angleY >= 11.0 && angleY <= 38.0) {
+            inTargetAngle = true;
+            promptHint = 'มุมขวาถูกต้อง! ค้างไว้นิ่งๆ...';
+          } else if (angleY < 11.0) {
+            promptHint = 'หันศีรษะไปทางขวาอีกนิด 👉';
+          } else {
+            promptHint = 'หันขวามากเกินไป ค่อยๆ ปรับกลับมานิดนึง';
+          }
         }
 
-        if (angleMatched) {
-          HapticFeedback.mediumImpact();
+        if (inTargetAngle) {
+          // Collect 4 consecutive steady high-precision frames for this angle
           final embedding =
               await _recognitionService.extractFaceEmbedding(croppedFace);
-          _collectedEmbeddings.add(embedding);
-          _currentEnrollStep++;
+          _currentStepEmbeddings.add(embedding);
 
-          if (_currentEnrollStep < 3) {
-            setState(() {
-              _updateInstructionText();
-            });
-            await Future.delayed(const Duration(milliseconds: 700));
-            _isProcessingFrame = false;
+          final progress = (_currentStepEmbeddings.length / 4.0).clamp(0.0, 1.0);
+
+          setState(() {
+            _stepProgress = progress;
+            _statusDetail = '$promptHint (${(progress * 100).toInt()}%)';
+            _statusColor = const Color(0xFF34D399);
+          });
+
+          HapticFeedback.selectionClick();
+
+          // Finished 4 frames for current angle?
+          if (_currentStepEmbeddings.length >= 4) {
+            HapticFeedback.mediumImpact();
+            final angleCentroid =
+                FaceRecognitionService.combineMultiAngleEmbeddings(_currentStepEmbeddings);
+            _collectedEmbeddings.add(angleCentroid);
+            _currentStepEmbeddings.clear();
+            _stepProgress = 0.0;
+
+            if (_currentEnrollStep < 2) {
+              // Pause and show transition
+              _isTransitioningStep = true;
+              final completedStep = _currentEnrollStep + 1;
+              setState(() {
+                _statusTitle = '✅ มุมที่ $completedStep บันทึกสำเร็จ!';
+                _statusDetail = completedStep == 1
+                    ? 'เตรียมพร้อมสำหรับขั้นตอนที่ 2: หันหน้าไปทางซ้าย'
+                    : 'เตรียมพร้อมสำหรับขั้นตอนที่ 3: หันหน้าไปทางขวา';
+                _statusColor = const Color(0xFF34D399);
+              });
+
+              await Future.delayed(const Duration(milliseconds: 1400));
+              if (!mounted) return;
+
+              _currentEnrollStep++;
+              _isTransitioningStep = false;
+              setState(() {
+                _updateInstructionText();
+              });
+              _isProcessingFrame = false;
+            } else {
+              // Completed all 3 angles! Master 3D Vector Fusion (12 Frames total)
+              _isAuthenticating = true;
+              final masterEmbedding =
+                  FaceRecognitionService.combineMultiAngleEmbeddings(
+                      _collectedEmbeddings);
+
+              final profile = UserFaceProfile(
+                id: widget.effectiveEmail,
+                name: widget.effectiveName,
+                email: widget.effectiveEmail,
+                role: widget.effectiveRole,
+                faceEmbedding: masterEmbedding,
+                registeredAt: DateTime.now(),
+              );
+
+              await FaceAuthRepository.registerUser(profile);
+
+              if (!mounted) return;
+              HapticFeedback.heavyImpact();
+              _showSuccessModal(profile, 1.0, isNewRegistration: true);
+            }
           } else {
-            _isAuthenticating = true;
-            final masterEmbedding =
-                FaceRecognitionService.combineMultiAngleEmbeddings(
-                    _collectedEmbeddings);
-
-            final profile = UserFaceProfile(
-              id: widget.effectiveEmail,
-              name: widget.effectiveName,
-              email: widget.effectiveEmail,
-              role: widget.effectiveRole,
-              faceEmbedding: masterEmbedding,
-              registeredAt: DateTime.now(),
-            );
-
-            await FaceAuthRepository.registerUser(profile);
-
-            if (!mounted) return;
-            HapticFeedback.heavyImpact();
-            _showSuccessModal(profile, 1.0, isNewRegistration: true);
+            await Future.delayed(const Duration(milliseconds: 120));
+            _isProcessingFrame = false;
           }
         } else {
+          // Angle lost or moving: gently reset progress
+          setState(() {
+            _statusDetail = promptHint;
+            _statusColor = Colors.white70;
+            _stepProgress = 0.0;
+            _currentStepEmbeddings.clear();
+          });
           _isProcessingFrame = false;
         }
       }
@@ -405,19 +491,19 @@ class _FaceScanScreenState extends State<FaceScanScreen>
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              width: 68,
-              height: 68,
+              width: 72,
+              height: 72,
               decoration: const BoxDecoration(
                 color: Color(0xFF34D399),
                 shape: BoxShape.circle,
               ),
               child: const Icon(Icons.check_rounded,
-                  color: Colors.black, size: 44),
+                  color: Colors.black, size: 48),
             ),
             const SizedBox(height: 18),
             Text(
               isNewRegistration
-                  ? 'บันทึกใบหน้า 3D สำเร็จ!'
+                  ? 'บันทึกใบหน้า 3D ครบถ้วนแล้ว!'
                   : 'ปลดล็อก Face ID สำเร็จ',
               style: const TextStyle(
                 fontSize: 22,
@@ -437,17 +523,17 @@ class _FaceScanScreenState extends State<FaceScanScreen>
             ),
             const SizedBox(height: 16),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               decoration: BoxDecoration(
                 color: Colors.white.withValues(alpha: 0.08),
                 borderRadius: BorderRadius.circular(16),
               ),
               child: Text(
                 isNewRegistration
-                    ? 'บันทึกมิติ 3 มุมมองครบถ้วน • อีเมล: ${user.email}'
+                    ? 'บันทึก 12 เฟรม 3 มิติสมบูรณ์ • อีเมล: ${user.email}'
                     : 'AI Match ${(score * 100).toStringAsFixed(1)}% • ${user.role.toUpperCase()}',
                 style: const TextStyle(
-                  fontSize: 12,
+                  fontSize: 12.5,
                   fontWeight: FontWeight.w600,
                   color: Color(0xFF34D399),
                 ),
@@ -702,7 +788,9 @@ class _FaceScanScreenState extends State<FaceScanScreen>
                 painter: AppleFaceIdCleanPainter(
                   statusColor: _statusColor,
                   pulseScale: _pulseAnimation.value,
-                  scanProgress: _scanProgress,
+                  scanProgress: widget.mode == FaceScanMode.register
+                      ? _stepProgress
+                      : _scanProgress,
                 ),
               );
             },
@@ -738,7 +826,7 @@ class _FaceScanScreenState extends State<FaceScanScreen>
             },
           ),
 
-          // 4. Prominent Top Header Bar with Big Registration Guidance
+          // 4. Prominent Top Header Bar with Giant Guidance Banner
           SafeArea(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -753,7 +841,7 @@ class _FaceScanScreenState extends State<FaceScanScreen>
                         onTap: () => Navigator.pop(context),
                       ),
 
-                      // Title (Apple Style)
+                      // Title
                       Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
@@ -763,10 +851,10 @@ class _FaceScanScreenState extends State<FaceScanScreen>
                           Text(
                             widget.mode == FaceScanMode.login
                                 ? 'Face ID Login'
-                                : 'ลงทะเบียน Face ID',
+                                : 'ลงทะเบียน Face ID (3D)',
                             style: const TextStyle(
                               color: Colors.white,
-                              fontSize: 19,
+                              fontSize: 18,
                               fontWeight: FontWeight.bold,
                               letterSpacing: -0.3,
                             ),
@@ -785,28 +873,29 @@ class _FaceScanScreenState extends State<FaceScanScreen>
                     ],
                   ),
 
-                  // Big Prominent Registration Guidance Banner
+                  // Giant Prominent Registration Guidance Banner
                   if (widget.mode == FaceScanMode.register)
                     Container(
-                      margin: const EdgeInsets.only(top: 14),
+                      margin: const EdgeInsets.only(top: 12),
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 18, vertical: 14),
+                          horizontal: 16, vertical: 14),
                       decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.65),
+                        color: Colors.black.withValues(alpha: 0.72),
                         borderRadius: BorderRadius.circular(24),
                         border: Border.all(
-                            color: const Color(0xFF00A896).withValues(alpha: 0.6),
+                            color: _statusColor.withValues(alpha: 0.6),
                             width: 1.5),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.4),
-                            blurRadius: 16,
+                            color: Colors.black.withValues(alpha: 0.5),
+                            blurRadius: 18,
                             offset: const Offset(0, 4),
                           ),
                         ],
                       ),
                       child: Column(
                         children: [
+                          // 3-Step Badges
                           Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
@@ -818,35 +907,53 @@ class _FaceScanScreenState extends State<FaceScanScreen>
                               _buildStepArrow(),
                               _buildBigStepChip(
                                 1,
-                                '2. หันซ้าย',
+                                '2. หันซ้าย 👈',
                                 Icons.arrow_back_rounded,
                               ),
                               _buildStepArrow(),
                               _buildBigStepChip(
                                 2,
-                                '3. หันขวา',
+                                '3. หันขวา 👉',
                                 Icons.arrow_forward_rounded,
                               ),
                             ],
                           ),
-                          const SizedBox(height: 10),
+                          const SizedBox(height: 12),
+                          // Big Action Text
                           Text(
-                            _getBigStepTitle(),
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 16,
+                            _statusTitle,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: _statusColor,
+                              fontSize: 19,
                               fontWeight: FontWeight.bold,
+                              letterSpacing: -0.3,
                             ),
                           ),
-                          const SizedBox(height: 2),
+                          const SizedBox(height: 4),
                           Text(
-                            'ผู้ลงทะเบียน: ${widget.effectiveName} (${widget.effectiveEmail})',
+                            _statusDetail,
+                            textAlign: TextAlign.center,
                             style: const TextStyle(
-                              color: Colors.white60,
-                              fontSize: 12,
+                              color: Colors.white,
+                              fontSize: 13.5,
+                              fontWeight: FontWeight.w500,
                             ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 10),
+                          // Hold Progress Bar for Current Step
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(6),
+                            child: SizedBox(
+                              height: 6,
+                              width: double.infinity,
+                              child: LinearProgressIndicator(
+                                value: _stepProgress,
+                                backgroundColor: Colors.white12,
+                                valueColor: AlwaysStoppedAnimation<Color>(
+                                    _statusColor),
+                              ),
+                            ),
                           ),
                         ],
                       ),
@@ -856,42 +963,43 @@ class _FaceScanScreenState extends State<FaceScanScreen>
             ),
           ),
 
-          // 5. Floating Clean Apple Status Pill
-          Positioned(
-            left: 24,
-            right: 24,
-            bottom: MediaQuery.of(context).size.height * 0.16,
-            child: Center(
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(24),
-                child: BackdropFilter(
-                  filter: ui.ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 22, vertical: 12),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.40),
-                      borderRadius: BorderRadius.circular(24),
-                      border: Border.all(
-                        color: _statusColor.withValues(alpha: 0.35),
-                        width: 1.2,
+          // 5. Floating Status Pill for Login Mode
+          if (widget.mode == FaceScanMode.login)
+            Positioned(
+              left: 24,
+              right: 24,
+              bottom: MediaQuery.of(context).size.height * 0.16,
+              child: Center(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(24),
+                  child: BackdropFilter(
+                    filter: ui.ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 22, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.40),
+                        borderRadius: BorderRadius.circular(24),
+                        border: Border.all(
+                          color: _statusColor.withValues(alpha: 0.35),
+                          width: 1.2,
+                        ),
                       ),
-                    ),
-                    child: Text(
-                      _statusText,
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: _statusColor,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 15,
-                        letterSpacing: -0.2,
+                      child: Text(
+                        _statusDetail,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: _statusColor,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 15,
+                          letterSpacing: -0.2,
+                        ),
                       ),
                     ),
                   ),
                 ),
               ),
             ),
-          ),
 
           // 6. Minimal Bottom Fallback Button
           Positioned(
@@ -921,19 +1029,6 @@ class _FaceScanScreenState extends State<FaceScanScreen>
         ],
       ),
     );
-  }
-
-  String _getBigStepTitle() {
-    switch (_currentEnrollStep) {
-      case 0:
-        return '👁️ ขั้นตอนที่ 1: มองตรงไปยังกล้อง';
-      case 1:
-        return '👈 ขั้นตอนที่ 2: หันศีรษะไปทางซ้ายช้าๆ';
-      case 2:
-        return '👉 ขั้นตอนที่ 3: หันศีรษะไปทางขวาช้าๆ';
-      default:
-        return 'กำลังประมวลผลข้อมูลใบหน้า 3D...';
-    }
   }
 
   Widget _buildGlassIconButton(
@@ -969,8 +1064,8 @@ class _FaceScanScreenState extends State<FaceScanScreen>
     Color textColor = Colors.white54;
 
     if (isCurrent) {
-      bgColor = const Color(0xFF00A896).withValues(alpha: 0.35);
-      borderColor = const Color(0xFF00A896);
+      bgColor = _statusColor.withValues(alpha: 0.35);
+      borderColor = _statusColor;
       textColor = Colors.white;
     } else if (isDone) {
       bgColor = const Color(0xFF34D399).withValues(alpha: 0.25);
@@ -1009,7 +1104,7 @@ class _FaceScanScreenState extends State<FaceScanScreen>
 
   Widget _buildStepArrow() {
     return const Padding(
-      padding: EdgeInsets.symmetric(horizontal: 4),
+      padding: EdgeInsets.symmetric(horizontal: 3),
       child: Icon(Icons.arrow_forward_ios_rounded,
           color: Colors.white24, size: 10),
     );
