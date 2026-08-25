@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../core/services/email_otp_service.dart';
 import '../../../core/services/google_auth_service.dart';
+import '../../../core/widgets/google_logo.dart';
 import '../data/models/user_face_profile.dart';
 import '../data/services/face_auth_repository.dart';
 import 'face_scan_screen.dart';
@@ -141,18 +142,22 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
 
     if (!mounted) return;
 
+    if (result.requiresManualInput) {
+      _showGoogleInputModal();
+      return;
+    }
+
     if (!result.isSuccess) {
       if (result.message != 'ยกเลิกการเข้าสู่ระบบด้วย Google') {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            backgroundColor: Colors.redAccent,
-            content: Text(result.message),
-          ),
-        );
+        _showGoogleInputModal();
       }
       return;
     }
 
+    _handleGoogleUser(result);
+  }
+
+  void _handleGoogleUser(GoogleAuthResult result) async {
     // Case 1: Existing Google user with registered Face ID
     if (!result.isNewUser && result.existingUser != null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -258,6 +263,109 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
                     }
                   }
                 },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showGoogleInputModal() {
+    final googleEmailCtrl = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1C1C1E),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            Container(
+              width: 58,
+              height: 58,
+              padding: const EdgeInsets.all(12),
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                shape: BoxShape.circle,
+              ),
+              child: const GoogleLogo(size: 34),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Sign in with Google',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'กรุณาระบุบัญชี Google ของคุณเพื่อดำเนินการต่อ',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.white70, fontSize: 13),
+            ),
+            const SizedBox(height: 18),
+            Container(
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: Colors.white24),
+              ),
+              child: TextField(
+                controller: googleEmailCtrl,
+                keyboardType: TextInputType.emailAddress,
+                style: const TextStyle(color: Colors.white, fontSize: 14),
+                decoration: const InputDecoration(
+                  prefixIcon: Icon(Icons.email_outlined, color: Colors.white60),
+                  hintText: 'yourname@gmail.com',
+                  hintStyle: TextStyle(color: Colors.white38),
+                  contentPadding:
+                      EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  border: InputBorder.none,
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              height: 48,
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF4285F4),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(24)),
+                ),
+                onPressed: () async {
+                  final email = googleEmailCtrl.text.trim();
+                  if (email.isEmpty || !email.contains('@')) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        backgroundColor: Colors.redAccent,
+                        content: Text('⚠️ กรุณากรอกอีเมล Google ให้ถูกต้อง'),
+                      ),
+                    );
+                    return;
+                  }
+                  Navigator.pop(ctx);
+                  setState(() => _isLoading = true);
+                  final processed = await GoogleAuthService.processGoogleUser(
+                    email: email,
+                    name: email.split('@').first,
+                  );
+                  setState(() => _isLoading = false);
+                  if (mounted) _handleGoogleUser(processed);
+                },
+                child: const Text(
+                  'เข้าสู่ระบบด้วย Google',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
+                  ),
+                ),
               ),
             ),
           ],
@@ -1317,32 +1425,14 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
         child: InkWell(
           onTap: _onGoogleLogin,
           borderRadius: BorderRadius.circular(20),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 16),
+          child: const Padding(
+            padding: EdgeInsets.symmetric(vertical: 13, horizontal: 16),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Container(
-                  width: 24,
-                  height: 24,
-                  decoration: const BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: Colors.white,
-                  ),
-                  child: const Center(
-                    child: Text(
-                      'G',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w900,
-                        color: Color(0xFF4285F4),
-                        fontFamily: 'Roboto',
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                const Text(
+                GoogleLogo(size: 20),
+                SizedBox(width: 10),
+                Text(
                   'เข้าสู่ระบบด้วย Google',
                   style: TextStyle(
                     fontSize: 14.5,
