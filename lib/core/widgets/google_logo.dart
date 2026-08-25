@@ -8,9 +8,13 @@ class GoogleLogo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return CustomPaint(
-      size: Size(size, size),
-      painter: _GoogleLogoPainter(),
+    return SizedBox(
+      width: size,
+      height: size,
+      child: CustomPaint(
+        size: Size(size, size),
+        painter: _GoogleLogoPainter(),
+      ),
     );
   }
 }
@@ -19,6 +23,7 @@ class _GoogleLogoPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final double s = size.width;
+    if (s <= 0) return;
     final double radius = s / 2;
     final center = Offset(radius, radius);
 

@@ -14,11 +14,13 @@ void main() async {
     debugPrint('DotEnv load warning: $e');
   }
 
-  // 2. Initialize Firebase with dynamic options from .env
+  // 2. Initialize Firebase safely without crashing or hanging UI
   try {
-    await Firebase.initializeApp(
-      options: DefaultFirebaseOptions.currentPlatform,
-    );
+    if (Firebase.apps.isEmpty) {
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
+    }
   } catch (e) {
     debugPrint('Firebase init error: $e');
   }
