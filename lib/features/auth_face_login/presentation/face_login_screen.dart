@@ -2,12 +2,10 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../core/services/email_otp_service.dart';
-import '../../agency/presentation/agency_main_screen.dart';
-import '../../ambulance/presentation/ambulance_main_screen.dart';
-import '../../driver_radar/presentation/driver_main_screen.dart';
 import '../data/models/user_face_profile.dart';
 import '../data/services/face_auth_repository.dart';
 import 'face_scan_screen.dart';
+import 'user_type_screen.dart';
 
 class FaceLoginScreen extends StatefulWidget {
   const FaceLoginScreen({super.key});
@@ -21,6 +19,9 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
   bool obscurePassword = true;
   bool obscureRePassword = true;
   bool _isLoading = false;
+
+  // Selected Role for Registration ('driver', 'ambulance', 'agency')
+  String _selectedRole = 'driver';
 
   // Email OTP Verification State
   bool _isEmailVerified = false;
@@ -114,13 +115,9 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
       await FaceAuthRepository.setCurrentUser(user);
 
       if (!mounted) return;
-      Widget targetScreen = const DriverMainScreen();
-      if (user.role == 'ambulance') targetScreen = const AmbulanceMainScreen();
-      if (user.role == 'agency') targetScreen = const AgencyMainScreen();
-
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (_) => targetScreen),
+        MaterialPageRoute(builder: (_) => const UserTypeScreen()),
       );
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -258,7 +255,7 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
           mode: FaceScanMode.register,
           registrationEmail: email,
           registrationName: name,
-          registrationRole: 'driver',
+          registrationRole: _selectedRole,
         ),
       ),
     );
@@ -373,7 +370,7 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
       id: email,
       email: email,
       name: name,
-      role: 'driver',
+      role: _selectedRole,
       faceEmbedding: _registeredFaceEmbedding!,
       registeredAt: DateTime.now(),
     );
@@ -392,7 +389,7 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
 
     Navigator.pushReplacement(
       context,
-      MaterialPageRoute(builder: (_) => const DriverMainScreen()),
+      MaterialPageRoute(builder: (_) => const UserTypeScreen()),
     );
   }
 
@@ -637,6 +634,9 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
             setState(() => obscureRePassword = !obscureRePassword);
           },
         ),
+        const SizedBox(height: 14),
+        _buildInputLabel('เลือกบทบาทการใช้งาน (Role)'),
+        _buildRoleSelector(),
         const SizedBox(height: 16),
         OutlinedButton.icon(
           onPressed: _isLoading ? null : _onScanFaceForRegistration,
@@ -683,6 +683,71 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
           onPressed: _isLoading ? () {} : _onRegister,
         ),
       ],
+    );
+  }
+
+  Widget _buildRoleSelector() {
+    return Row(
+      children: [
+        _buildRoleChip(
+            'driver', 'ผู้ใช้ทั่วไป', Icons.directions_car_rounded, const Color(0xFF5B9EE1)),
+        const SizedBox(width: 8),
+        _buildRoleChip(
+            'ambulance', 'Ambulance', Icons.airport_shuttle_rounded, const Color(0xFFEB5757)),
+        const SizedBox(width: 8),
+        _buildRoleChip(
+            'agency', 'หน่วยงาน', Icons.local_hospital_rounded, const Color(0xFF00A896)),
+      ],
+    );
+  }
+
+  Widget _buildRoleChip(
+      String roleKey, String label, IconData icon, Color color) {
+    final isSelected = _selectedRole == roleKey;
+    return Expanded(
+      child: GestureDetector(
+        onTap: () {
+          setState(() => _selectedRole = roleKey);
+        },
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+          decoration: BoxDecoration(
+            color: isSelected ? color : Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: isSelected ? color : Colors.grey.shade300,
+              width: isSelected ? 2 : 1,
+            ),
+            boxShadow: isSelected
+                ? [
+                    BoxShadow(
+                      color: color.withValues(alpha: 0.35),
+                      blurRadius: 8,
+                      offset: const Offset(0, 3),
+                    ),
+                  ]
+                : [],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 20, color: isSelected ? Colors.white : color),
+              const SizedBox(height: 4),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  color: isSelected ? Colors.white : Colors.black87,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
