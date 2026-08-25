@@ -66,8 +66,7 @@ class _FaceScanScreenState extends State<FaceScanScreen>
   int _currentEnrollStep = 0;
   final List<List<double>> _collectedEmbeddings = [];
 
-  // Interactive Liveness & Multi-frame Login
-  final LivenessChallenge _currentChallenge = LivenessChallenge.blink;
+  // Instant Attention & Multi-frame Login
   bool _challengePassed = false;
   final List<List<double>> _loginFrameEmbeddings = [];
   double _scanProgress = 0.0;
@@ -183,7 +182,7 @@ class _FaceScanScreenState extends State<FaceScanScreen>
       }
     } else {
       if (!_challengePassed) {
-        _statusText = '👁️ กรุณากะพริบตา 1 ครั้งเพื่อยืนยันบุคคลจริง (Liveness)';
+        _statusText = 'วางใบหน้าให้อยู่ในกรอบเพื่อปลดล็อก Face ID';
         _statusColor = const Color(0xFF00A896);
       } else {
         _statusText = 'กำลังสแกนวิเคราะห์ใบหน้า 3 มิติ (${(_scanProgress * 100).toInt()}%)...';
@@ -276,24 +275,19 @@ class _FaceScanScreenState extends State<FaceScanScreen>
 
       // ================= LOGIN MODE =================
       if (widget.mode == FaceScanMode.login) {
-        // Step A: Interactive Liveness Challenge
-        if (!_challengePassed) {
-          final isChallengeComplete = _antiSpoofingService
-              .evaluateInteractiveChallenge(
-                  face: face, challenge: _currentChallenge);
+        // Step A: Apple Face ID Attention Detection (Natural Direct Gaze + Eyes Open)
+        final isAttentive = _antiSpoofingService.isUserAttentive(face: face);
 
-          if (!isChallengeComplete) {
-            setState(() {
-              _statusText = '👁️ กรุณากะพริบตา 1 ครั้งเพื่อยืนยันบุคคลจริง';
-              _statusColor = const Color(0xFF00A896);
-            });
-            _isProcessingFrame = false;
-            return;
-          } else {
-            HapticFeedback.mediumImpact();
-            _challengePassed = true;
-          }
+        if (!isAttentive) {
+          setState(() {
+            _statusText = 'กรุณามองตรงมายังหน้าจอ';
+            _statusColor = const Color(0xFF00A896);
+          });
+          _isProcessingFrame = false;
+          return;
         }
+
+        _challengePassed = true;
 
         // Step B: Multi-Frame Temporal Fusion (Collect 3 high-quality frames for 100% precision)
         final embedding =
@@ -304,12 +298,12 @@ class _FaceScanScreenState extends State<FaceScanScreen>
 
         setState(() {
           _scanProgress = currentProgress;
-          _statusText = 'กำลังสแกน MobileFaceNet (${(currentProgress * 100).toInt()}%)...';
+          _statusText = 'กำลังสแกน Face ID (${(currentProgress * 100).toInt()}%)...';
           _statusColor = const Color(0xFF52E197);
         });
 
         if (_loginFrameEmbeddings.length < 3) {
-          await Future.delayed(const Duration(milliseconds: 100));
+          await Future.delayed(const Duration(milliseconds: 70));
           _isProcessingFrame = false;
           return;
         }
