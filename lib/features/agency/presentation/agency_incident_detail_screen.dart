@@ -1,13 +1,18 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import '../../../core/models/incident_report.dart';
+import '../../../core/services/incident_service.dart';
 
 class AgencyIncidentDetailScreen extends StatefulWidget {
-  final Map<String, dynamic> incidentData;
+  final IncidentReport? incident;
+  final Map<String, dynamic>? incidentData;
 
   const AgencyIncidentDetailScreen({
     super.key,
-    required this.incidentData,
+    this.incident,
+    this.incidentData,
   });
 
   @override
@@ -17,17 +22,29 @@ class AgencyIncidentDetailScreen extends StatefulWidget {
 
 class _AgencyIncidentDetailScreenState
     extends State<AgencyIncidentDetailScreen> {
-  // ภาพจำลองที่ได้รับมาจากเจ้าหน้าที่รถพยาบาล (ตาม Figma ของคุณ)
-  final List<String> _receivedPhotos = [
-    'https://i.pravatar.cc/300?img=1', // ใช้ placeholder คนจำลองแทน
-    'https://i.pravatar.cc/300?img=5',
-  ];
+  late bool _isPrepared;
+
+  @override
+  void initState() {
+    super.initState();
+    _isPrepared = widget.incident?.isErPrepared ?? widget.incidentData?['isErPrepared'] ?? false;
+  }
 
   @override
   Widget build(BuildContext context) {
+    final String id = widget.incident?.id ?? widget.incidentData?['id'] ?? 'Case #AVCB00021';
+    final String type = widget.incident?.type ?? widget.incidentData?['type'] ?? 'อุบัติเหตุทางรถยนต์';
+    final String severity = widget.incident?.severity ?? widget.incidentData?['severity'] ?? 'วิกฤต (Critical)';
+    final String address = widget.incident?.address ?? widget.incidentData?['location'] ?? 'อ.ฝาง จ.เชียงใหม่';
+    final String vehiclePlate = widget.incident?.assignedAmbulancePlate ?? widget.incidentData?['vehiclePlate'] ?? 'รอจ่ายงาน';
+    final String eta = widget.incident?.eta ?? widget.incidentData?['eta'] ?? '4 นาที';
+    final String desc = widget.incident?.description ?? widget.incidentData?['description'] ?? '-';
+    final String? photoBase64 = widget.incident?.photoBase64;
+
     const LatLng hospitalLocation = LatLng(19.0284, 99.8962);
-    const LatLng ambulanceLocation = LatLng(19.0350, 99.8962);
-    bool isPrepared = widget.incidentData['isErPrepared'] ?? false;
+    final LatLng incidentLocation = widget.incident != null
+        ? LatLng(widget.incident!.latitude, widget.incident!.longitude)
+        : const LatLng(19.0350, 99.8962);
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -35,43 +52,43 @@ class _AgencyIncidentDetailScreenState
         child: Column(
           children: [
             _buildHeader(),
-
             Expanded(
               child: SingleChildScrollView(
                 child: Column(
                   children: [
-                    // --- 1. แผนที่ครึ่งบน ---
+                    // แผนที่เส้นทางนำส่ง รพ.
                     SizedBox(
                       height: 200,
                       child: Stack(
                         children: [
                           FlutterMap(
-                            options: const MapOptions(
-                              initialCenter: ambulanceLocation,
-                              initialZoom: 15.0,
+                            options: MapOptions(
+                              initialCenter: incidentLocation,
+                              initialZoom: 14.5,
                             ),
                             children: [
                               TileLayer(
                                 urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                                userAgentPackageName: 'com.routealert.app',
                               ),
                               PolylineLayer(
                                 polylines: [
                                   Polyline(
-                                    points: [ambulanceLocation, hospitalLocation],
+                                    points: [incidentLocation, hospitalLocation],
                                     strokeWidth: 4.5,
-                                    color: const Color(0xFF69F0AE), // เส้นทางสีเขียว
+                                    color: const Color(0xFF10B981),
                                   ),
                                 ],
                               ),
-                              const MarkerLayer(
+                              MarkerLayer(
                                 markers: [
                                   Marker(
-                                    point: ambulanceLocation,
+                                    point: incidentLocation,
                                     width: 44,
                                     height: 44,
-                                    child: Center(child: Text('🚑', style: TextStyle(fontSize: 26))),
+                                    child: const Center(child: Text('🚑', style: TextStyle(fontSize: 26))),
                                   ),
-                                  Marker(
+                                  const Marker(
                                     point: hospitalLocation,
                                     width: 44,
                                     height: 44,
@@ -99,158 +116,175 @@ class _AgencyIncidentDetailScreenState
                       ),
                     ),
 
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 18),
 
-                    // --- 2. ป้าย Case ID ทรงแคปซูลสีเขียวสว่างตาม Figma ---
+                    // Case ID Capsule Badge
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 10),
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF69F0AE),
+                        color: const Color(0xFF69F0AE).withValues(alpha: 0.8),
                         borderRadius: BorderRadius.circular(25),
                         boxShadow: [
                           BoxShadow(
-                            color: const Color(0xFF69F0AE).withValues(alpha: 0.4),
+                            color: const Color(0xFF69F0AE).withValues(alpha: 0.3),
                             blurRadius: 8,
                             offset: const Offset(0, 3),
                           ),
                         ],
                       ),
                       child: Text(
-                        widget.incidentData['id'] ?? 'Case #AVCB00021',
+                        id,
                         style: const TextStyle(
-                          fontSize: 22,
+                          fontSize: 20,
                           fontWeight: FontWeight.bold,
-                          color: Colors.black87, // ตัวหนังสือดำบนพื้นเขียวสว่าง
+                          color: Colors.black87,
                         ),
                       ),
                     ),
 
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 14),
                     Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 40),
-                      child: Divider(color: Colors.grey.shade400, thickness: 1.5),
+                      padding: const EdgeInsets.symmetric(horizontal: 36),
+                      child: Divider(color: Colors.grey.shade300, thickness: 1),
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 10),
 
-                    // --- 3. รายละเอียดเคส (ข้อความย่อยสีเขียวเข้ม) ---
+                    // รายละเอียดเคส
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 28),
                       child: Column(
                         children: [
                           _buildDetailRow(
-                            labelTH: 'สถานะ',
-                            labelEN: '(Status)',
-                            value: widget.incidentData['status'] ?? 'กำลังเดินทางส่งเคส',
-                            valueColor: const Color(0xFF2E7D32),
+                            labelTH: 'สถานะห้องฉุกเฉิน',
+                            labelEN: '(ER Status)',
+                            value: _isPrepared ? 'เตรียมเตียงและทีมแพทย์เรียบร้อย' : 'กำลังรอยืนยันความพร้อม',
+                            valueColor: _isPrepared ? const Color(0xFF10B981) : const Color(0xFFE65100),
                             isBold: true,
                           ),
                           _buildDetailRow(
                             labelTH: 'ประเภทอุบัติเหตุ',
                             labelEN: '(Type of incident)',
-                            value: widget.incidentData['type'] ?? 'อุบัติเหตุทางรถยนต์',
+                            value: type,
                           ),
                           _buildDetailRow(
                             labelTH: 'ระดับความรุนแรง',
                             labelEN: '(Severity)',
-                            value: widget.incidentData['severity'] ?? 'ปานกลาง',
+                            value: severity,
                           ),
                           _buildDetailRow(
-                            labelTH: 'ความว่าจะถึงที่หมาย', // ตามคำพิมพ์ในรูป Figma
+                            labelTH: 'สถานที่เกิดเหตุ',
+                            labelEN: '(Location)',
+                            value: address,
+                          ),
+                          _buildDetailRow(
+                            labelTH: 'คาดการณ์ถึง รพ.',
                             labelEN: '(Estimated Time of Arrival)',
-                            value: widget.incidentData['eta'] ?? '4 นาที',
+                            value: eta,
+                            valueColor: const Color(0xFFEB5757),
+                            isBold: true,
                           ),
                           _buildDetailRow(
-                            labelTH: 'หมายเลขที่รับหมาย',
-                            labelEN: '(Car Detail)',
-                            value: widget.incidentData['vehiclePlate'] ?? 'กขค123',
+                            labelTH: 'รถกู้ชีพที่รับเคส',
+                            labelEN: '(Assigned Vehicle)',
+                            value: vehiclePlate,
+                            valueColor: const Color(0xFF00A896),
+                            isBold: true,
                           ),
+                          if (desc.isNotEmpty && desc != '-')
+                            _buildDetailRow(
+                              labelTH: 'รายละเอียดเพิ่มเติม',
+                              labelEN: '(Description)',
+                              value: desc,
+                            ),
                         ],
                       ),
                     ),
 
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 14),
 
-                    // --- 4. โซนแสดงรูปภาพ (เฉพาะหน่วยงาน/แพทย์ที่เห็นได้) ---
+                    // รูปถ่ายจากจุดเกิดเหตุ (ส่งจาก Driver SOS)
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 28),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
-                            'รูปภาพ (รูปประกอบไม่มีส่วนเกี่ยวข้อง)',
-                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.black87),
+                          const Row(
+                            children: [
+                              Text('รูปภาพที่ส่งมาจากที่เกิดเหตุ', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+                              SizedBox(width: 4),
+                              Text('(Attached Photos)', style: TextStyle(fontSize: 12, color: Color(0xFF2E7D32), fontWeight: FontWeight.w600)),
+                            ],
                           ),
-                          const Text(
-                            '(Image)',
-                            style: TextStyle(fontSize: 12, color: Color(0xFF2E7D32), fontWeight: FontWeight.w600),
-                          ),
-                          const SizedBox(height: 12),
-                          
-                          // แสดงรูปภาพ 2 รูปแนวนอนแบบใน Figma
-                          Row(
-                            children: _receivedPhotos.map((photoUrl) {
-                              return Expanded(
-                                child: Container(
-                                  height: 180,
-                                  margin: const EdgeInsets.only(right: 8),
-                                  decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(12),
-                                    image: DecorationImage(
-                                      image: NetworkImage(photoUrl),
-                                      fit: BoxFit.cover,
-                                    ),
-                                  ),
-                                ),
-                              );
-                            }).toList(),
-                          ),
+                          const SizedBox(height: 10),
+                          if (photoBase64 != null && photoBase64.isNotEmpty)
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(16),
+                              child: Image.memory(
+                                base64Decode(photoBase64),
+                                height: 180,
+                                width: double.infinity,
+                                fit: BoxFit.cover,
+                              ),
+                            )
+                          else
+                            Container(
+                              height: 100,
+                              width: double.infinity,
+                              decoration: BoxDecoration(
+                                color: Colors.grey.shade100,
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(color: Colors.grey.shade300),
+                              ),
+                              child: const Center(
+                                child: Text('ไม่มีรูปภาพแนบมากับเคสนี้', style: TextStyle(color: Colors.grey, fontSize: 13)),
+                              ),
+                            ),
                         ],
                       ),
                     ),
 
-                    const SizedBox(height: 32),
+                    const SizedBox(height: 28),
 
-                    // --- 5. ปุ่มยืนยัน (สีเขียวสว่างตาม Figma) ---
+                    // ปุ่มยืนยันเตรียมเตียง ER
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 28),
                       child: SizedBox(
                         width: double.infinity,
                         height: 48,
                         child: ElevatedButton(
-                          onPressed: isPrepared
-                              ? null
-                              : () {
-                                  setState(() {
-                                    widget.incidentData['isErPrepared'] = true;
-                                    widget.incidentData['status'] = 'เตรียม ER เรียบร้อย';
-                                  });
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text('✅ ยืนยันการเตรียมเตียงห้องฉุกเฉินแล้ว'),
-                                      backgroundColor: Color(0xFF2E7D32),
-                                    ),
-                                  );
-                                },
+                          onPressed: () async {
+                            final newStatus = !_isPrepared;
+                            setState(() => _isPrepared = newStatus);
+                            final messenger = ScaffoldMessenger.of(context);
+                            await IncidentService().setErPrepared(id, newStatus);
+                            messenger.showSnackBar(
+                              SnackBar(
+                                content: Text(newStatus
+                                    ? '✅ ยืนยันการเตรียมเตียงห้องฉุกเฉิน (ER Ready) สำเร็จ'
+                                    : '⚪ ยกเลิกสถานะเตรียมเตียง'),
+                                backgroundColor: newStatus ? const Color(0xFF10B981) : Colors.black87,
+                              ),
+                            );
+                          },
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF69F0AE),
-                            disabledBackgroundColor: Colors.grey.shade400,
+                            backgroundColor: _isPrepared ? const Color(0xFF10B981) : const Color(0xFF69F0AE),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(24),
                             ),
-                            elevation: isPrepared ? 0 : 2,
+                            elevation: 2,
                           ),
                           child: Text(
-                            isPrepared ? 'ยืนยันรับเคสเรียบร้อย' : 'ยืนยัน',
+                            _isPrepared ? '✓ ยืนยันเตียง ER เรียบร้อยแล้ว' : 'ยืนยันเตียง ER พร้อมรับผู้ป่วย',
                             style: TextStyle(
-                              fontSize: 18,
+                              fontSize: 16,
                               fontWeight: FontWeight.bold,
-                              color: isPrepared ? Colors.white : Colors.black87,
+                              color: _isPrepared ? Colors.white : Colors.black87,
                             ),
                           ),
                         ),
                       ),
                     ),
-                    const SizedBox(height: 40),
+                    const SizedBox(height: 36),
                   ],
                 ),
               ),
@@ -289,7 +323,7 @@ class _AgencyIncidentDetailScreenState
             ),
           ),
           const SizedBox(width: 12),
-          const Text('RouteAlert', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.black87)),
+          const Text('RouteAlert ER Agency', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.black87)),
         ],
       ),
     );
@@ -303,7 +337,7 @@ class _AgencyIncidentDetailScreenState
     bool isBold = false,
   }) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.symmetric(vertical: 7),
       child: Column(
         children: [
           Row(
@@ -337,7 +371,7 @@ class _AgencyIncidentDetailScreenState
             ],
           ),
           const SizedBox(height: 6),
-          Divider(color: Colors.grey.shade300, thickness: 1),
+          Divider(color: Colors.grey.shade200, thickness: 1),
         ],
       ),
     );

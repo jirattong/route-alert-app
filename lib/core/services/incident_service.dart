@@ -1,0 +1,280 @@
+import 'dart:async';
+import 'dart:convert';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../models/incident_report.dart';
+
+class IncidentService {
+  static final IncidentService _instance = IncidentService._internal();
+  factory IncidentService() => _instance;
+  IncidentService._internal();
+
+  static const String _collectionName = 'incident_reports';
+  static const String _localKey = 'local_incident_reports_v2';
+
+  final StreamController<List<IncidentReport>> _incidentsController =
+      StreamController<List<IncidentReport>>.broadcast();
+
+  Stream<List<IncidentReport>> get incidentsStream =>
+      _incidentsController.stream;
+
+  StreamSubscription? _firestoreSubscription;
+
+  /// Initialize real-time listening
+  Future<void> initialize() async {
+    _initFirestoreListener();
+  }
+
+  void _initFirestoreListener() {
+    try {
+      _firestoreSubscription?.cancel();
+      _firestoreSubscription = FirebaseFirestore.instance
+          .collection(_collectionName)
+          .snapshots()
+          .listen((snapshot) async {
+        final List<IncidentReport> list = [];
+        for (var doc in snapshot.docs) {
+          try {
+            final data = doc.data();
+            list.add(IncidentReport.fromMap(data));
+          } catch (e) {
+            debugPrint('Error parsing incident doc ${doc.id}: $e');
+          }
+        }
+
+        // Sort latest first
+        list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+        // Save to local cache
+        await _saveToLocalCache(list);
+        if (!_incidentsController.isClosed) {
+          _incidentsController.add(list);
+        }
+      }, onError: (err) async {
+        debugPrint('Firestore incident stream error: $err');
+        final local = await getLocalIncidents();
+        if (!_incidentsController.isClosed) {
+          _incidentsController.add(local);
+        }
+      });
+    } catch (e) {
+      debugPrint('IncidentService init error: $e');
+    }
+  }
+
+  /// Create a new incident report (Driver role)
+  Future<bool> createIncident(IncidentReport incident) async {
+    try {
+      final id = incident.id.isNotEmpty
+          ? incident.id
+          : 'INC-${DateTime.now().millisecondsSinceEpoch}';
+
+      final newIncident = incident.copyWith(id: id);
+
+      // 1. Save to local cache first
+      final local = await getLocalIncidents();
+      local.removeWhere((i) => i.id == id);
+      local.insert(0, newIncident);
+      await _saveToLocalCache(local);
+      if (!_incidentsController.isClosed) {
+        _incidentsController.add(local);
+      }
+
+      // 2. Sync with Cloud Firestore
+      try {
+        await FirebaseFirestore.instance
+            .collection(_collectionName)
+            .doc(id)
+            .set(newIncident.toMap());
+      } catch (firestoreError) {
+        debugPrint('Firestore sync incident error: $firestoreError');
+      }
+
+      return true;
+    } catch (e) {
+      debugPrint('createIncident error: $e');
+      return false;
+    }
+  }
+
+  /// Agency role: Sets ER preparation status (Hospital ER ready)
+  Future<bool> setErPrepared(String id, bool isPrepared) async {
+    try {
+      final local = await getLocalIncidents();
+      final idx = local.indexWhere((i) => i.id == id);
+      if (idx != -1) {
+        local[idx] = local[idx].copyWith(isErPrepared: isPrepared);
+        await _saveToLocalCache(local);
+        if (!_incidentsController.isClosed) {
+          _incidentsController.add(local);
+        }
+      }
+
+      try {
+        await FirebaseFirestore.instance
+            .collection(_collectionName)
+            .doc(id)
+            .update({'isErPrepared': isPrepared});
+      } catch (_) {}
+
+      return true;
+    } catch (e) {
+      debugPrint('setErPrepared error: $e');
+      return false;
+    }
+  }
+
+  /// Ambulance role: Accept incident dispatch
+  Future<bool> acceptIncidentByAmbulance({
+    required String id,
+    required String ambulancePlate,
+    required String ambulanceId,
+  }) async {
+    try {
+      final local = await getLocalIncidents();
+      final idx = local.indexWhere((i) => i.id == id);
+      if (idx != -1) {
+        local[idx] = local[idx].copyWith(
+          status: 'assigned',
+          statusStep: 1, // กำลังเดินทางไปรับเคส
+          assignedAmbulancePlate: ambulancePlate,
+          assignedAmbulanceId: ambulanceId,
+        );
+        await _saveToLocalCache(local);
+        if (!_incidentsController.isClosed) {
+          _incidentsController.add(local);
+        }
+      }
+
+      try {
+        await FirebaseFirestore.instance
+            .collection(_collectionName)
+            .doc(id)
+            .update({
+          'status': 'assigned',
+          'statusStep': 1,
+          'assignedAmbulancePlate': ambulancePlate,
+          'assignedAmbulanceId': ambulanceId,
+        });
+      } catch (_) {}
+
+      return true;
+    } catch (e) {
+      debugPrint('acceptIncidentByAmbulance error: $e');
+      return false;
+    }
+  }
+
+  /// Ambulance role: Progress through incident stages
+  /// step 1: กำลังไปรับเคส, step 2: ถึงจุดเกิดเหตุ, step 3: กำลังไป รพ., step 4: ถึง รพ. (Resolved)
+  Future<bool> updateIncidentProgressStep({
+    required String id,
+    required int step,
+    required String status,
+  }) async {
+    try {
+      final local = await getLocalIncidents();
+      final idx = local.indexWhere((i) => i.id == id);
+      if (idx != -1) {
+        local[idx] = local[idx].copyWith(
+          status: status,
+          statusStep: step,
+        );
+        await _saveToLocalCache(local);
+        if (!_incidentsController.isClosed) {
+          _incidentsController.add(local);
+        }
+      }
+
+      try {
+        await FirebaseFirestore.instance
+            .collection(_collectionName)
+            .doc(id)
+            .update({
+          'status': status,
+          'statusStep': step,
+        });
+      } catch (_) {}
+
+      return true;
+    } catch (e) {
+      debugPrint('updateIncidentProgressStep error: $e');
+      return false;
+    }
+  }
+
+  /// Get incidents from local cache
+  Future<List<IncidentReport>> getLocalIncidents() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final jsonStr = prefs.getString(_localKey);
+      if (jsonStr == null || jsonStr.isEmpty) {
+        return _getDefaultInitialCases();
+      }
+
+      final List<dynamic> raw = json.decode(jsonStr);
+      final list = raw.map((e) => IncidentReport.fromMap(e)).toList();
+      list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      return list;
+    } catch (e) {
+      return _getDefaultInitialCases();
+    }
+  }
+
+  Future<void> _saveToLocalCache(List<IncidentReport> list) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = list.map((e) => e.toMap()).toList();
+      await prefs.setString(_localKey, json.encode(raw));
+    } catch (_) {}
+  }
+
+  List<IncidentReport> _getDefaultInitialCases() {
+    final now = DateTime.now();
+    return [
+      IncidentReport(
+        id: 'Case #AVCB00021',
+        type: 'อุบัติเหตุทางรถยนต์',
+        severity: 'วิกฤต (Code Red - หมดสติ / บาดเจ็บสาหัส)',
+        description: 'รถยนต์เฉี่ยวชนกับรถจักรยานยนต์ มีผู้ได้รับบาดเจ็บ 2 ราย',
+        latitude: 19.0400,
+        longitude: 99.8962,
+        province: 'เชียงใหม่',
+        address: 'อ.ฝาง จ.เชียงใหม่ บริเวณหน้าตลาดสด',
+        reporterName: 'พลเมืองดี',
+        reporterEmail: 'citizen@gmail.com',
+        reporterPhone: '0812345678',
+        status: 'pending',
+        statusStep: 0,
+        isErPrepared: false,
+        eta: '4 นาที',
+        assignedAmbulancePlate: 'กขค123',
+        createdAt: now.subtract(const Duration(minutes: 15)),
+      ),
+      IncidentReport(
+        id: 'Case #SIXSEVEN67',
+        type: 'การจราจรติดขัดรุนแรง',
+        severity: 'ปานกลาง (Medium - บาดเจ็บแต่รู้สึกตัว)',
+        description: 'ต้นไม้ล้มกีดขวางช่องทางจราจร การจราจรเคลื่อนตัวช้า',
+        latitude: 19.0320,
+        longitude: 99.8850,
+        province: 'เชียงใหม่',
+        address: 'อ.เมือง จ.เชียงใหม่ ถ.สุเทพ',
+        reporterName: 'ผู้ใช้ทางหลวง',
+        reporterEmail: 'driver@gmail.com',
+        status: 'in_progress',
+        statusStep: 1,
+        isErPrepared: true,
+        eta: '8 นาที',
+        assignedAmbulancePlate: 'ขก4567',
+        createdAt: now.subtract(const Duration(hours: 1, minutes: 20)),
+      ),
+    ];
+  }
+
+  void dispose() {
+    _firestoreSubscription?.cancel();
+    _incidentsController.close();
+  }
+}

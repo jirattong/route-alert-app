@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../../../core/models/incident_report.dart';
+import '../../../core/services/incident_service.dart';
 import 'ambulance_incident_detail_screen.dart';
 
 class AmbulanceIncidentListScreen extends StatefulWidget {
@@ -11,8 +13,7 @@ class AmbulanceIncidentListScreen extends StatefulWidget {
 
 class _AmbulanceIncidentListScreenState
     extends State<AmbulanceIncidentListScreen> {
-  // เขตปฏิบัติการจำลอง
-  String _selectedDistrict = 'อ.เมืองเชียงใหม่';
+  String _selectedDistrict = 'ทั้งหมดในโซน';
   final List<String> _districts = [
     'ทั้งหมดในโซน',
     'อ.เมืองเชียงใหม่',
@@ -21,35 +22,11 @@ class _AmbulanceIncidentListScreenState
     'อ.หางดง',
   ];
 
-  // รายการเคสเหตุการณ์ฉุกเฉินสำหรับรถพยาบาล
-  final List<Map<String, dynamic>> _incidents = [
-    {
-      'id': 'Case #AVCB00021',
-      'location': 'อ.ฝาง จ.เชียงใหม่',
-      'district': 'อ.ฝาง จ.เชียงใหม่',
-      'type': 'อุบัติเหตุทางรถยนต์',
-      'severity': 'ปานกลาง (Medium)',
-      'vehiclePlate': 'กขค123',
-      'status': 'กำลังเดินทางไปรับเคส',
-      'statusStep': 1, // 0: รอยืนยัน, 1: กำลังไปรับเคส, 2: ถึงจุดเกิดเหตุ, 3: กำลังไป รพ., 4: ถึง รพ.
-      'isAccepted': true,
-      'hasPolice': true,
-      'hasAmbulance': true,
-    },
-    {
-      'id': 'Case #SIXSEVEN67',
-      'location': 'อ.ฝาง จ.เชียงใหม่',
-      'district': 'อ.ฝาง จ.เชียงใหม่',
-      'type': 'อุบัติเหตุทางรถยนต์',
-      'severity': 'วิกฤต (Critical)',
-      'vehiclePlate': 'ยังไม่มีรถรับหมาย',
-      'status': 'กำลังรอยืนยัน',
-      'statusStep': 0,
-      'isAccepted': false,
-      'hasPolice': true,
-      'hasAmbulance': true,
-    },
-  ];
+  @override
+  void initState() {
+    super.initState();
+    IncidentService().initialize();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -58,17 +35,12 @@ class _AmbulanceIncidentListScreenState
       body: SafeArea(
         child: Column(
           children: [
-            // --- 1. Header Bar ด้านบน ---
             _buildHeader(),
-
-            // --- 2. ตัวเลือกเขตปฏิบัติการ/อำเภอ ---
             const SizedBox(height: 12),
             _buildAreaSelectorBar(),
-
-            // --- 3. หัวข้อ "เหตุในบริเวณพื้นที่" ---
             const SizedBox(height: 16),
             Text(
-              'เหตุในบริเวณพื้นที่',
+              'เหตุในบริเวณพื้นที่ (Dispatched Incidents)',
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
@@ -77,14 +49,47 @@ class _AmbulanceIncidentListScreenState
             ),
             const SizedBox(height: 12),
 
-            // --- 4. ลิสต์รายการเคสขอบสีแดงตาม Figma ---
+            // ลิสต์รายการเคสแบบ Real-Time จาก IncidentService
             Expanded(
-              child: ListView.builder(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-                itemCount: _incidents.length,
-                itemBuilder: (context, index) {
-                  return _buildAmbulanceIncidentCard(_incidents[index]);
+              child: StreamBuilder<List<IncidentReport>>(
+                stream: IncidentService().incidentsStream,
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
+                    return const Center(
+                      child: CircularProgressIndicator(color: Color(0xFFEB5757)),
+                    );
+                  }
+
+                  final allList = snapshot.data ?? [];
+                  final list = allList.where((i) {
+                    if (_selectedDistrict == 'ทั้งหมดในโซน') return true;
+                    return i.address.contains(_selectedDistrict) || i.province.contains(_selectedDistrict);
+                  }).toList();
+
+                  if (list.isEmpty) {
+                    return Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.check_circle_outline_rounded,
+                              color: Colors.grey.shade400, size: 56),
+                          const SizedBox(height: 12),
+                          Text(
+                            'ไม่มีเคสฉุกเฉินในโซน $_selectedDistrict ในขณะนี้',
+                            style: TextStyle(color: Colors.grey.shade600, fontSize: 14),
+                          ),
+                        ],
+                      ),
+                    );
+                  }
+
+                  return ListView.builder(
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                    itemCount: list.length,
+                    itemBuilder: (context, index) {
+                      return _buildAmbulanceIncidentCard(list[index]);
+                    },
+                  );
                 },
               ),
             ),
@@ -94,7 +99,6 @@ class _AmbulanceIncidentListScreenState
     );
   }
 
-  // --- Header แถบบนพร้อมโลโก้ RouteAlert ---
   Widget _buildHeader() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
@@ -121,81 +125,49 @@ class _AmbulanceIncidentListScreenState
             child: Stack(
               alignment: Alignment.center,
               children: [
-                const Icon(Icons.airport_shuttle_outlined,
-                    size: 20, color: Color(0xFF2C3E50)),
-                Positioned(
-                  top: 4,
-                  right: 4,
-                  child: Icon(Icons.wifi,
-                      size: 9, color: Colors.redAccent.shade700),
-                ),
+                const Icon(Icons.airport_shuttle_outlined, size: 20, color: Color(0xFF2C3E50)),
+                Positioned(top: 4, right: 4, child: Icon(Icons.wifi, size: 9, color: Colors.redAccent.shade700)),
               ],
             ),
           ),
           const SizedBox(width: 12),
-          const Text(
-            'RouteAlert',
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: Colors.black87,
-            ),
-          ),
+          const Text('RouteAlert Ambulance', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.black87)),
         ],
       ),
     );
   }
 
-  // --- ตัวเลือกเขตปฏิบัติการ ---
   Widget _buildAreaSelectorBar() {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
+      padding: const EdgeInsets.symmetric(horizontal: 24),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Row(
+          const Row(
             children: [
-              const Icon(Icons.my_location_rounded,
-                  color: Color(0xFFEB5757), size: 20),
-              const SizedBox(width: 6),
-              Text(
-                'เขตปฏิบัติการ:',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.grey.shade700,
-                ),
-              ),
+              Icon(Icons.location_on, color: Color(0xFFEB5757), size: 22),
+              SizedBox(width: 6),
+              Text('พื้นที่แสดงเหตุ:', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
             ],
           ),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
             decoration: BoxDecoration(
-              color: const Color(0xFFEB5757).withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: const Color(0xFFEB5757), width: 1.2),
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: const Color(0xFF5B9EE1), width: 1.5),
             ),
             child: DropdownButtonHideUnderline(
               child: DropdownButton<String>(
                 value: _selectedDistrict,
-                icon: const Icon(Icons.arrow_drop_down_rounded,
-                    color: Color(0xFFEB5757), size: 24),
-                style: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.bold,
-                  color: Color(0xFFEB5757),
-                ),
-                onChanged: (String? newValue) {
-                  if (newValue != null) {
-                    setState(() => _selectedDistrict = newValue);
-                  }
+                isDense: true,
+                icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Color(0xFF5B9EE1)),
+                items: _districts
+                    .map((d) => DropdownMenuItem(value: d, child: Text(d, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold))))
+                    .toList(),
+                onChanged: (val) {
+                  if (val != null) setState(() => _selectedDistrict = val);
                 },
-                items: _districts.map<DropdownMenuItem<String>>((String value) {
-                  return DropdownMenuItem<String>(
-                    value: value,
-                    child: Text(value),
-                  );
-                }).toList(),
               ),
             ),
           ),
@@ -204,9 +176,8 @@ class _AmbulanceIncidentListScreenState
     );
   }
 
-  // --- การ์ดเคสขอบสีแดง ถอดแบบจาก Figma เป๊ะๆ ---
-  Widget _buildAmbulanceIncidentCard(Map<String, dynamic> item) {
-    bool isAccepted = item['isAccepted'] ?? false;
+  Widget _buildAmbulanceIncidentCard(IncidentReport item) {
+    bool isAccepted = item.status != 'pending';
 
     return Container(
       margin: const EdgeInsets.only(bottom: 20),
@@ -214,7 +185,10 @@ class _AmbulanceIncidentListScreenState
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: const Color(0xFFEB5757), width: 1.8), // ขอบสีแดงตามรูป
+        border: Border.all(
+          color: isAccepted ? const Color(0xFF10B981) : const Color(0xFFEB5757),
+          width: 1.8,
+        ),
         boxShadow: [
           BoxShadow(
             color: const Color(0xFFEB5757).withValues(alpha: 0.08),
@@ -228,106 +202,84 @@ class _AmbulanceIncidentListScreenState
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // 1. สถานที่
               Text(
-                item['location'],
-                style: const TextStyle(
-                  fontSize: 17,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.black87,
-                ),
+                item.address.isNotEmpty ? item.address : item.province,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Colors.black87),
               ),
               const SizedBox(height: 2),
-
-              // 2. เลข Case ID
               Text(
-                item['id'],
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.grey.shade600,
-                ),
+                item.id,
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.grey.shade600),
               ),
               const SizedBox(height: 4),
-
-              // 3. ประเภทอุบัติเหตุ
               Text(
-                item['type'],
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w500,
-                  color: Colors.black87,
-                ),
+                item.type,
+                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500, color: Colors.black87),
               ),
               const SizedBox(height: 4),
-
-              // 4. เลขรถที่รับเคส
               Text(
-                'เลขรถที่รับเคส : ${item['vehiclePlate']}',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: Colors.grey.shade700,
-                ),
+                item.assignedAmbulancePlate != null && item.assignedAmbulancePlate!.isNotEmpty
+                    ? 'เลขรถที่รับเคส : ${item.assignedAmbulancePlate}'
+                    : 'เลขรถที่รับเคส : ยังไม่มีรถรับหมาย',
+                style: TextStyle(fontSize: 13.5, color: Colors.grey.shade700),
               ),
               const SizedBox(height: 10),
 
-              // 5. สถานะ + ไอคอนรถพยาบาล/ตำรวจ
               Row(
                 children: [
                   Text(
-                    item['status'],
+                    item.statusText,
                     style: TextStyle(
-                      fontSize: 15,
+                      fontSize: 14.5,
                       fontWeight: FontWeight.bold,
-                      color: isAccepted
-                          ? const Color(0xFFEB5757)
-                          : Colors.redAccent.shade700,
+                      color: item.statusColor,
                     ),
                   ),
                   const SizedBox(width: 8),
-                  if (item['hasAmbulance'] == true)
-                    const Text('🚑', style: TextStyle(fontSize: 18)),
-                  if (item['hasPolice'] == true)
-                    const Text('🚓', style: TextStyle(fontSize: 18)),
+                  const Text('🚑', style: TextStyle(fontSize: 17)),
+                  const SizedBox(width: 4),
+                  const Text('🚓', style: TextStyle(fontSize: 17)),
                 ],
               ),
-
               const SizedBox(height: 16),
 
-              // 6. ปุ่มกดรับเคส (ยืนยัน / ยืนยันเรียบร้อย)
+              // ปุ่มกดรับเคส (ยืนยันรับหมาย)
               Center(
                 child: SizedBox(
                   width: 170,
                   height: 42,
                   child: ElevatedButton(
                     onPressed: isAccepted
-                        ? null // ถ้ากดรับแล้ว ปุ่มจะกลายเป็นสีเทาจางตาม Figma
-                        : () {
-                            setState(() {
-                              item['isAccepted'] = true;
-                              item['status'] = 'กำลังเดินทางไปรับเคส';
-                              item['vehiclePlate'] = 'กขค123 (รถของเรา)';
-                            });
-
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('🔴 ยืนยันรับเคสเรียบร้อยแล้ว!'),
-                                backgroundColor: Color(0xFFEB5757),
-                              ),
+                        ? null
+                        : () async {
+                            await IncidentService().acceptIncidentByAmbulance(
+                              id: item.id,
+                              ambulancePlate: 'กขค123 (รถของเรา)',
+                              ambulanceId: 'AMB-1669-01',
                             );
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('🔴 ยืนยันรับเคสและบันทึกหมายเรียบร้อยแล้ว!'),
+                                  backgroundColor: Color(0xFFEB5757),
+                                ),
+                              );
+                            }
                           },
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFFEB5757),
-                      disabledBackgroundColor: const Color(0xFFA3A3A3), // สีเทาปุ่มยืนยันเรียบร้อย
+                      disabledBackgroundColor: const Color(0xFFA3A3A3),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(22),
                       ),
                       elevation: isAccepted ? 0 : 3,
                     ),
                     child: Text(
-                      isAccepted ? 'ยืนยันเรียบร้อย' : 'ยืนยัน',
+                      isAccepted ? 'ยืนยันรับเคสแล้ว' : 'ยืนยันรับเคส',
                       style: const TextStyle(
-                        fontSize: 16,
+                        fontSize: 15,
                         fontWeight: FontWeight.bold,
                         color: Colors.white,
                       ),
@@ -347,8 +299,7 @@ class _AmbulanceIncidentListScreenState
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (context) =>
-                        AmbulanceIncidentDetailScreen(incidentData: item),
+                    builder: (context) => AmbulanceIncidentDetailScreen(incident: item),
                   ),
                 );
               },

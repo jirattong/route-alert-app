@@ -73,8 +73,18 @@ class EmergencyMqttService {
   final StreamController<EmergencyVehicleData> _emergencyStreamController =
       StreamController<EmergencyVehicleData>.broadcast();
 
+  final StreamController<List<EmergencyVehicleData>> _fleetStreamController =
+      StreamController<List<EmergencyVehicleData>>.broadcast();
+
+  final Map<String, EmergencyVehicleData> _activeFleet = {};
+
   Stream<EmergencyVehicleData> get emergencyStream =>
       _emergencyStreamController.stream;
+
+  Stream<List<EmergencyVehicleData>> get activeFleetStream =>
+      _fleetStreamController.stream;
+
+  List<EmergencyVehicleData> get activeFleet => _activeFleet.values.toList();
 
   Future<bool> initialize() async {
     if (_isConnected) return true;
@@ -114,26 +124,75 @@ class EmergencyMqttService {
 
       try {
         final data = EmergencyVehicleData.fromJson(payload);
+        _activeFleet[data.id] = data;
         _emergencyStreamController.add(data);
+        _fleetStreamController.add(_activeFleet.values.toList());
       } catch (_) {}
     });
   }
 
   /// Broadcasts ambulance live location to other drivers on the road
   void broadcastAmbulanceLocation(EmergencyVehicleData data) {
+    _activeFleet[data.id] = data;
+    _emergencyStreamController.add(data);
+    _fleetStreamController.add(_activeFleet.values.toList());
+
     if (!_isConnected || _client == null) {
-      // Local broadcast fallback
-      _emergencyStreamController.add(data);
       return;
     }
 
-    final builder = MqttClientPayloadBuilder();
-    builder.addString(data.toJson());
-    _client!.publishMessage(
-      topicAmbulanceBroadcast,
-      MqttQos.atLeastOnce,
-      builder.payload!,
-    );
+    try {
+      final builder = MqttClientPayloadBuilder();
+      builder.addString(data.toJson());
+      _client!.publishMessage(
+        topicAmbulanceBroadcast,
+        MqttQos.atLeastOnce,
+        builder.payload!,
+      );
+    } catch (_) {}
+  }
+
+  /// Seed initial simulated active ambulances for testing when offline
+  void seedSimulatedFleet(LatLng userPos) {
+    if (_activeFleet.isNotEmpty) return;
+
+    final samples = [
+      EmergencyVehicleData(
+        id: 'AMB-1669-01',
+        callSign: 'กู้ชีพนครพิงค์ 01',
+        latitude: userPos.latitude + 0.012,
+        longitude: userPos.longitude + 0.015,
+        speed: 65.0,
+        emergencyType: 'ผู้ป่วยวิกฤตฉุกเฉิน (Red Code)',
+        sirenActive: true,
+        timestamp: DateTime.now(),
+      ),
+      EmergencyVehicleData(
+        id: 'AMB-1669-02',
+        callSign: 'กู้ชีพมหาราช 02',
+        latitude: userPos.latitude - 0.020,
+        longitude: userPos.longitude + 0.018,
+        speed: 55.0,
+        emergencyType: 'อุบัติเหตุจราจร (Yellow Code)',
+        sirenActive: true,
+        timestamp: DateTime.now(),
+      ),
+      EmergencyVehicleData(
+        id: 'AMB-1669-03',
+        callSign: 'ศูนย์กู้ชีพพายัพ 03',
+        latitude: userPos.latitude + 0.028,
+        longitude: userPos.longitude - 0.022,
+        speed: 48.0,
+        emergencyType: 'ผู้ป่วยฉุกเฉินนำส่ง รพ.',
+        sirenActive: true,
+        timestamp: DateTime.now(),
+      ),
+    ];
+
+    for (var s in samples) {
+      _activeFleet[s.id] = s;
+    }
+    _fleetStreamController.add(_activeFleet.values.toList());
   }
 
   /// Calculates distance in meters between driver and ambulance (Haversine formula)
@@ -160,5 +219,6 @@ class EmergencyMqttService {
   void dispose() {
     _client?.disconnect();
     _emergencyStreamController.close();
+    _fleetStreamController.close();
   }
 }

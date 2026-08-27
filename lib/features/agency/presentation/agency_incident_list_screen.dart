@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../../../core/models/incident_report.dart';
+import '../../../core/services/incident_service.dart';
 import 'agency_incident_detail_screen.dart';
 
 class AgencyIncidentListScreen extends StatefulWidget {
@@ -10,32 +12,11 @@ class AgencyIncidentListScreen extends StatefulWidget {
 }
 
 class _AgencyIncidentListScreenState extends State<AgencyIncidentListScreen> {
-  // รายการเคสที่กำลังมุ่งหน้ามาที่โรงพยาบาล
-  final List<Map<String, dynamic>> _incomingIncidents = [
-    {
-      'id': 'Case #SIXSEVEN67',
-      'location': 'อ.ฝาง จ.เชียงใหม่',
-      'type': 'อุบัติเหตุทางรถยนต์',
-      'severity': 'วิกฤต (Critical)',
-      'status': 'กำลังรอยืนยัน (ER)',
-      'isErPrepared': false, // ยังไม่ได้เตรียมเตียง
-      'eta': '8 นาที',
-      'hasPolice': true,
-      'hasAmbulance': true,
-    },
-    {
-      'id': 'Case #AVCB00021',
-      'location': 'อ.ฝาง จ.เชียงใหม่',
-      'type': 'อุบัติเหตุทางรถยนต์',
-      'severity': 'ปานกลาง (Medium)',
-      'vehiclePlate': 'กขค123',
-      'status': 'กำลังเดินทางส่งเคส',
-      'isErPrepared': true, // เตรียมเตียงเรียบร้อย
-      'eta': '4 นาที',
-      'hasPolice': true,
-      'hasAmbulance': true,
-    },
-  ];
+  @override
+  void initState() {
+    super.initState();
+    IncidentService().initialize();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -46,7 +27,7 @@ class _AgencyIncidentListScreenState extends State<AgencyIncidentListScreen> {
           children: [
             _buildHeader(),
             const SizedBox(height: 16),
-            
+
             Text(
               'เคสที่กำลังมุ่งหน้ามา (Incoming ER)',
               style: TextStyle(
@@ -57,13 +38,42 @@ class _AgencyIncidentListScreenState extends State<AgencyIncidentListScreen> {
             ),
             const SizedBox(height: 12),
 
-            // ลิสต์รายการการ์ด
+            // ลิสต์รายการการ์ดจาก IncidentService แบบ Real-Time
             Expanded(
-              child: ListView.builder(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-                itemCount: _incomingIncidents.length,
-                itemBuilder: (context, index) {
-                  return _buildAgencyIncidentCard(_incomingIncidents[index]);
+              child: StreamBuilder<List<IncidentReport>>(
+                stream: IncidentService().incidentsStream,
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
+                    return const Center(
+                      child: CircularProgressIndicator(color: Color(0xFF00A896)),
+                    );
+                  }
+
+                  final list = snapshot.data ?? [];
+                  if (list.isEmpty) {
+                    return Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.check_circle_outline_rounded,
+                              color: Colors.grey.shade400, size: 56),
+                          const SizedBox(height: 12),
+                          Text(
+                            'ไม่มีเคสฉุกเฉินที่กำลังนำส่งในขณะนี้',
+                            style: TextStyle(color: Colors.grey.shade600, fontSize: 14),
+                          ),
+                        ],
+                      ),
+                    );
+                  }
+
+                  return ListView.builder(
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                    itemCount: list.length,
+                    itemBuilder: (context, index) {
+                      return _buildAgencyIncidentCard(list[index]);
+                    },
+                  );
                 },
               ),
             ),
@@ -74,8 +84,8 @@ class _AgencyIncidentListScreenState extends State<AgencyIncidentListScreen> {
   }
 
   // --- การ์ดขอบสีเขียวแบบ Figma ---
-  Widget _buildAgencyIncidentCard(Map<String, dynamic> item) {
-    bool isPrepared = item['isErPrepared'] ?? false;
+  Widget _buildAgencyIncidentCard(IncidentReport item) {
+    bool isPrepared = item.isErPrepared;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 20),
@@ -83,7 +93,10 @@ class _AgencyIncidentListScreenState extends State<AgencyIncidentListScreen> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: const Color(0xFF69F0AE), width: 2), // ขอบสีเขียวสว่าง
+        border: Border.all(
+          color: isPrepared ? const Color(0xFF10B981) : const Color(0xFF69F0AE),
+          width: 2,
+        ),
         boxShadow: [
           BoxShadow(
             color: const Color(0xFF69F0AE).withValues(alpha: 0.15),
@@ -98,40 +111,43 @@ class _AgencyIncidentListScreenState extends State<AgencyIncidentListScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                item['location'],
+                item.address.isNotEmpty ? item.address : item.province,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Colors.black87),
               ),
               const SizedBox(height: 2),
               Text(
-                item['id'],
-                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Colors.grey.shade600),
+                item.id,
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.grey.shade600),
               ),
               const SizedBox(height: 4),
               Text(
-                item['type'],
-                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500, color: Colors.black87),
+                item.type,
+                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500, color: Colors.black87),
               ),
               const SizedBox(height: 4),
-              if (item['vehiclePlate'] != null)
+              if (item.assignedAmbulancePlate != null && item.assignedAmbulancePlate!.isNotEmpty)
                 Text(
-                  'เลขรถรับเคส : ${item['vehiclePlate']}',
-                  style: TextStyle(fontSize: 14, color: Colors.grey.shade700),
+                  'เลขรถรับเคส : ${item.assignedAmbulancePlate}',
+                  style: TextStyle(fontSize: 13.5, color: Colors.grey.shade700),
                 ),
               const SizedBox(height: 10),
 
               Row(
                 children: [
                   Text(
-                    item['status'],
-                    style: const TextStyle(
-                      fontSize: 15,
+                    isPrepared ? 'เตรียม ER เรียบร้อย' : item.statusText,
+                    style: TextStyle(
+                      fontSize: 14.5,
                       fontWeight: FontWeight.bold,
-                      color: Color(0xFF2E7D32), // ตัวหนังสือเขียวเข้ม
+                      color: isPrepared ? const Color(0xFF10B981) : const Color(0xFF2E7D32),
                     ),
                   ),
                   const SizedBox(width: 8),
-                  if (item['hasAmbulance'] == true) const Text('🚑', style: TextStyle(fontSize: 18)),
-                  if (item['hasPolice'] == true) const Text('🚓', style: TextStyle(fontSize: 18)),
+                  const Text('🚑', style: TextStyle(fontSize: 17)),
+                  const SizedBox(width: 4),
+                  const Text('🚓', style: TextStyle(fontSize: 17)),
                 ],
               ),
               const SizedBox(height: 16),
@@ -142,28 +158,22 @@ class _AgencyIncidentListScreenState extends State<AgencyIncidentListScreen> {
                   width: 170,
                   height: 42,
                   child: ElevatedButton(
-                    onPressed: isPrepared
-                        ? null
-                        : () {
-                            setState(() {
-                              item['isErPrepared'] = true;
-                              item['status'] = 'เตรียม ER เรียบร้อย';
-                            });
-                          },
+                    onPressed: () async {
+                      await IncidentService().setErPrepared(item.id, !isPrepared);
+                    },
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF69F0AE), // สีเขียวสว่างตาม Figma
-                      disabledBackgroundColor: Colors.grey.shade400, // สีเทาเมื่อกดแล้ว
+                      backgroundColor: isPrepared ? Colors.grey.shade300 : const Color(0xFF69F0AE),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(22),
                       ),
                       elevation: isPrepared ? 0 : 3,
                     ),
                     child: Text(
-                      isPrepared ? 'ยืนยันเรียบร้อย' : 'ยืนยันเตียง ER',
+                      isPrepared ? '✓ ยืนยันเรียบร้อย' : 'ยืนยันเตียง ER',
                       style: TextStyle(
-                        fontSize: 16,
+                        fontSize: 15,
                         fontWeight: FontWeight.bold,
-                        color: isPrepared ? Colors.white : Colors.black87,
+                        color: isPrepared ? Colors.grey.shade700 : Colors.black87,
                       ),
                     ),
                   ),
@@ -181,7 +191,7 @@ class _AgencyIncidentListScreenState extends State<AgencyIncidentListScreen> {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (context) => AgencyIncidentDetailScreen(incidentData: item),
+                    builder: (context) => AgencyIncidentDetailScreen(incident: item),
                   ),
                 );
               },
@@ -221,7 +231,7 @@ class _AgencyIncidentListScreenState extends State<AgencyIncidentListScreen> {
             ),
           ),
           const SizedBox(width: 12),
-          const Text('RouteAlert', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.black87)),
+          const Text('RouteAlert ER Agency', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.black87)),
         ],
       ),
     );

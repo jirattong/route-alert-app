@@ -1,54 +1,64 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
-import 'driver_home_screen.dart';
-import 'incident_list_screen.dart';
-import 'driver_settings_screen.dart';
-import 'driver_profile_screen.dart';
+import '../../../core/models/incident_report.dart';
 
 class IncidentDetailScreen extends StatelessWidget {
-  final Map<String, dynamic> incidentData;
+  final IncidentReport? incident;
+  final Map<String, dynamic>? incidentData;
 
   const IncidentDetailScreen({
     super.key,
-    required this.incidentData,
+    this.incident,
+    this.incidentData,
   });
 
   @override
   Widget build(BuildContext context) {
-    // พิกัดจำลองจุดเกิดเหตุ และ ตำแหน่งรถพยาบาล
-    const LatLng incidentLocation = LatLng(19.0284, 99.8962);
-    const LatLng ambulanceLocation = LatLng(19.0350, 99.8962);
+    final String id = incident?.id ?? incidentData?['id'] ?? 'Case #AVCB00021';
+    final String type = incident?.type ?? incidentData?['type'] ?? 'อุบัติเหตุทางรถยนต์';
+    final String severity = incident?.severity ?? incidentData?['severity'] ?? 'วิกฤต (Code Red)';
+    final String status = incident?.statusText ?? incidentData?['status'] ?? 'กำลังรอยืนยัน';
+    final Color statusColor = incident?.statusColor ?? incidentData?['statusColor'] ?? const Color(0xFF5B9EE1);
+    final String address = incident?.address ?? incidentData?['location'] ?? 'อ.ฝาง จ.เชียงใหม่';
+    final String desc = incident?.description ?? incidentData?['description'] ?? '-';
+    final String? photoBase64 = incident?.photoBase64;
+    final String carPlate = incident?.assignedAmbulancePlate ?? incidentData?['carPlate'] ?? 'รอศูนย์จ่ายงาน';
+
+    final LatLng incidentLocation = incident != null
+        ? LatLng(incident!.latitude, incident!.longitude)
+        : const LatLng(19.0284, 99.8962);
+    final LatLng ambulanceLocation = LatLng(
+      incidentLocation.latitude + 0.007,
+      incidentLocation.longitude + 0.007,
+    );
 
     return Scaffold(
       backgroundColor: Colors.white,
       body: SafeArea(
         child: Column(
           children: [
-            // --- 1. Header Bar ด้านบนตาม Figma ---
-            _buildHeader(),
-
+            _buildHeader(context),
             Expanded(
               child: SingleChildScrollView(
                 child: Column(
                   children: [
-                    // --- 2. ส่วนแผนที่ครึ่งบนพร้อมปุ่มย้อนกลับ < ---
+                    // แผนที่จุดเกิดเหตุ
                     SizedBox(
                       height: 240,
                       child: Stack(
                         children: [
                           FlutterMap(
-                            options: const MapOptions(
-                              initialCenter: ambulanceLocation,
-                              initialZoom: 15.0,
+                            options: MapOptions(
+                              initialCenter: incidentLocation,
+                              initialZoom: 14.5,
                             ),
                             children: [
                               TileLayer(
-                                urlTemplate:
-                                    'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                                 userAgentPackageName: 'com.routealert.app',
                               ),
-                              // เส้นทางเดินรถ (Polyline)
                               PolylineLayer(
                                 polylines: [
                                   Polyline(
@@ -58,10 +68,8 @@ class IncidentDetailScreen extends StatelessWidget {
                                   ),
                                 ],
                               ),
-                              // หมุดแสดงตำแหน่ง
                               MarkerLayer(
                                 markers: [
-                                  // หมุดรถพยาบาล
                                   Marker(
                                     point: ambulanceLocation,
                                     width: 44,
@@ -72,42 +80,36 @@ class IncidentDetailScreen extends StatelessWidget {
                                         color: Colors.white,
                                         shape: BoxShape.circle,
                                         boxShadow: [
-                                          BoxShadow(
-                                              color: Colors.black26,
-                                              blurRadius: 6)
+                                          BoxShadow(color: Colors.black26, blurRadius: 6)
                                         ],
                                       ),
                                       child: const Center(
-                                          child: Text('🚑',
-                                              style: TextStyle(fontSize: 22))),
+                                          child: Text('🚑', style: TextStyle(fontSize: 22))),
                                     ),
                                   ),
-                                  // หมุดจุดเกิดเหตุ
-                                  const Marker(
+                                  Marker(
                                     point: incidentLocation,
-                                    width: 36,
-                                    height: 36,
-                                    child: Icon(
+                                    width: 38,
+                                    height: 38,
+                                    child: const Icon(
                                       Icons.location_on_rounded,
                                       color: Color(0xFFEB5757),
-                                      size: 38,
+                                      size: 40,
                                     ),
                                   ),
                                 ],
                               ),
                             ],
                           ),
-
-                          // ปุ่มย้อนกลับ < ย้อนไปหน้าก่อนหน้า
                           Positioned(
-                            top: 16,
-                            left: 16,
+                            top: 14,
+                            left: 14,
                             child: CircleAvatar(
                               backgroundColor: Colors.white,
                               radius: 20,
                               child: IconButton(
                                 icon: const Icon(Icons.arrow_back_ios_new_rounded,
-                                    color: Colors.black87, size: 20),
+                                    color: Colors.black87, size: 18),
                                 onPressed: () => Navigator.pop(context),
                               ),
                             ),
@@ -116,41 +118,57 @@ class IncidentDetailScreen extends StatelessWidget {
                       ),
                     ),
 
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 18),
 
-                    // --- 3. ป้าย Case ID สีฟ้าทรงแคปซูลตาม Figma ---
+                    // Case ID Capsule Badge
                     Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 28, vertical: 10),
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF8BB7F0),
+                        color: const Color(0xFF8BB7F0).withValues(alpha: 0.85),
                         borderRadius: BorderRadius.circular(25),
                         boxShadow: [
                           BoxShadow(
-                            color: const Color(0xFF8BB7F0).withValues(alpha: 0.4),
+                            color: const Color(0xFF8BB7F0).withValues(alpha: 0.35),
                             blurRadius: 8,
                             offset: const Offset(0, 3),
                           ),
                         ],
                       ),
                       child: Text(
-                        incidentData['id'] ?? 'Case #AVCB00021',
+                        id,
                         style: const TextStyle(
-                          fontSize: 22,
+                          fontSize: 20,
                           fontWeight: FontWeight.bold,
                           color: Colors.black87,
                         ),
                       ),
                     ),
 
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 14),
                     Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 40),
-                      child: Divider(color: Colors.grey.shade400, thickness: 1.5),
+                      padding: const EdgeInsets.symmetric(horizontal: 36),
+                      child: Divider(color: Colors.grey.shade300, thickness: 1),
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 10),
 
-                    // --- 4. ตารางแสดงรายละเอียดเคสตาม Figma ---
+                    // รูปภาพที่แนบมา (ถ้ามี)
+                    if (photoBase64 != null && photoBase64.isNotEmpty) ...[
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 8),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(16),
+                          child: Image.memory(
+                            base64Decode(photoBase64),
+                            height: 180,
+                            width: double.infinity,
+                            fit: BoxFit.cover,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                    ],
+
+                    // รายละเอียดเคส
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 28),
                       child: Column(
@@ -158,33 +176,42 @@ class IncidentDetailScreen extends StatelessWidget {
                           _buildDetailRow(
                             labelTH: 'สถานะ',
                             labelEN: '(Status)',
-                            value: incidentData['status'] ?? 'กำลังเดินทางรับเคส',
-                            valueColor: incidentData['statusColor'] ??
-                                const Color(0xFF5B9EE1),
+                            value: status,
+                            valueColor: statusColor,
                           ),
                           _buildDetailRow(
                             labelTH: 'ประเภทอุบัติเหตุ',
                             labelEN: '(Type of incident)',
-                            value: incidentData['type'] ?? 'อุบัติเหตุทางรถยนต์',
+                            value: type,
                           ),
                           _buildDetailRow(
                             labelTH: 'ระดับความรุนแรง',
                             labelEN: '(Severity)',
-                            value: 'ปานกลาง (Medium)',
+                            value: severity,
                           ),
-                          // ระบุเป้าหมายเวลาคาดการณ์ชัดเจน
                           _buildDetailRow(
-                            labelTH: 'คาดว่าจะถึงจุดเกิดเหตุ',
-                            labelEN: '(Estimated Time of Arrival)',
-                            value: '4 นาที',
-                            valueColor: const Color(0xFFEB5757),
+                            labelTH: 'สถานที่เกิดเหตุ',
+                            labelEN: '(Location)',
+                            value: address,
+                          ),
+                          if (desc.isNotEmpty && desc != '-')
+                            _buildDetailRow(
+                              labelTH: 'รายละเอียดเพิ่มเติม',
+                              labelEN: '(Description)',
+                              value: desc,
+                            ),
+                          _buildDetailRow(
+                            labelTH: 'รถกู้ชีพที่รับเคส',
+                            labelEN: '(Assigned Ambulance)',
+                            value: carPlate,
+                            valueColor: const Color(0xFF00A896),
                             isBold: true,
                           ),
                         ],
                       ),
                     ),
 
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 24),
                   ],
                 ),
               ),
@@ -192,21 +219,17 @@ class IncidentDetailScreen extends StatelessWidget {
           ],
         ),
       ),
-
-      // --- 5. Bottom Navigation Bar ---
-      bottomNavigationBar: _buildBottomNavigationBar(context),
     );
   }
 
-  // --- Header แถบบนพร้อมโลโก้ RouteAlert ---
-  Widget _buildHeader() {
+  Widget _buildHeader(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
       decoration: BoxDecoration(
         color: Colors.white,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 4,
             offset: const Offset(0, 2),
           ),
@@ -216,41 +239,34 @@ class IncidentDetailScreen extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Container(
-            width: 36,
-            height: 36,
+            width: 34,
+            height: 34,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              border: Border.all(color: const Color(0xFF2C3E50), width: 2),
+              border: Border.all(color: const Color(0xFF2C3E50), width: 1.8),
             ),
             child: Stack(
               alignment: Alignment.center,
               children: [
-                const Icon(Icons.airport_shuttle_outlined,
-                    size: 20, color: Color(0xFF2C3E50)),
+                const Icon(Icons.airport_shuttle_outlined, size: 18, color: Color(0xFF2C3E50)),
                 Positioned(
-                  top: 4,
-                  right: 4,
-                  child: Icon(Icons.wifi,
-                      size: 9, color: Colors.redAccent.shade700),
+                  top: 3,
+                  right: 3,
+                  child: Icon(Icons.wifi, size: 8, color: Colors.redAccent.shade700),
                 ),
               ],
             ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 10),
           const Text(
-            'RouteAlert',
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: Colors.black87,
-            ),
+            'RouteAlert Incident',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87),
           ),
         ],
       ),
     );
   }
 
-  // --- Helper: แถวข้อมูลหัวข้อและรายละเอียดตาม Figma ---
   Widget _buildDetailRow({
     required String labelTH,
     required String labelEN,
@@ -259,7 +275,7 @@ class IncidentDetailScreen extends StatelessWidget {
     bool isBold = false,
   }) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 10),
+      padding: const EdgeInsets.symmetric(vertical: 8),
       child: Column(
         children: [
           Row(
@@ -272,38 +288,23 @@ class IncidentDetailScreen extends StatelessWidget {
                   children: [
                     Text(
                       labelTH,
-                      style: const TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.black87,
-                      ),
+                      style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.bold, color: Colors.black87),
                     ),
                     Text(
                       labelEN,
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: Color(0xFF5B9EE1),
-                        fontWeight: FontWeight.w600,
-                      ),
+                      style: const TextStyle(fontSize: 11.5, color: Color(0xFF5B9EE1), fontWeight: FontWeight.w600),
                     ),
                   ],
                 ),
               ),
-              const Text(
-                ':',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.black54,
-                ),
-              ),
-              const SizedBox(width: 12),
+              const Text(':', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.black54)),
+              const SizedBox(width: 10),
               Expanded(
                 flex: 6,
                 child: Text(
                   value,
                   style: TextStyle(
-                    fontSize: 15,
+                    fontSize: 14.5,
                     fontWeight: isBold ? FontWeight.bold : FontWeight.w600,
                     color: valueColor,
                   ),
@@ -311,63 +312,8 @@ class IncidentDetailScreen extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 10),
-          Divider(color: Colors.grey.shade300, thickness: 1),
-        ],
-      ),
-    );
-  }
-
-  // --- Bottom Navigation Bar ---
-  Widget _buildBottomNavigationBar(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border(top: BorderSide(color: Colors.grey.shade200)),
-      ),
-      child: BottomNavigationBar(
-        currentIndex: 1,
-        onTap: (index) {
-          if (index == 0) {
-            Navigator.pushReplacement(
-                context,
-                MaterialPageRoute(
-                    builder: (context) => const DriverHomeScreen()));
-          } else if (index == 1) {
-            Navigator.pushReplacement(
-                context,
-                MaterialPageRoute(
-                    builder: (context) => const IncidentListScreen()));
-          } else if (index == 2) {
-            Navigator.pushReplacement(
-                context,
-                MaterialPageRoute(
-                    builder: (context) => const DriverSettingsScreen()));
-          } else if (index == 3) {
-            Navigator.pushReplacement(
-                context,
-                MaterialPageRoute(
-                    builder: (context) => const DriverProfileScreen()));
-          }
-        },
-        type: BottomNavigationBarType.fixed,
-        backgroundColor: Colors.white,
-        selectedItemColor: const Color(0xFF2C3E50),
-        unselectedItemColor: Colors.grey.shade400,
-        showSelectedLabels: false,
-        showUnselectedLabels: false,
-        elevation: 0,
-        items: const [
-          BottomNavigationBarItem(
-              icon: Icon(Icons.map_outlined, size: 28), label: 'Map'),
-          BottomNavigationBarItem(
-              icon: Icon(Icons.airport_shuttle_rounded, size: 28),
-              label: 'Ambulance'),
-          BottomNavigationBarItem(
-              icon: Icon(Icons.settings_outlined, size: 28), label: 'Settings'),
-          BottomNavigationBarItem(
-              icon: Icon(Icons.person_outline_rounded, size: 28),
-              label: 'Profile'),
+          const SizedBox(height: 8),
+          Divider(color: Colors.grey.shade200, thickness: 1),
         ],
       ),
     );

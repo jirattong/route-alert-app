@@ -29,6 +29,11 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
   bool _isEmailVerified = false;
   String? _verifiedEmail;
 
+  // Real-time Email Check State
+  bool _isCheckingEmail = false;
+  bool _isEmailAlreadyRegistered = false;
+  Timer? _emailDebounceTimer;
+
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
@@ -45,12 +50,69 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
       }
     });
 
-    _emailController.addListener(() {
-      // If user changes email text after verifying, reset verified state
-      if (_isEmailVerified && _emailController.text.trim().toLowerCase() != _verifiedEmail) {
+    _emailController.addListener(_onEmailInputChanged);
+  }
+
+  void _onEmailInputChanged() {
+    final rawEmail = _emailController.text.trim();
+    final lowerEmail = rawEmail.toLowerCase();
+
+    // If user changes email text after verifying, reset verified state
+    if (_isEmailVerified && lowerEmail != _verifiedEmail) {
+      setState(() {
+        _isEmailVerified = false;
+        _verifiedEmail = null;
+      });
+    }
+
+    _emailDebounceTimer?.cancel();
+
+    if (isLogin) {
+      if (_isEmailAlreadyRegistered || _isCheckingEmail) {
         setState(() {
-          _isEmailVerified = false;
-          _verifiedEmail = null;
+          _isEmailAlreadyRegistered = false;
+          _isCheckingEmail = false;
+        });
+      }
+      return;
+    }
+
+    if (rawEmail.isEmpty) {
+      if (_isEmailAlreadyRegistered || _isCheckingEmail) {
+        setState(() {
+          _isEmailAlreadyRegistered = false;
+          _isCheckingEmail = false;
+        });
+      }
+      return;
+    }
+
+    final bool isValidEmail =
+        RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(rawEmail);
+
+    if (!isValidEmail) {
+      if (_isEmailAlreadyRegistered || _isCheckingEmail) {
+        setState(() {
+          _isEmailAlreadyRegistered = false;
+          _isCheckingEmail = false;
+        });
+      }
+      return;
+    }
+
+    // Debounce duplicate email check
+    _emailDebounceTimer = Timer(const Duration(milliseconds: 350), () async {
+      if (!mounted) return;
+      setState(() => _isCheckingEmail = true);
+
+      final isRegistered =
+          await FaceAuthRepository.isEmailRegistered(lowerEmail);
+
+      if (!mounted) return;
+      if (_emailController.text.trim().toLowerCase() == lowerEmail) {
+        setState(() {
+          _isCheckingEmail = false;
+          _isEmailAlreadyRegistered = isRegistered;
         });
       }
     });
@@ -58,6 +120,7 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
 
   @override
   void dispose() {
+    _emailDebounceTimer?.cancel();
     _nameController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
@@ -403,7 +466,10 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
     // Check duplicate email
     setState(() => _isLoading = true);
     final isDuplicate = await FaceAuthRepository.isEmailRegistered(email);
-    setState(() => _isLoading = false);
+    setState(() {
+      _isLoading = false;
+      _isEmailAlreadyRegistered = isDuplicate;
+    });
 
     if (!mounted) return;
 
@@ -411,7 +477,7 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           backgroundColor: Colors.redAccent,
-          content: Text('⚠️ อีเมลนี้มีอยู่ในระบบแล้ว กรุณาใช้อีเมลอื่น หรือสลับไปเข้าสู่ระบบ'),
+          content: Text('⚠️ อีเมลนี้มีอยู่ในระบบแล้ว (ไม่ต้องขอ OTP) กรุณาใช้อีเมลอื่น หรือกดเข้าสู่ระบบ'),
           duration: Duration(seconds: 4),
         ),
       );
@@ -567,29 +633,19 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
       return;
     }
 
-    // 2. Duplicate checks
+    // 2. Duplicate email check (Usernames can be duplicated)
     setState(() => _isLoading = true);
     final isDuplicateEmail = await FaceAuthRepository.isEmailRegistered(email);
-    final isDuplicateUser = await FaceAuthRepository.isUsernameRegistered(name);
     setState(() => _isLoading = false);
 
     if (!mounted) return;
 
     if (isDuplicateEmail) {
+      setState(() => _isEmailAlreadyRegistered = true);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           backgroundColor: Colors.redAccent,
           content: Text('⚠️ อีเมลนี้ถูกใช้งานแล้ว กรุณาใช้อีเมลอื่น หรือเข้าสู่ระบบ'),
-        ),
-      );
-      return;
-    }
-
-    if (isDuplicateUser) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          backgroundColor: Colors.redAccent,
-          content: Text('⚠️ ชื่อผู้ใช้นี้ถูกใช้งานแล้ว กรุณาระบุชื่ออื่น'),
         ),
       );
       return;
@@ -643,6 +699,7 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
     );
 
     await FaceAuthRepository.registerUser(newProfile);
+    await FaceAuthRepository.updateUserPassword(email, password);
 
     if (!mounted) return;
     setState(() => _isLoading = false);
@@ -737,7 +794,13 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
           Expanded(
             child: GestureDetector(
               onTap: () {
-                if (!isLogin) setState(() => isLogin = true);
+                if (!isLogin) {
+                  setState(() {
+                    isLogin = true;
+                    _isCheckingEmail = false;
+                    _isEmailAlreadyRegistered = false;
+                  });
+                }
               },
               child: Container(
                 decoration: BoxDecoration(
@@ -768,7 +831,12 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
           Expanded(
             child: GestureDetector(
               onTap: () {
-                if (isLogin) setState(() => isLogin = false);
+                if (isLogin) {
+                  setState(() {
+                    isLogin = false;
+                  });
+                  _onEmailInputChanged();
+                }
               },
               child: Container(
                 decoration: BoxDecoration(
@@ -1060,88 +1128,212 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
   }
 
   Widget _buildEmailWithOtpField() {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.02),
-            blurRadius: 6,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: TextField(
-              controller: _emailController,
-              keyboardType: TextInputType.emailAddress,
-              decoration: InputDecoration(
-                prefixIcon: const Icon(Icons.email_outlined,
-                    color: Colors.grey, size: 20),
-                hintText: 'name@gmail.com',
-                hintStyle:
-                    TextStyle(color: Colors.grey.shade400, fontSize: 13.5),
-                contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 16, vertical: 14),
-                border: InputBorder.none,
-              ),
+    final bool isValidFormat =
+        RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$')
+            .hasMatch(_emailController.text.trim());
+
+    Color borderColor = Colors.transparent;
+    if (_isEmailAlreadyRegistered) {
+      borderColor = Colors.redAccent;
+    } else if (_isEmailVerified) {
+      borderColor = const Color(0xFF00A896);
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          decoration: BoxDecoration(
+            color: _isEmailAlreadyRegistered
+                ? const Color(0xFFFFF5F5)
+                : Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: borderColor,
+              width: borderColor == Colors.transparent ? 0 : 1.5,
             ),
+            boxShadow: [
+              BoxShadow(
+                color: _isEmailAlreadyRegistered
+                    ? Colors.red.withValues(alpha: 0.08)
+                    : Colors.black.withValues(alpha: 0.02),
+                blurRadius: 6,
+                offset: const Offset(0, 2),
+              ),
+            ],
           ),
-          Padding(
-            padding: const EdgeInsets.only(right: 8.0),
-            child: _isEmailVerified
-                ? Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFE8F8F5),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: const Color(0xFF00A896)),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _emailController,
+                  keyboardType: TextInputType.emailAddress,
+                  decoration: InputDecoration(
+                    prefixIcon: Icon(
+                      Icons.email_outlined,
+                      color: _isEmailAlreadyRegistered
+                          ? Colors.redAccent
+                          : Colors.grey,
+                      size: 20,
                     ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.verified_user_rounded,
-                            size: 14, color: Color(0xFF00A896)),
-                        SizedBox(width: 4),
-                        Text(
-                          'ยืนยันแล้ว',
-                          style: TextStyle(
+                    hintText: 'name@gmail.com',
+                    hintStyle:
+                        TextStyle(color: Colors.grey.shade400, fontSize: 13.5),
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 14),
+                    border: InputBorder.none,
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(right: 8.0),
+                child: _isCheckingEmail
+                    ? const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 12),
+                        child: SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
                             color: Color(0xFF00A896),
-                            fontSize: 11.5,
-                            fontWeight: FontWeight.bold,
                           ),
                         ),
-                      ],
-                    ),
-                  )
-                : ElevatedButton(
-                    onPressed: _isLoading ? null : _onRequestEmailOtp,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF00A896),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      elevation: 0,
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 8),
-                      minimumSize: Size.zero,
-                    ),
-                    child: const Text(
-                      'ขอ OTP',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                      ),
+                      )
+                    : _isEmailAlreadyRegistered
+                        ? Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: Colors.red.shade100,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: Colors.redAccent),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.error_outline_rounded,
+                                    size: 14, color: Colors.redAccent),
+                                SizedBox(width: 4),
+                                Text(
+                                  'มีในระบบแล้ว',
+                                  style: TextStyle(
+                                    color: Colors.redAccent,
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          )
+                        : _isEmailVerified
+                            ? Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 10, vertical: 6),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFE8F8F5),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                      color: const Color(0xFF00A896)),
+                                ),
+                                child: const Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.verified_user_rounded,
+                                        size: 14, color: Color(0xFF00A896)),
+                                    SizedBox(width: 4),
+                                    Text(
+                                      'ยืนยันแล้ว',
+                                      style: TextStyle(
+                                        color: Color(0xFF00A896),
+                                        fontSize: 11.5,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              )
+                            : ElevatedButton(
+                                onPressed: (_isLoading ||
+                                        _isEmailAlreadyRegistered ||
+                                        !isValidFormat)
+                                    ? null
+                                    : _onRequestEmailOtp,
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF00A896),
+                                  disabledBackgroundColor:
+                                      Colors.grey.shade300,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  elevation: 0,
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 12, vertical: 8),
+                                  minimumSize: Size.zero,
+                                ),
+                                child: Text(
+                                  'ขอ OTP',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                    color: (_isEmailAlreadyRegistered ||
+                                            !isValidFormat)
+                                        ? Colors.grey.shade600
+                                        : Colors.white,
+                                  ),
+                                ),
+                              ),
+              ),
+            ],
+          ),
+        ),
+        if (_isEmailAlreadyRegistered) ...[
+          const SizedBox(height: 6),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+            decoration: BoxDecoration(
+              color: Colors.red.shade50,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: Colors.red.shade200),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.warning_amber_rounded,
+                    size: 16, color: Colors.redAccent),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    '⚠️ อีเมลนี้มีอยู่ในระบบแล้ว (ไม่ต้องขอ OTP) กรุณาใช้อีเมลอื่น หรือกดปุ่ม "Sign in"',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      color: Colors.red.shade800,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
+                ),
+              ],
+            ),
+          ),
+        ] else if (!_isEmailVerified &&
+            isValidFormat &&
+            !_isCheckingEmail) ...[
+          const SizedBox(height: 5),
+          Row(
+            children: [
+              Icon(Icons.check_circle_outline_rounded,
+                  size: 14, color: Colors.teal.shade600),
+              const SizedBox(width: 4),
+              Text(
+                '✓ อีเมลนี้สามารถใช้ลงทะเบียนได้ (กด "ขอ OTP" เพื่อยืนยัน)',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: Colors.teal.shade700,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
           ),
         ],
-      ),
+      ],
     );
   }
 

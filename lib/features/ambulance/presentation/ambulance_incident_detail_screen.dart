@@ -1,14 +1,19 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import '../../../core/models/incident_report.dart';
+import '../../../core/services/incident_service.dart';
 
 class AmbulanceIncidentDetailScreen extends StatefulWidget {
-  final Map<String, dynamic> incidentData;
+  final IncidentReport? incident;
+  final Map<String, dynamic>? incidentData;
 
   const AmbulanceIncidentDetailScreen({
     super.key,
-    required this.incidentData,
+    this.incident,
+    this.incidentData,
   });
 
   @override
@@ -23,17 +28,19 @@ class _AmbulanceIncidentDetailScreenState
 
   // ลำดับขั้นตอนการปฏิบัติงาน (Forward-Only State)
   final List<Map<String, String>> _statusSteps = [
-    {'title': 'กำลังรอยืนยัน', 'desc': 'รอรถพยาบาลกดรับเคส'},
-    {'title': 'กำลังเดินทางไปรับเคส', 'desc': 'ยิงสัญญาณเตือนผู้ใช้บนถนนเปิดทาง'},
-    {'title': 'ถึงจุดเกิดเหตุแล้ว', 'desc': 'กำลังปฐมพยาบาลและประเมินผู้ป่วย'},
-    {'title': 'รับผู้ป่วยแล้ว - กำลังส่ง รพ.', 'desc': 'นำทางและแจ้งห้อง ER เตรียมรับสาย'},
-    {'title': 'ถึงโรงพยาบาล (เสร็จสิ้น)', 'desc': 'ส่งมอบผู้ป่วยและปิดภารกิจ'},
+    {'title': 'กำลังรอยืนยัน', 'desc': 'รอรถพยาบาลกดรับเคส', 'status': 'pending'},
+    {'title': 'กำลังเดินทางไปรับเคส', 'desc': 'ยิงสัญญาณเตือนผู้ใช้บนถนนเปิดทาง', 'status': 'assigned'},
+    {'title': 'ถึงจุดเกิดเหตุแล้ว', 'desc': 'กำลังปฐมพยาบาลและประเมินผู้ป่วย', 'status': 'at_scene'},
+    {'title': 'รับผู้ป่วยแล้ว - กำลังส่ง รพ.', 'desc': 'นำทางและแจ้งห้อง ER เตรียมรับสาย', 'status': 'transporting'},
+    {'title': 'ถึงโรงพยาบาล (เสร็จสิ้น)', 'desc': 'ส่งมอบผู้ป่วยและปิดภารกิจ', 'status': 'resolved'},
   ];
 
   @override
   void initState() {
     super.initState();
-    _currentStep = widget.incidentData['statusStep'] ?? 1;
+    _currentStep = widget.incident?.statusStep ?? widget.incidentData?['statusStep'] ?? 1;
+    if (_currentStep < 0) _currentStep = 0;
+    if (_currentStep >= _statusSteps.length) _currentStep = _statusSteps.length - 1;
   }
 
   void _takePhoto() {
@@ -45,22 +52,21 @@ class _AmbulanceIncidentDetailScreenState
     );
   }
 
-  // ⏳ ⏳ หน้าต่างยืนยันเปลี่ยนสถานะ พร้อมคูลดาวน์นับถอยหลัง 3 วินาที
+  // ⏳ หน้าต่างยืนยันเปลี่ยนสถานะ พร้อมคูลดาวน์นับถอยหลัง 3 วินาที
   void _showNextStatusConfirmDialog() {
     if (_currentStep >= _statusSteps.length - 1) return;
 
     final nextStepInfo = _statusSteps[_currentStep + 1];
-    int cooldownSec = 3; // ⏳ ตัวแปรนับถอยหลัง 3 วินาที
+    int cooldownSec = 3;
 
     showDialog(
       context: context,
-      barrierDismissible: false, // ป้องกันการกดปิดนอกจอด้านนอกขณะนับเวลา
+      barrierDismissible: false,
       builder: (ctx) {
         return StatefulBuilder(
           builder: (context, setModalState) {
-            // เริ่มนับถอยหลัง Timer 3 วินาที
             Timer? timer;
-            if (cooldownSec > 0 && !(timer?.isActive ?? false)) {
+            if (cooldownSec > 0) {
               timer = Timer.periodic(const Duration(seconds: 1), (t) {
                 if (cooldownSec > 0) {
                   setModalState(() {
@@ -125,7 +131,6 @@ class _AmbulanceIncidentDetailScreenState
                     ),
                     const SizedBox(height: 24),
 
-                    // ปุ่มยกเลิก และ ปุ่มยืนยัน (ติดคูลดาวน์ 3 วินาที)
                     Row(
                       children: [
                         Expanded(
@@ -154,15 +159,26 @@ class _AmbulanceIncidentDetailScreenState
                         const SizedBox(width: 12),
                         Expanded(
                           child: ElevatedButton(
-                            // 🔒 ปิดปุ่มไว้จนกว่าคูลดาวน์ 3 วินาทีจะครบ
                             onPressed: cooldownSec == 0
-                                ? () {
+                                ? () async {
                                     timer?.cancel();
                                     Navigator.pop(ctx);
+                                    final newStep = _currentStep + 1;
                                     setState(() {
-                                      _currentStep++;
+                                      _currentStep = newStep;
                                     });
-                                    ScaffoldMessenger.of(context).showSnackBar(
+
+                                    final scaffoldMessenger = ScaffoldMessenger.of(context);
+                                    final caseId = widget.incident?.id ?? widget.incidentData?['id'] ?? '';
+                                    if (caseId.isNotEmpty) {
+                                      await IncidentService().updateIncidentProgressStep(
+                                        id: caseId,
+                                        step: newStep,
+                                        status: _statusSteps[newStep]['status']!,
+                                      );
+                                    }
+
+                                    scaffoldMessenger.showSnackBar(
                                       SnackBar(
                                         content: Text(
                                             'อัปเดตสถานะเป็น "${_statusSteps[_currentStep]['title']}" เรียบร้อยแล้ว'),
@@ -207,8 +223,20 @@ class _AmbulanceIncidentDetailScreenState
 
   @override
   Widget build(BuildContext context) {
-    const LatLng incidentLocation = LatLng(19.0284, 99.8962);
-    const LatLng ambulanceLocation = LatLng(19.0350, 99.8962);
+    final String id = widget.incident?.id ?? widget.incidentData?['id'] ?? 'Case #AVCB00021';
+    final String type = widget.incident?.type ?? widget.incidentData?['type'] ?? 'อุบัติเหตุทางรถยนต์';
+    final String severity = widget.incident?.severity ?? widget.incidentData?['severity'] ?? 'ปานกลาง (Medium)';
+    final String address = widget.incident?.address ?? widget.incidentData?['location'] ?? 'อ.ฝาง จ.เชียงใหม่';
+    final String desc = widget.incident?.description ?? widget.incidentData?['description'] ?? '-';
+    final String? photoBase64 = widget.incident?.photoBase64;
+
+    final LatLng incidentLocation = widget.incident != null
+        ? LatLng(widget.incident!.latitude, widget.incident!.longitude)
+        : const LatLng(19.0284, 99.8962);
+    final LatLng ambulanceLocation = LatLng(
+      incidentLocation.latitude + 0.008,
+      incidentLocation.longitude + 0.008,
+    );
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -216,20 +244,19 @@ class _AmbulanceIncidentDetailScreenState
         child: Column(
           children: [
             _buildHeader(),
-
             Expanded(
               child: SingleChildScrollView(
                 child: Column(
                   children: [
-                    // --- แผนที่ครึ่งบน ---
+                    // แผนที่นำทาง
                     SizedBox(
                       height: 210,
                       child: Stack(
                         children: [
                           FlutterMap(
-                            options: const MapOptions(
+                            options: MapOptions(
                               initialCenter: ambulanceLocation,
-                              initialZoom: 15.0,
+                              initialZoom: 14.5,
                             ),
                             children: [
                               TileLayer(
@@ -245,20 +272,20 @@ class _AmbulanceIncidentDetailScreenState
                                   ),
                                 ],
                               ),
-                              const MarkerLayer(
+                              MarkerLayer(
                                 markers: [
                                   Marker(
                                     point: ambulanceLocation,
                                     width: 44,
                                     height: 44,
-                                    child: Center(
+                                    child: const Center(
                                         child: Text('🚑', style: TextStyle(fontSize: 26))),
                                   ),
                                   Marker(
                                     point: incidentLocation,
                                     width: 36,
                                     height: 36,
-                                    child: Icon(
+                                    child: const Icon(
                                       Icons.location_on_rounded,
                                       color: Color(0xFFEB5757),
                                       size: 38,
@@ -287,7 +314,7 @@ class _AmbulanceIncidentDetailScreenState
 
                     const SizedBox(height: 16),
 
-                    // --- ป้าย Case ID ---
+                    // ป้าย Case ID
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 8),
                       decoration: BoxDecoration(
@@ -302,7 +329,7 @@ class _AmbulanceIncidentDetailScreenState
                         ],
                       ),
                       child: Text(
-                        widget.incidentData['id'] ?? 'Case #AVCB00021',
+                        id,
                         style: const TextStyle(
                           fontSize: 20,
                           fontWeight: FontWeight.bold,
@@ -313,7 +340,7 @@ class _AmbulanceIncidentDetailScreenState
 
                     const SizedBox(height: 16),
 
-                    // 📊 --- แถบ Visual Stepper แสดงความคืบหน้า 5 ขั้นตอน --- 📊
+                    // แถบ Visual Stepper แสดงความคืบหน้า 5 ขั้นตอน
                     _buildStatusStepper(),
 
                     const SizedBox(height: 12),
@@ -322,7 +349,7 @@ class _AmbulanceIncidentDetailScreenState
                       child: Divider(color: Colors.grey.shade300, thickness: 1.5),
                     ),
 
-                    // --- รายละเอียดเคส ---
+                    // รายละเอียดเคส
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 28),
                       child: Column(
@@ -337,138 +364,148 @@ class _AmbulanceIncidentDetailScreenState
                           _buildDetailRow(
                             labelTH: 'ประเภทอุบัติเหตุ',
                             labelEN: '(Type of incident)',
-                            value: widget.incidentData['type'] ?? 'อุบัติเหตุทางรถยนต์',
+                            value: type,
                           ),
                           _buildDetailRow(
                             labelTH: 'ระดับความรุนแรง',
                             labelEN: '(Severity)',
-                            value: widget.incidentData['severity'] ?? 'ปานกลาง (Medium)',
+                            value: severity,
                           ),
+                          _buildDetailRow(
+                            labelTH: 'สถานที่เกิดเหตุ',
+                            labelEN: '(Location)',
+                            value: address,
+                          ),
+                          if (desc.isNotEmpty && desc != '-')
+                            _buildDetailRow(
+                              labelTH: 'รายละเอียดเพิ่มเติม',
+                              labelEN: '(Description)',
+                              value: desc,
+                            ),
                         ],
                       ),
                     ),
 
-                    const SizedBox(height: 12),
+                    // รูปถ่ายจากจุดเกิดเหตุ (ส่งจาก Driver SOS)
+                    if (photoBase64 != null && photoBase64.isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 28),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('รูปถ่ายจากผู้แจ้งเหตุ (Driver Photo):', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                            const SizedBox(height: 6),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(16),
+                              child: Image.memory(
+                                base64Decode(photoBase64),
+                                height: 160,
+                                width: double.infinity,
+                                fit: BoxFit.cover,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
 
-                    // --- ส่วนถ่ายรูปภาพหน้างาน ---
+                    const SizedBox(height: 16),
+
+                    // แกลเลอรีรูปถ่ายหน้างานเพิ่มเติม
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 28),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          const Row(
                             children: [
-                              const Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    'รูปภาพหน้างาน',
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.black87,
-                                    ),
-                                  ),
-                                  Text(
-                                    '(Image - For ER Staff)',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: Color(0xFFEB5757),
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              ElevatedButton.icon(
-                                onPressed: _takePhoto,
-                                icon: const Icon(Icons.camera_alt_rounded,
-                                    size: 16, color: Colors.white),
-                                label: const Text('ถ่ายรูป',
-                                    style: TextStyle(color: Colors.white, fontSize: 13)),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: const Color(0xFFEB5757),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(18),
-                                  ),
-                                ),
-                              ),
+                              Text('รูปภาพเพิ่มเติมหน้างาน', style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.bold)),
+                              SizedBox(width: 4),
+                              Text('(ER Scene Photo)', style: TextStyle(fontSize: 11, color: Color(0xFFEB5757))),
                             ],
                           ),
                           const SizedBox(height: 8),
-                          _photoList.isEmpty
-                              ? Container(
-                                  height: 80,
-                                  width: double.infinity,
+                          Row(
+                            children: [
+                              InkWell(
+                                onTap: _takePhoto,
+                                borderRadius: BorderRadius.circular(14),
+                                child: Container(
+                                  width: 60,
+                                  height: 60,
                                   decoration: BoxDecoration(
                                     color: Colors.grey.shade100,
-                                    borderRadius: BorderRadius.circular(16),
+                                    borderRadius: BorderRadius.circular(14),
                                     border: Border.all(color: Colors.grey.shade300),
                                   ),
-                                  child: Center(
-                                    child: Text(
-                                      'ยังไม่มีรูปภาพหน้างาน',
-                                      style: TextStyle(
-                                          color: Colors.grey.shade500, fontSize: 12),
-                                    ),
-                                  ),
-                                )
-                              : SizedBox(
-                                  height: 80,
-                                  child: ListView.builder(
-                                    scrollDirection: Axis.horizontal,
-                                    itemCount: _photoList.length,
-                                    itemBuilder: (ctx, index) {
-                                      return Container(
-                                        margin: const EdgeInsets.only(right: 10),
-                                        width: 110,
-                                        decoration: BoxDecoration(
-                                          borderRadius: BorderRadius.circular(12),
-                                          image: DecorationImage(
-                                            image: NetworkImage(_photoList[index]),
-                                            fit: BoxFit.cover,
+                                  child: const Icon(Icons.add_a_photo_outlined, color: Color(0xFFEB5757), size: 24),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: _photoList.isEmpty
+                                    ? Text('ยังไม่มีรูปถ่ายเพิ่มเติม', style: TextStyle(color: Colors.grey.shade500, fontSize: 12))
+                                    : SizedBox(
+                                        height: 60,
+                                        child: ListView.builder(
+                                          scrollDirection: Axis.horizontal,
+                                          itemCount: _photoList.length,
+                                          itemBuilder: (ctx, i) => Container(
+                                            margin: const EdgeInsets.only(right: 8),
+                                            width: 60,
+                                            height: 60,
+                                            decoration: BoxDecoration(
+                                              borderRadius: BorderRadius.circular(14),
+                                              image: DecorationImage(
+                                                image: NetworkImage(_photoList[i]),
+                                                fit: BoxFit.cover,
+                                              ),
+                                            ),
                                           ),
                                         ),
-                                      );
-                                    },
-                                  ),
-                                ),
+                                      ),
+                              ),
+                            ],
+                          ),
                         ],
                       ),
                     ),
 
                     const SizedBox(height: 24),
 
-                    // 🔘 --- ปุ่มเปลี่ยนสถานะขั้นตอนถัดไป --- 🔘
-                    if (_currentStep < _statusSteps.length - 1)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 28),
-                        child: SizedBox(
-                          width: double.infinity,
-                          child: ElevatedButton.icon(
-                            onPressed: _showNextStatusConfirmDialog,
-                            icon: const Icon(Icons.arrow_forward_rounded,
-                                color: Colors.white),
-                            label: Text(
-                              'ถัดไป: ${_statusSteps[_currentStep + 1]['title']}',
-                              style: const TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.white,
-                              ),
+                    // ปุ่มเปลี่ยนสถานะขั้นตอนถัดไป
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 28),
+                      child: SizedBox(
+                        width: double.infinity,
+                        height: 48,
+                        child: ElevatedButton(
+                          onPressed: _currentStep < _statusSteps.length - 1
+                              ? _showNextStatusConfirmDialog
+                              : null,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFFEB5757),
+                            disabledBackgroundColor: const Color(0xFF10B981),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(24),
                             ),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFFEB5757),
-                              padding: const EdgeInsets.symmetric(vertical: 14),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(25),
-                              ),
+                            elevation: 2,
+                          ),
+                          child: Text(
+                            _currentStep < _statusSteps.length - 1
+                                ? '👉 เลื่อนสถานะเป็น "${_statusSteps[_currentStep + 1]['title']}"'
+                                : '✅ ภารกิจนำส่งเสร็จสิ้นสมบูรณ์',
+                            style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
                             ),
                           ),
                         ),
                       ),
-
-                    const SizedBox(height: 30),
+                    ),
+                    const SizedBox(height: 36),
                   ],
                 ),
               ),
@@ -479,15 +516,15 @@ class _AmbulanceIncidentDetailScreenState
     );
   }
 
-  // --- แถบ Visual Stepper แสดงความคืบหน้า ---
   Widget _buildStatusStepper() {
-    return Padding(
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
       padding: const EdgeInsets.symmetric(horizontal: 20),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: List.generate(_statusSteps.length, (index) {
-          bool isPassed = index <= _currentStep;
-          bool isCurrent = index == _currentStep;
+          final isPassed = index < _currentStep;
+          final isCurrent = index == _currentStep;
 
           return Row(
             children: [
@@ -495,7 +532,11 @@ class _AmbulanceIncidentDetailScreenState
                 width: 32,
                 height: 32,
                 decoration: BoxDecoration(
-                  color: isPassed ? const Color(0xFFEB5757) : Colors.grey.shade200,
+                  color: isPassed
+                      ? const Color(0xFFEB5757)
+                      : isCurrent
+                          ? const Color(0xFFFFEAEA)
+                          : Colors.grey.shade200,
                   shape: BoxShape.circle,
                   border: Border.all(
                     color: isCurrent ? Colors.redAccent.shade700 : Colors.transparent,
@@ -508,7 +549,7 @@ class _AmbulanceIncidentDetailScreenState
                       : Text(
                           '${index + 1}',
                           style: TextStyle(
-                            color: Colors.grey.shade600,
+                            color: isCurrent ? const Color(0xFFEB5757) : Colors.grey.shade600,
                             fontWeight: FontWeight.bold,
                             fontSize: 12,
                           ),
@@ -517,7 +558,7 @@ class _AmbulanceIncidentDetailScreenState
               ),
               if (index < _statusSteps.length - 1)
                 Container(
-                  width: 35,
+                  width: 30,
                   height: 3,
                   color: index < _currentStep
                       ? const Color(0xFFEB5757)
@@ -569,7 +610,7 @@ class _AmbulanceIncidentDetailScreenState
           ),
           const SizedBox(width: 12),
           const Text(
-            'RouteAlert',
+            'RouteAlert Ambulance',
             style: TextStyle(
               fontSize: 20,
               fontWeight: FontWeight.bold,
@@ -589,7 +630,7 @@ class _AmbulanceIncidentDetailScreenState
     bool isBold = false,
   }) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.symmetric(vertical: 7),
       child: Column(
         children: [
           Row(

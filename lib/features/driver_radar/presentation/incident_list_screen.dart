@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import '../../../core/models/incident_report.dart';
+import '../../../core/services/incident_service.dart';
+import 'incident_detail_screen.dart';
 
 class IncidentListScreen extends StatefulWidget {
   final VoidCallback? onOpenSos;
@@ -13,28 +16,11 @@ class _IncidentListScreenState extends State<IncidentListScreen> {
   String _selectedProvince = 'เชียงใหม่';
   int _selectedTab = 0; // 0 = เหตุในบริเวณพื้นที่, 1 = รายงานของฉัน (SOS)
 
-  final List<Map<String, dynamic>> _incidents = [
-    {
-      'id': 'Case #AVCB00021',
-      'location': 'อ.ฝาง จ.เชียงใหม่',
-      'type': 'อุบัติเหตุทางรถยนต์',
-      'carPlate': 'กขค123',
-      'status': 'กำลังรอยืนยัน',
-      'statusColor': const Color(0xFF5B9EE1),
-      'hasAmbulance': true,
-      'hasPolice': true,
-    },
-    {
-      'id': 'Case #AVCB00019',
-      'location': 'อ.เมือง จ.เชียงใหม่',
-      'type': 'การจราจรติดขัดรุนแรง',
-      'carPlate': 'ขก4567',
-      'status': 'กำลังดำเนินการ',
-      'statusColor': const Color(0xFFF59E0B),
-      'hasAmbulance': false,
-      'hasPolice': true,
-    },
-  ];
+  @override
+  void initState() {
+    super.initState();
+    IncidentService().initialize();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -107,6 +93,7 @@ class _IncidentListScreenState extends State<IncidentListScreen> {
                         Expanded(
                           child: InkWell(
                             onTap: () => setState(() => _selectedTab = 0),
+                            borderRadius: BorderRadius.circular(24),
                             child: Container(
                               padding: const EdgeInsets.symmetric(vertical: 10),
                               decoration: BoxDecoration(
@@ -127,6 +114,7 @@ class _IncidentListScreenState extends State<IncidentListScreen> {
                         Expanded(
                           child: InkWell(
                             onTap: () => setState(() => _selectedTab = 1),
+                            borderRadius: BorderRadius.circular(24),
                             child: Container(
                               padding: const EdgeInsets.symmetric(vertical: 10),
                               decoration: BoxDecoration(
@@ -150,12 +138,54 @@ class _IncidentListScreenState extends State<IncidentListScreen> {
                 ),
                 const SizedBox(height: 12),
 
-                // รายการเหตุ
+                // รายการเหตุแบบ Real-Time จาก IncidentService
                 Expanded(
-                  child: ListView.builder(
-                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
-                    itemCount: _incidents.length,
-                    itemBuilder: (context, index) => _buildIncidentCard(_incidents[index]),
+                  child: StreamBuilder<List<IncidentReport>>(
+                    stream: IncidentService().incidentsStream,
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
+                        return const Center(
+                          child: CircularProgressIndicator(color: Color(0xFF5B9EE1)),
+                        );
+                      }
+
+                      final allList = snapshot.data ?? [];
+                      // กรองตามแท็บ
+                      final filtered = allList.where((item) {
+                        if (_selectedTab == 1) {
+                          // My SOS reports
+                          return true;
+                        } else {
+                          // Area incidents
+                          return item.province.contains(_selectedProvince);
+                        }
+                      }).toList();
+
+                      if (filtered.isEmpty) {
+                        return Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.check_circle_outline_rounded,
+                                  color: Colors.grey.shade400, size: 56),
+                              const SizedBox(height: 12),
+                              Text(
+                                _selectedTab == 1
+                                    ? 'คุณยังไม่มีประวัติแจ้งเหตุฉุกเฉิน'
+                                    : 'ไม่มีรายงานเหตุฉุกเฉินในพื้นที่ $_selectedProvince',
+                                style: TextStyle(color: Colors.grey.shade600, fontSize: 14),
+                              ),
+                            ],
+                          ),
+                        );
+                      }
+
+                      return ListView.builder(
+                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+                        itemCount: filtered.length,
+                        itemBuilder: (context, index) => _buildIncidentCard(filtered[index]),
+                      );
+                    },
                   ),
                 ),
               ],
@@ -202,76 +232,99 @@ class _IncidentListScreenState extends State<IncidentListScreen> {
     );
   }
 
-  Widget _buildIncidentCard(Map<String, dynamic> item) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: const Color(0xFF5B9EE1), width: 1.8),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF5B9EE1).withValues(alpha: 0.12),
-            blurRadius: 10,
-            offset: const Offset(0, 3),
+  Widget _buildIncidentCard(IncidentReport item) {
+    return InkWell(
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => IncidentDetailScreen(incident: item),
           ),
-        ],
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                item['location'],
-                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                item['id'],
-                style: TextStyle(fontSize: 13, color: Colors.grey.shade600, fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                item['type'],
-                style: const TextStyle(fontSize: 14, color: Colors.black87),
-              ),
-              if (item['carPlate'] != null) ...[
-                const SizedBox(height: 2),
-                Text(
-                  'เลขรถรับเคส : ${item['carPlate']}',
-                  style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
-                ),
-              ],
-              const SizedBox(height: 8),
-              Row(
+        );
+      },
+      borderRadius: BorderRadius.circular(22),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 16),
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(color: const Color(0xFF5B9EE1), width: 1.8),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFF5B9EE1).withValues(alpha: 0.12),
+              blurRadius: 10,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    item['status'],
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.bold,
-                      color: item['statusColor'],
-                    ),
+                    item.address.isNotEmpty ? item.address : item.province,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.bold),
                   ),
-                  const SizedBox(width: 8),
-                  if (item['hasAmbulance'] == true) const Text('🚑', style: TextStyle(fontSize: 16)),
-                  if (item['hasPolice'] == true) const Text('🚓', style: TextStyle(fontSize: 16)),
+                  const SizedBox(height: 2),
+                  Text(
+                    item.id,
+                    style: TextStyle(fontSize: 12.5, color: Colors.grey.shade600, fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    item.type,
+                    style: const TextStyle(fontSize: 13.5, color: Colors.black87),
+                  ),
+                  if (item.assignedAmbulancePlate != null && item.assignedAmbulancePlate!.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      'เลขรถรับเคส : ${item.assignedAmbulancePlate}',
+                      style: TextStyle(fontSize: 12.5, color: Colors.grey.shade700),
+                    ),
+                  ],
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: item.statusColor.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          item.statusText,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            color: item.statusColor,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      if (item.assignedAmbulancePlate != null)
+                        const Text('🚑', style: TextStyle(fontSize: 15)),
+                    ],
+                  ),
                 ],
               ),
-            ],
-          ),
-          Container(
-            padding: const EdgeInsets.all(6),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: const Color(0xFF5B9EE1), width: 1.5),
             ),
-            child: const Icon(Icons.arrow_forward_ios_rounded, color: Color(0xFF5B9EE1), size: 18),
-          ),
-        ],
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFF5B9EE1), width: 1.5),
+              ),
+              child: const Icon(Icons.arrow_forward_ios_rounded, color: Color(0xFF5B9EE1), size: 16),
+            ),
+          ],
+        ),
       ),
     );
   }

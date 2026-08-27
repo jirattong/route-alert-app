@@ -1,6 +1,9 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import '../../../core/services/emergency_mqtt_service.dart';
+import '../../../core/services/location_service.dart';
 
 class AmbulanceHomeScreen extends StatefulWidget {
   const AmbulanceHomeScreen({super.key});
@@ -13,9 +16,63 @@ class _AmbulanceHomeScreenState extends State<AmbulanceHomeScreen> {
   // สถานะเปิด/ปิดส่งสัญญาณเตือนฉุกเฉิน
   bool _isNotificationAlert = false;
 
-  // ข้อมูลจำลองพิกัดรถพยาบาล และจุดเกิดเหตุ
-  final LatLng _ambulanceLocation = const LatLng(19.0350, 99.8962);
+  // ข้อมูลพิกัดรถพยาบาล และจุดเกิดเหตุ
+  LatLng _ambulanceLocation = const LatLng(19.0350, 99.8962);
   final LatLng _incidentLocation = const LatLng(19.0284, 99.8962);
+
+  StreamSubscription<LatLng>? _locationSub;
+  Timer? _broadcastTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _initAmbulanceTracking();
+  }
+
+  void _initAmbulanceTracking() async {
+    await EmergencyMqttService().initialize();
+    final pos = await LocationService.getCurrentLocation();
+    if (pos != null && mounted) {
+      setState(() => _ambulanceLocation = pos);
+    }
+
+    _locationSub = LocationService.getLiveLocationStream().listen((newPos) {
+      if (!mounted) return;
+      setState(() => _ambulanceLocation = newPos);
+      if (_isNotificationAlert) {
+        _broadcastCurrentLocation();
+      }
+    });
+
+    // Heartbeat broadcast every 3s when alert is active
+    _broadcastTimer = Timer.periodic(const Duration(seconds: 3), (timer) {
+      if (_isNotificationAlert && mounted) {
+        _broadcastCurrentLocation();
+      }
+    });
+  }
+
+  void _broadcastCurrentLocation() {
+    EmergencyMqttService().broadcastAmbulanceLocation(
+      EmergencyVehicleData(
+        id: 'AMB-1669-01',
+        callSign: 'กู้ชีพนครพิงค์ 01',
+        latitude: _ambulanceLocation.latitude,
+        longitude: _ambulanceLocation.longitude,
+        speed: 65.0,
+        emergencyType: 'ผู้ป่วยวิกฤตฉุกเฉิน (Red Code)',
+        sirenActive: _isNotificationAlert,
+        timestamp: DateTime.now(),
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _locationSub?.cancel();
+    _broadcastTimer?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -220,6 +277,9 @@ class _AmbulanceHomeScreenState extends State<AmbulanceHomeScreen> {
                   inactiveTrackColor: Colors.grey.shade400,
                   onChanged: (value) {
                     setState(() => _isNotificationAlert = value);
+                    if (value) {
+                      _broadcastCurrentLocation();
+                    }
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
                         content: Text(

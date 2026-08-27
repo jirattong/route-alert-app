@@ -13,7 +13,8 @@ class VoiceAlertService {
   // Cooldown timestamps to avoid spamming the driver
   DateTime? _lastOuterAlertTime;
   DateTime? _lastRedAlertTime;
-  static const int _alertCooldownSeconds = 15;
+  DateTime? _lastPassedTime;
+  static const int _alertCooldownSeconds = 12;
 
   Future<void> initialize() async {
     if (_isInitialized) return;
@@ -32,7 +33,7 @@ class VoiceAlertService {
       }
 
       await _flutterTts.setLanguage('th-TH');
-      await _flutterTts.setSpeechRate(0.5); // Clear, readable speed
+      await _flutterTts.setSpeechRate(0.52); // Clear, readable speed
       await _flutterTts.setVolume(1.0);
       await _flutterTts.setPitch(1.0);
 
@@ -42,7 +43,7 @@ class VoiceAlertService {
     }
   }
 
-  /// Speaks outer geofence warning (1500 meters)
+  /// Speaks outer geofence warning (3 km / 1.5 km)
   Future<void> speakOuterRadarAlert() async {
     final now = DateTime.now();
     if (_lastOuterAlertTime != null &&
@@ -51,24 +52,42 @@ class VoiceAlertService {
     }
     _lastOuterAlertTime = now;
 
-    await _speak('มีรถพยาบาลฉุกเฉินในรัศมี 1.5 กิโลเมตร โปรดระมัดระวัง');
+    await _speak('สัญญาณเรดาร์! ตรวจพบรถพยาบาลเปิดไซเรนกำลังมุ่งหน้ามาในเส้นทางของคุณ');
   }
 
-  /// Speaks critical red-zone alert (400 meters)
-  Future<void> speakRedAlert() async {
+  /// Speaks critical red-zone alert with dynamic distance
+  Future<void> speakCriticalAlert(int meters) async {
     final now = DateTime.now();
     if (_lastRedAlertTime != null &&
-        now.difference(_lastRedAlertTime!).inSeconds < 10) {
+        now.difference(_lastRedAlertTime!).inSeconds < 8) {
       return;
     }
     _lastRedAlertTime = now;
 
-    await _speak('แจ้งเตือนฉุกเฉิน! รถพยาบาลกำลังเข้าใกล้ในระยะ 400 เมตร โปรดชะลอความเร็วและเปิดทาง');
+    String distText = meters < 100 ? 'ระยะกระชั้นชิด' : 'ระยะ $meters เมตร';
+    await _speak('แจ้งเตือนฉุกเฉินระดับวิกฤต! รถพยาบาลกำลังตามหลังมาใน$distText กรุณาชะลอความเร็วและเบี่ยงทางทันที');
   }
 
-  /// Speaks thank-you message after yielding
+  /// Speaks critical red-zone alert default
+  Future<void> speakRedAlert() async {
+    await speakCriticalAlert(400);
+  }
+
+  /// Speaks notification when ambulance has successfully passed / overtaken
+  Future<void> speakAmbulancePassed() async {
+    final now = DateTime.now();
+    if (_lastPassedTime != null &&
+        now.difference(_lastPassedTime!).inSeconds < 15) {
+      return;
+    }
+    _lastPassedTime = now;
+
+    await _speak('รถพยาบาลฉุกเฉินเคลื่อนที่ผ่านไปแล้ว ปลอดภัยแล้วครับ ขอบคุณที่ร่วมเปิดทาง');
+  }
+
+  /// Speaks thank-you message after user manually taps yield
   Future<void> speakYieldSuccess() async {
-    await _speak('ขอบคุณที่เปิดทางให้รถพยาบาลฉุกเฉินครับ');
+    await _speak('ขอบคุณที่ร่วมเปิดทางช่วยชีวิตผู้ป่วยฉุกเฉินครับ');
   }
 
   Future<void> _speak(String text) async {
