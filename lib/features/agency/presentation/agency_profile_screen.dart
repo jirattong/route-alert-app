@@ -102,7 +102,7 @@ class _AgencyProfileScreenState extends State<AgencyProfileScreen> {
                     // --- เมนูแก้ไขรหัสผ่าน ---
                     _buildOptionTile(
                       title: 'แก้ไขรหัสผ่าน (Password)',
-                      onTap: () {},
+                      onTap: () => _showEditPasswordModal(context),
                     ),
 
                     const SizedBox(height: 32),
@@ -457,7 +457,7 @@ class _AgencyProfileScreenState extends State<AgencyProfileScreen> {
     );
   }
 
-  Widget _buildModalTextField(String label, TextEditingController controller) {
+  Widget _buildModalTextField(String label, TextEditingController controller, {bool isPassword = false}) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -465,6 +465,7 @@ class _AgencyProfileScreenState extends State<AgencyProfileScreen> {
         const SizedBox(height: 6),
         TextField(
           controller: controller,
+          obscureText: isPassword,
           decoration: InputDecoration(
             contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             border: OutlineInputBorder(
@@ -478,6 +479,81 @@ class _AgencyProfileScreenState extends State<AgencyProfileScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  // --- Modal แก้ไขรหัสผ่าน ---
+  void _showEditPasswordModal(BuildContext context) {
+    final oldPassCtrl = TextEditingController();
+    final newPassCtrl = TextEditingController();
+    final confirmPassCtrl = TextEditingController();
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
+      builder: (ctx) {
+        return Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
+            top: 20,
+            left: 24,
+            right: 24,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+              const SizedBox(height: 16),
+              _buildModalTextField('รหัสผ่านเดิม', oldPassCtrl, isPassword: true),
+              const SizedBox(height: 14),
+              _buildModalTextField('รหัสผ่านใหม่ (อย่างน้อย 6 ตัวอักษร)', newPassCtrl, isPassword: true),
+              const SizedBox(height: 14),
+              _buildModalTextField('ยืนยันรหัสผ่านใหม่', confirmPassCtrl, isPassword: true),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () {
+                    if (newPassCtrl.text.length < 6) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('รหัสผ่านใหม่ต้องมีความยาวอย่างน้อย 6 ตัวอักษร')),
+                      );
+                      return;
+                    }
+                    if (newPassCtrl.text != confirmPassCtrl.text) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('รหัสผ่านใหม่ไม่ตรงกัน กรุณาตรวจสอบอีกครั้ง')),
+                      );
+                      return;
+                    }
+                    Navigator.pop(ctx);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('✅ เปลี่ยนรหัสผ่านสำเร็จเรียบร้อย'),
+                        backgroundColor: Color(0xFF2E7D32),
+                      ),
+                    );
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF2E7D32),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
+                  ),
+                  child: const Text('บันทึก (SAVE)', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

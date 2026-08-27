@@ -61,6 +61,8 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
   Timer? _simulationTimer;
   bool _isSimulating = false;
   bool _isSimulatingHomeScreen = false; // Simulation of outside app / iOS Home Screen Live Activity
+  bool _isNightMode = false; // Night Driving Dark Map Mode
+  bool _isSleepMode = false; // OLED Screen Saver Sleep Mode
 
   late AnimationController _pulseController;
   late Animation<double> _glowAnimation;
@@ -303,6 +305,10 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
     // Trigger Critical Alert (Red Zone)
     if (inRed && !_hasVibrated) {
       _hasVibrated = true;
+      // ⚡ Auto-wake up from sleep mode if ambulance approaches!
+      if (_isSleepMode) {
+        _isSleepMode = false;
+      }
       HapticFeedback.heavyImpact();
       VoiceAlertService().speakCriticalAlert(meters.round());
       if (_isBackgroundActive) {
@@ -381,6 +387,11 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
   Widget build(BuildContext context) {
     int displayMeters = _currentDistanceMeters.round();
 
+    // If Sleep / OLED Black Screen Saver Mode is active
+    if (_isSleepMode) {
+      return _buildOledSleepModeView(displayMeters);
+    }
+
     // If Home Screen Simulation Mode is active (Replicates iOS/Android outside app with live widget)
     if (_isSimulatingHomeScreen) {
       return HomeScreenSimulationView(
@@ -393,7 +404,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
     }
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
+      backgroundColor: _isNightMode ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
       body: SafeArea(
         child: Column(
           children: [
@@ -707,52 +718,231 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
   }
 
   Widget _buildHeader() {
+    final isDark = _isNightMode;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isDark ? const Color(0xFF0F172A) : Colors.white,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
+            color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.04),
             blurRadius: 6,
             offset: const Offset(0, 2),
           ),
         ],
       ),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Container(
-            width: 34,
-            height: 34,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(color: const Color(0xFF2C3E50), width: 1.8),
-            ),
-            child: Stack(
-              alignment: Alignment.center,
+          Row(
+            children: [
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                      color: isDark ? Colors.white70 : const Color(0xFF2C3E50),
+                      width: 1.8),
+                ),
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    Icon(Icons.airport_shuttle_outlined,
+                        size: 18,
+                        color:
+                            isDark ? Colors.white : const Color(0xFF2C3E50)),
+                    Positioned(
+                      top: 3,
+                      right: 3,
+                      child: Icon(Icons.wifi,
+                          size: 8, color: Colors.redAccent.shade700),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                'RouteAlert Driver',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: isDark ? Colors.white : const Color(0xFF1E293B),
+                ),
+              ),
+            ],
+          ),
+          Row(
+            children: [
+              // 🌙 โหมดกลางคืน (Night Driving Mode)
+              IconButton(
+                icon: Icon(
+                  _isNightMode
+                      ? Icons.light_mode_rounded
+                      : Icons.dark_mode_rounded,
+                  color: _isNightMode
+                      ? const Color(0xFFFBBF24)
+                      : const Color(0xFF475569),
+                  size: 22,
+                ),
+                tooltip: _isNightMode
+                    ? 'สลับเป็นโหมดกลางวัน'
+                    : 'โหมดขับขี่กลางคืน (Night Mode)',
+                onPressed: () {
+                  setState(() => _isNightMode = !_isNightMode);
+                },
+              ),
+              // 💤 โหมดพักจอ (OLED Sleep Saver)
+              IconButton(
+                icon: const Icon(
+                  Icons.bedtime_outlined,
+                  color: Color(0xFF6366F1),
+                  size: 22,
+                ),
+                tooltip: 'โหมดพักหน้าจอประหยัดแบตเตอรี่ (OLED Black)',
+                onPressed: () {
+                  setState(() => _isSleepMode = true);
+                },
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 💤 Ultra Battery-Saving OLED Pitch Black Screen
+  Widget _buildOledSleepModeView(int meters) {
+    final now = DateTime.now();
+    final timeStr =
+        '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+
+    return Scaffold(
+      backgroundColor: Colors.black, // Pure OLED 0% Black to save 100% display power
+      body: InkWell(
+        onTap: () {
+          setState(() => _isSleepMode = false);
+        },
+        splashColor: Colors.white10,
+        highlightColor: Colors.transparent,
+        child: SafeArea(
+          child: SizedBox.expand(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Icon(Icons.airport_shuttle_outlined,
-                    size: 18, color: Color(0xFF2C3E50)),
-                Positioned(
-                  top: 3,
-                  right: 3,
-                  child: Icon(Icons.wifi,
-                      size: 8, color: Colors.redAccent.shade700),
+                // Top status indicator
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            width: 8,
+                            height: 8,
+                            decoration: const BoxDecoration(
+                              color: Color(0xFF10B981),
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          const Text(
+                            'AI Radar Active',
+                            style: TextStyle(
+                              color: Color(0xFF10B981),
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const Text(
+                        'OLED Sleep Mode 💤',
+                        style: TextStyle(color: Colors.white38, fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // Center Clock & Breathing Sleep Icon
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    AnimatedBuilder(
+                      animation: _glowAnimation,
+                      builder: (context, child) {
+                        return Container(
+                          padding: const EdgeInsets.all(20),
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: const Color(0xFF6366F1).withValues(alpha: _glowAnimation.value * 0.4),
+                          ),
+                          child: const Icon(
+                            Icons.bedtime_rounded,
+                            color: Color(0xFFA5B4FC),
+                            size: 48,
+                          ),
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 20),
+                    Text(
+                      timeStr,
+                      style: const TextStyle(
+                        fontSize: 64,
+                        fontWeight: FontWeight.w200,
+                        color: Colors.white70,
+                        letterSpacing: -2,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.05),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: Colors.white12),
+                      ),
+                      child: const Text(
+                        'เรดาร์ตรวจจับ AI กำลังสแกนรอบตัว 360°',
+                        style: TextStyle(color: Colors.white60, fontSize: 12.5),
+                      ),
+                    ),
+                  ],
+                ),
+
+                // Bottom Wake-up Hint
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 30),
+                  child: Column(
+                    children: [
+                      const Icon(Icons.touch_app_rounded, color: Colors.white30, size: 24),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'แตะหน้าจอเพื่อปลุกกลับสู่แผนที่',
+                        style: TextStyle(
+                          color: Colors.white70,
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '⚡ หน้าจอจะติดและเตือนภัยทันทีเมื่อมีรถพยาบาลเข้าใกล้',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.4),
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
           ),
-          const SizedBox(width: 10),
-          const Text(
-            'RouteAlert Driver',
-            style: TextStyle(
-              fontSize: 19,
-              fontWeight: FontWeight.w700,
-              color: Color(0xFF1E293B),
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -1232,7 +1422,10 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
       ),
       children: [
         TileLayer(
-          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+          urlTemplate: _isNightMode
+              ? 'https://cartodb-basemaps-{s}.global.ssl.fastly.net/dark_all/{z}/{x}/{y}.png'
+              : 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+          subdomains: _isNightMode ? const ['a', 'b', 'c', 'd'] : const ['a', 'b', 'c'],
           userAgentPackageName: 'com.routealert.app',
         ),
 

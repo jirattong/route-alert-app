@@ -48,6 +48,28 @@ class UserFaceProfile {
     );
   }
 
+  bool get hasFaceEnrolled => faceEmbedding.isNotEmpty;
+
+  UserFaceProfile copyWith({
+    String? id,
+    String? email,
+    String? name,
+    String? role,
+    List<double>? faceEmbedding,
+    String? avatarPath,
+    DateTime? registeredAt,
+  }) {
+    return UserFaceProfile(
+      id: id ?? this.id,
+      email: email ?? this.email,
+      name: name ?? this.name,
+      role: role ?? this.role,
+      faceEmbedding: faceEmbedding ?? this.faceEmbedding,
+      avatarPath: avatarPath ?? this.avatarPath,
+      registeredAt: registeredAt ?? this.registeredAt,
+    );
+  }
+
   String toJson() => json.encode(toMap());
 
   factory UserFaceProfile.fromJson(String source) =>
