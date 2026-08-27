@@ -1455,11 +1455,21 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
       ),
       children: [
         TileLayer(
-          urlTemplate: _isNightMode
-              ? 'https://cartodb-basemaps-{s}.global.ssl.fastly.net/dark_all/{z}/{x}/{y}.png'
-              : 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-          subdomains: _isNightMode ? const ['a', 'b', 'c', 'd'] : const ['a', 'b', 'c'],
+          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
           userAgentPackageName: 'com.routealert.app',
+          tileBuilder: _isNightMode
+              ? (context, tileWidget, tile) {
+                  return ColorFiltered(
+                    colorFilter: const ColorFilter.matrix(<double>[
+                      -0.85, 0, 0, 0, 240,
+                      0, -0.85, 0, 0, 240,
+                      0, 0, -0.85, 0, 250,
+                      0, 0, 0, 1, 0,
+                    ]),
+                    child: tileWidget,
+                  );
+                }
+              : null,
         ),
 
         // วงกลม Geofence อิงหน่วยเมตร
