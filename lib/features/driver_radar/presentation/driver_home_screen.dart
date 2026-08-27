@@ -10,7 +10,6 @@ import '../../../core/services/emergency_mqtt_service.dart';
 import '../../../core/services/voice_alert_service.dart';
 import '../../../core/services/critical_notification_service.dart';
 import '../../../core/services/ai_trajectory_service.dart';
-import 'home_screen_simulation_view.dart';
 
 class DriverHomeScreen extends StatefulWidget {
   final VoidCallback? onOpenSos;
@@ -60,7 +59,6 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
   StreamSubscription<List<EmergencyVehicleData>>? _fleetSubscription;
   Timer? _simulationTimer;
   bool _isSimulating = false;
-  bool _isSimulatingHomeScreen = false; // Simulation of outside app / iOS Home Screen Live Activity
   bool _isNightMode = false; // Night Driving Dark Map Mode
   bool _isSleepMode = false; // OLED Screen Saver Sleep Mode
 
@@ -392,17 +390,6 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
       return _buildOledSleepModeView(displayMeters);
     }
 
-    // If Home Screen Simulation Mode is active (Replicates iOS/Android outside app with live widget)
-    if (_isSimulatingHomeScreen) {
-      return HomeScreenSimulationView(
-        distanceMeters: displayMeters,
-        isCritical: _isInRedZone,
-        yieldProbability: _aiPrediction?.yieldProbability ?? 0.94,
-        statusText: _aiPrediction?.statusTitleTH ?? 'มีรถพยาบาลตามหลังมา',
-        onReturnToApp: () => setState(() => _isSimulatingHomeScreen = false),
-      );
-    }
-
     return Scaffold(
       backgroundColor: _isNightMode ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
       body: SafeArea(
@@ -519,7 +506,40 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                       ),
                     ),
 
-                  // 3. ปุ่ม SOS ขวาล่าง
+                  // 3. ปุ่มจัดกึ่งกลาง GPS + ปุ่ม SOS ขวาล่าง
+                  Positioned(
+                    right: 20,
+                    bottom: 160,
+                    child: InkWell(
+                      onTap: () {
+                        _mapController.move(_currentLocation, 15.0);
+                      },
+                      borderRadius: BorderRadius.circular(25),
+                      child: Container(
+                        width: 48,
+                        height: 48,
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: const Color(0xFF2563EB), width: 1.8),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.15),
+                              blurRadius: 8,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: const Icon(
+                          Icons.my_location_rounded,
+                          color: Color(0xFF2563EB),
+                          size: 24,
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  // ปุ่ม SOS ขวาล่าง
                   Positioned(
                     right: 20,
                     bottom: 84,
@@ -722,35 +742,6 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                             icon: const Icon(Icons.refresh_rounded, size: 20, color: Colors.black87),
                             onPressed: _resetSimulation,
                             tooltip: 'รีเซ็ตพิกัดจำลอง',
-                          ),
-                          const SizedBox(width: 4),
-                          // ปุ่มจำลองหน้าจอ Home Screen (ตรงตามตัวอย่างที่ผู้ใช้ส่งมา)
-                          InkWell(
-                            onTap: () {
-                              setState(() => _isSimulatingHomeScreen = true);
-                            },
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFF0FDF4),
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(color: const Color(0xFF10B981)),
-                              ),
-                              child: const Row(
-                                children: [
-                                  Icon(Icons.phone_iphone_rounded, size: 14, color: Color(0xFF047857)),
-                                  SizedBox(width: 4),
-                                  Text(
-                                    '📱 จำลองหน้าจอหลัก',
-                                    style: TextStyle(
-                                      fontSize: 11.5,
-                                      fontWeight: FontWeight.bold,
-                                      color: Color(0xFF047857),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
                           ),
                         ],
                       ),
@@ -1467,6 +1458,12 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
       options: MapOptions(
         initialCenter: _currentLocation,
         initialZoom: 14.5,
+        interactionOptions: const InteractionOptions(
+          flags: InteractiveFlag.drag |
+              InteractiveFlag.pinchZoom |
+              InteractiveFlag.doubleTapZoom |
+              InteractiveFlag.scrollWheelZoom,
+        ),
       ),
       children: [
         TileLayer(
