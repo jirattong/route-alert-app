@@ -172,10 +172,12 @@ class _IncidentListScreenState extends State<IncidentListScreen> {
                       }
 
                       final allList = snapshot.data ?? [];
-                      // กรองตามระยะทาง & แท็บ
+                      // กรองเคสที่ถูกยกเลิก (cancelled) ออก ไม่ให้ขึ้นมากวนใจ
                       final filtered = allList.where((item) {
+                        if (item.status == 'cancelled') return false;
+
                         if (_selectedTab == 1) {
-                          // My SOS reports
+                          // My SOS reports (เฉพาะที่กำลังดำเนินการ)
                           return true;
                         } else {
                           // Area incidents by radius

@@ -62,6 +62,7 @@ class _AmbulanceIncidentListScreenState
 
                   final allList = snapshot.data ?? [];
                   final list = allList.where((i) {
+                    if (i.status == 'cancelled') return false;
                     if (_selectedDistrict == 'ทั้งหมดในโซน') return true;
                     return i.address.contains(_selectedDistrict) || i.province.contains(_selectedDistrict);
                   }).toList();

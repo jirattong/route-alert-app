@@ -30,7 +30,6 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
   LatLng _currentLocation = const LatLng(19.0284, 99.8962);
   final double _driverHeading = 45.0; // Heading degree (NE)
   final double _driverSpeed = 50.0; // km/h
-  bool _isLoadingGps = true;
 
   late LatLng _ambulanceLocation;
   double _ambulanceHeading = 45.0;
@@ -170,7 +169,6 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
     if (initialPos != null && mounted) {
       setState(() {
         _currentLocation = initialPos;
-        _isLoadingGps = false;
         _ambulanceLocation = LatLng(
           initialPos.latitude - 0.016,
           initialPos.longitude - 0.016,
@@ -181,7 +179,6 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
       _runAiTrajectoryEvaluation();
     } else {
       if (mounted) {
-        setState(() => _isLoadingGps = false);
         EmergencyMqttService().seedSimulatedFleet(_currentLocation);
       }
       _runAiTrajectoryEvaluation();
@@ -400,15 +397,6 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
               child: Stack(
                 children: [
                   _buildMapView(),
-
-                  if (_isLoadingGps)
-                    Container(
-                      color: Colors.black26,
-                      child: const Center(
-                        child:
-                            CircularProgressIndicator(color: Color(0xFF5B9EE1)),
-                      ),
-                    ),
 
                   // 1. แสงเตือนสีแดงกะพริบระดับวิกฤตรอบขอบจอ (Full Emergency Red Strobe)
                   if (_isInRedZone)

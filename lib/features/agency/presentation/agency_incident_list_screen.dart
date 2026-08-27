@@ -49,7 +49,8 @@ class _AgencyIncidentListScreenState extends State<AgencyIncidentListScreen> {
                     );
                   }
 
-                  final list = snapshot.data ?? [];
+                  final rawList = snapshot.data ?? [];
+                  final list = rawList.where((i) => i.status != 'cancelled').toList();
                   if (list.isEmpty) {
                     return Center(
                       child: Column(
