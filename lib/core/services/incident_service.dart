@@ -65,13 +65,15 @@ class IncidentService {
 
   // Anti-Spam & Sybil Attack Protection State
   DateTime? _lastReportSubmissionTime;
-  static const Duration _antiSpamCooldown = Duration(minutes: 2);
+  Duration _activeCooldownDuration = const Duration(minutes: 2);
+  static const Duration _defaultCooldown = Duration(minutes: 2);
+  static const Duration _cancelledQuickCooldown = Duration(seconds: 8); // สั้นลงเหลือ 8 วิ หากกดยกเลิกเหตุ
 
   /// Check remaining cooldown seconds (Anti-Spam)
   int get remainingCooldownSeconds {
     if (_lastReportSubmissionTime == null) return 0;
     final elapsed = DateTime.now().difference(_lastReportSubmissionTime!);
-    final remaining = _antiSpamCooldown.inSeconds - elapsed.inSeconds;
+    final remaining = _activeCooldownDuration.inSeconds - elapsed.inSeconds;
     return remaining > 0 ? remaining : 0;
   }
 
@@ -102,6 +104,7 @@ class IncidentService {
         _incidentsController.add(local);
       }
 
+      _activeCooldownDuration = _defaultCooldown;
       _lastReportSubmissionTime = DateTime.now();
 
       // 3. Sync with Cloud Firestore
@@ -271,6 +274,10 @@ class IncidentService {
       } catch (e) {
         debugPrint('Firestore cancel error: $e');
       }
+
+      // เมื่อผู้ใช้กดยกเลิกเหตุ ให้ลดเวลา Cooldown จาก 2 นาที เหลือเพียง 8 วินาที เพื่อให้สามารถกดแจ้งเหตุใหม่ที่ถูกต้องได้ทันที
+      _activeCooldownDuration = _cancelledQuickCooldown;
+      _lastReportSubmissionTime = DateTime.now();
 
       return true;
     } catch (e) {
