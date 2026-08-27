@@ -63,16 +63,37 @@ class IncidentService {
     }
   }
 
-  /// Create a new incident report (Driver role)
-  Future<bool> createIncident(IncidentReport incident) async {
+  // Anti-Spam & Sybil Attack Protection State
+  DateTime? _lastReportSubmissionTime;
+  static const Duration _antiSpamCooldown = Duration(minutes: 2);
+
+  /// Check remaining cooldown seconds (Anti-Spam)
+  int get remainingCooldownSeconds {
+    if (_lastReportSubmissionTime == null) return 0;
+    final elapsed = DateTime.now().difference(_lastReportSubmissionTime!);
+    final remaining = _antiSpamCooldown.inSeconds - elapsed.inSeconds;
+    return remaining > 0 ? remaining : 0;
+  }
+
+  /// Create a new incident report (Driver role with Anti-Spam Defense)
+  Future<Map<String, dynamic>> createIncident(IncidentReport incident) async {
     try {
+      // 1. Anti-Spam Rate Limit Check
+      if (remainingCooldownSeconds > 0) {
+        return {
+          'success': false,
+          'message':
+              '⚠️ ป้องกันสแปมแจ้งเหตุ: กรุณารอสักครู่ (เหลือ Cooldown $remainingCooldownSeconds วินาที) หากมีเหตุเร่งด่วนกรุณาโทร 1669',
+        };
+      }
+
       final id = incident.id.isNotEmpty
           ? incident.id
           : 'INC-${DateTime.now().millisecondsSinceEpoch}';
 
       final newIncident = incident.copyWith(id: id);
 
-      // 1. Save to local cache first
+      // 2. Save to local cache first
       final local = await getLocalIncidents();
       local.removeWhere((i) => i.id == id);
       local.insert(0, newIncident);
@@ -81,7 +102,9 @@ class IncidentService {
         _incidentsController.add(local);
       }
 
-      // 2. Sync with Cloud Firestore
+      _lastReportSubmissionTime = DateTime.now();
+
+      // 3. Sync with Cloud Firestore
       try {
         await FirebaseFirestore.instance
             .collection(_collectionName)
@@ -91,10 +114,16 @@ class IncidentService {
         debugPrint('Firestore sync incident error: $firestoreError');
       }
 
-      return true;
+      return {
+        'success': true,
+        'message': 'ส่งรายงานเหตุฉุกเฉินเรียบร้อยแล้ว',
+      };
     } catch (e) {
       debugPrint('createIncident error: $e');
-      return false;
+      return {
+        'success': false,
+        'message': 'เกิดข้อผิดพลาดในการส่งข้อมูล: $e',
+      };
     }
   }
 
@@ -200,6 +229,52 @@ class IncidentService {
       return true;
     } catch (e) {
       debugPrint('updateIncidentProgressStep error: $e');
+      return false;
+    }
+  }
+
+  /// Cancel an incident report (Only allowed if status is pending / statusStep == 0)
+  Future<bool> cancelIncident(String incidentId, {String? reason}) async {
+    try {
+      final local = await getLocalIncidents();
+      final index = local.indexWhere((i) => i.id == incidentId);
+      if (index != -1) {
+        final existing = local[index];
+        if (!existing.canBeCancelled) {
+          debugPrint('Cannot cancel: Incident is already assigned/in progress');
+          return false;
+        }
+
+        final updated = existing.copyWith(
+          status: 'cancelled',
+          description: reason != null && reason.isNotEmpty
+              ? '${existing.description} (ยกเลิกโดยผู้แจ้ง: $reason)'
+              : '${existing.description} (ยกเลิกการแจ้งเหตุ)',
+        );
+        local[index] = updated;
+        await _saveToLocalCache(local);
+        if (!_incidentsController.isClosed) {
+          _incidentsController.add(local);
+        }
+      }
+
+      // Sync Firestore
+      try {
+        await FirebaseFirestore.instance
+            .collection(_collectionName)
+            .doc(incidentId)
+            .update({
+          'status': 'cancelled',
+          if (reason != null) 'cancelReason': reason,
+          'cancelledAt': DateTime.now().toIso8601String(),
+        });
+      } catch (e) {
+        debugPrint('Firestore cancel error: $e');
+      }
+
+      return true;
+    } catch (e) {
+      debugPrint('cancelIncident error: $e');
       return false;
     }
   }

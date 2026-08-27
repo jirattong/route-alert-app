@@ -44,8 +44,12 @@ class IncidentReport {
     required this.createdAt,
   });
 
+  bool get canBeCancelled => status == 'pending' && statusStep == 0;
+
   Color get statusColor {
     switch (status) {
+      case 'cancelled':
+        return const Color(0xFF94A3B8); // Slate Grey
       case 'resolved':
         return const Color(0xFF10B981); // Emerald
       case 'transporting':
@@ -62,6 +66,8 @@ class IncidentReport {
 
   String get statusText {
     switch (status) {
+      case 'cancelled':
+        return 'ยกเลิกการแจ้งเหตุ';
       case 'resolved':
         return 'ช่วยเหลือเสร็จสิ้น';
       case 'transporting':

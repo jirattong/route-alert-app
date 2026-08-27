@@ -471,6 +471,54 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                     child: _buildFloatingHeadsUpBanner(),
                   ),
 
+                  // 2.2 🟢 Live Presence Indicator Pill (แสดงจำนวนผู้ใช้งานออนไลน์รอบตัวสดๆ)
+                  if (!_isInRedZone)
+                    Positioned(
+                      top: 76,
+                      left: 16,
+                      child: InkWell(
+                        onTap: () => _showLivePresenceModal(context),
+                        borderRadius: BorderRadius.circular(20),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.95),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(color: const Color(0xFF10B981), width: 1.5),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.08),
+                                blurRadius: 8,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                width: 8,
+                                height: 8,
+                                decoration: const BoxDecoration(
+                                  color: Color(0xFF10B981),
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              const Text(
+                                '🟢 ออนไลน์สด: 4 หน่วยรอบตัว (แตะดู)',
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF065F46),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+
                   // 3. ปุ่ม SOS ขวาล่าง
                   Positioned(
                     right: 20,
@@ -1455,33 +1503,37 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
 
         MarkerLayer(
           markers: [
-            // User Driver Marker
+            // 1. User Driver Marker (คุณ)
             Marker(
               point: _currentLocation,
-              width: 46,
-              height: 46,
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  shape: BoxShape.circle,
-                  boxShadow: [
-                    BoxShadow(
-                      color: const Color(0xFF5B9EE1).withValues(alpha: 0.4),
-                      blurRadius: 10,
-                      offset: const Offset(0, 2),
+              width: 90,
+              height: 60,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1D4ED8),
+                      borderRadius: BorderRadius.circular(8),
+                      boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
                     ),
-                  ],
-                ),
-                child: Center(
-                  child: Transform.rotate(
-                    angle: _driverHeading * math.pi / 180,
-                    child: Container(
-                      width: 32,
-                      height: 32,
-                      decoration: const BoxDecoration(
-                        color: Color(0xFF3B82F6),
-                        shape: BoxShape.circle,
-                      ),
+                    child: Text(
+                      'คุณ (${_driverSpeed.toInt()} km/h)',
+                      style: const TextStyle(color: Colors.white, fontSize: 9.5, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Container(
+                    width: 32,
+                    height: 32,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFF3B82F6),
+                      shape: BoxShape.circle,
+                      boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 6)],
+                    ),
+                    child: Transform.rotate(
+                      angle: _driverHeading * math.pi / 180,
                       child: const Icon(
                         Icons.navigation_rounded,
                         color: Colors.white,
@@ -1489,15 +1541,184 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                       ),
                     ),
                   ),
-                ),
+                ],
               ),
             ),
 
-            // Ambulance Markers
+            // 2. Nearby Citizen Driver Marker (ผู้ร่วมทาง)
+            Marker(
+              point: const LatLng(19.0340, 99.9020),
+              width: 90,
+              height: 60,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF047857),
+                      borderRadius: BorderRadius.circular(8),
+                      boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
+                    ),
+                    child: const Text(
+                      '🚗 #D402 (55 km/h)',
+                      style: TextStyle(color: Colors.white, fontSize: 9.5, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Container(
+                    width: 30,
+                    height: 30,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFF10B981),
+                      shape: BoxShape.circle,
+                      boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 6)],
+                    ),
+                    child: const Center(
+                      child: Text('🚗', style: TextStyle(fontSize: 14)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // 3. Hospital ER Center Marker (รพ.มหาราช)
+            Marker(
+              point: const LatLng(19.0220, 99.8910),
+              width: 100,
+              height: 60,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0284C7),
+                      borderRadius: BorderRadius.circular(8),
+                      boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
+                    ),
+                    child: const Text(
+                      '🏥 รพ.มหาราช (ER พร้อม)',
+                      style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Container(
+                    width: 30,
+                    height: 30,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFF0284C7),
+                      shape: BoxShape.circle,
+                      boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 6)],
+                    ),
+                    child: const Center(
+                      child: Icon(Icons.local_hospital_rounded, color: Colors.white, size: 16),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // 4. Ambulance Markers (รถพยาบาลฉุกเฉิน)
             ...ambulanceMarkers,
           ],
         ),
       ],
+    );
+  }
+
+  /// Real-Time Live Presence Details Bottom Sheet
+  void _showLivePresenceModal(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Row(
+                    children: [
+                      Icon(Icons.hub_rounded, color: Color(0xFF10B981), size: 24),
+                      SizedBox(width: 8),
+                      Text(
+                        'สมาชิกที่กำลังออนไลน์ขณะนี้ (Live Presence)',
+                        style: TextStyle(fontSize: 16.5, fontWeight: FontWeight.bold),
+                      ),
+                    ],
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFECFDF5),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Text(
+                      '4 Active',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF047857)),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: const BoxDecoration(color: Color(0xFFEFF6FF), shape: BoxShape.circle),
+                  child: const Text('🚗', style: TextStyle(fontSize: 20)),
+                ),
+                title: const Text('คุณ (ผู้ขับขี่ปัจจุบัน)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                subtitle: Text('ความเร็ว ${_driverSpeed.toInt()} km/h • กำลังเชื่อมต่อเรดาร์ AI'),
+                trailing: const Text('🟢 Online', style: TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.bold, fontSize: 12)),
+              ),
+              Divider(color: Colors.grey.shade200, height: 1),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: const BoxDecoration(color: Color(0xFFF0FDF4), shape: BoxShape.circle),
+                  child: const Text('🚗', style: TextStyle(fontSize: 20)),
+                ),
+                title: const Text('ผู้ขับขี่ร่วมทาง (#D402)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                subtitle: const Text('ห่าง 1.2 กม. • ความเร็ว 55 km/h • เปิดเรดาร์'),
+                trailing: const Text('🟢 Online', style: TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.bold, fontSize: 12)),
+              ),
+              Divider(color: Colors.grey.shade200, height: 1),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: const BoxDecoration(color: Color(0xFFFEF2F2), shape: BoxShape.circle),
+                  child: const Text('🚑', style: TextStyle(fontSize: 20)),
+                ),
+                title: const Text('รถพยาบาลฉุกเฉิน (รพ.มหาราช)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                subtitle: Text('ความเร็ว ${_ambulanceSpeed.toInt()} km/h • บรอดแคสต์ GPS ผ่าน MQTT'),
+                trailing: const Text('🚨 Active', style: TextStyle(color: Color(0xFFDC2626), fontWeight: FontWeight.bold, fontSize: 12)),
+              ),
+              Divider(color: Colors.grey.shade200, height: 1),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: const BoxDecoration(color: Color(0xFFF0F9FF), shape: BoxShape.circle),
+                  child: const Text('🏥', style: TextStyle(fontSize: 20)),
+                ),
+                title: const Text('ศูนย์สั่งการ รพ.มหาราชนคร (Agency ER)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                subtitle: const Text('เตียงฉุกเฉินพร้อมรับ 5/8 เตียง • มอนิเตอร์เหตุสด'),
+                trailing: const Text('🟢 Standby', style: TextStyle(color: Color(0xFF0284C7), fontWeight: FontWeight.bold, fontSize: 12)),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 

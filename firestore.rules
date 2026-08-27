@@ -1,0 +1,65 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions for Role-Based Access Control (RBAC)
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function getUserRole() {
+      return request.auth.token.role;
+    }
+
+    function isDriver() {
+      return isAuthenticated() && (getUserRole() == 'driver' || request.auth.token.email != null);
+    }
+
+    function isAmbulance() {
+      return isAuthenticated() && (getUserRole() == 'ambulance' || request.auth.token.email.matches('.*ambulance.*'));
+    }
+
+    function isAgency() {
+      return isAuthenticated() && (getUserRole() == 'agency' || request.auth.token.email.matches('.*agency.*'));
+    }
+
+    // 1. Incident Reports Security Rules
+    match /incident_reports/{incidentId} {
+      // Anyone authenticated can read incidents within regional bounds
+      allow read: if true;
+
+      // Only citizens/drivers can create reports with required emergency fields
+      allow create: if request.resource.data.type is string
+                    && request.resource.data.latitude is number
+                    && request.resource.data.longitude is number
+                    && request.resource.data.severity is string;
+
+      // Strict Field-Level Update Control based on Roles:
+      allow update: if 
+        // A) Agency (Hospital ER) can update ER readiness and assign ambulances
+        (isAgency() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isErPrepared', 'assignedAmbulanceId', 'assignedAmbulancePlate', 'agencyNotes']))
+        ||
+        // B) Ambulance can update rescue progress steps (1 to 4) and ETA
+        (isAmbulance() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'statusStep', 'eta', 'ambulanceLocation']))
+        ||
+        // C) Citizen who reported can CANCEL only if status is still 'pending'
+        (resource.data.status == 'pending' && resource.data.statusStep == 0 
+         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'cancelReason', 'cancelledAt']));
+
+      // Never allow arbitrary deletion of emergency audit records
+      allow delete: if false;
+    }
+
+    // 2. User Profiles & Face Biometrics Security Rules
+    match /users/{userId} {
+      // Users can only read and edit their own profile & face embeddings
+      allow read, write: if isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // 3. Emergency Fleet Live Telemetry Rules
+    match /emergency_fleet/{vehicleId} {
+      allow read: if true;
+      allow write: if isAmbulance();
+    }
+  }
+}

@@ -187,7 +187,9 @@ class _SosReportScreenState extends State<SosReportScreen> {
       createdAt: DateTime.now(),
     );
 
-    final success = await IncidentService().createIncident(newReport);
+    final result = await IncidentService().createIncident(newReport);
+    final bool success = result['success'] == true;
+    final String message = result['message'] ?? 'ส่งรายงานเรียบร้อยแล้ว';
 
     if (mounted) {
       setState(() => _isSubmitting = false);
@@ -225,7 +227,11 @@ class _SosReportScreenState extends State<SosReportScreen> {
         );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('เกิดข้อผิดพลาดในการส่งข้อมูล กรุณาลองใหม่อีกครั้ง')),
+          SnackBar(
+            content: Text(message),
+            backgroundColor: const Color(0xFFDC2626),
+            duration: const Duration(seconds: 4),
+          ),
         );
       }
     }

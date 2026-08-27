@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:latlong2/latlong.dart';
 import '../../../core/models/incident_report.dart';
 import '../../../core/services/incident_service.dart';
+import '../../../core/services/location_service.dart';
 import 'incident_detail_screen.dart';
 
 class IncidentListScreen extends StatefulWidget {
@@ -13,13 +15,26 @@ class IncidentListScreen extends StatefulWidget {
 }
 
 class _IncidentListScreenState extends State<IncidentListScreen> {
-  String _selectedProvince = 'เชียงใหม่';
+  double _selectedRadiusKm = 15.0; // ค่าเริ่มต้น: ไม่เกิน 15 กม. ตามที่ผู้ใช้ต้องการ
   int _selectedTab = 0; // 0 = เหตุในบริเวณพื้นที่, 1 = รายงานของฉัน (SOS)
+  LatLng _userLocation = const LatLng(19.0284, 99.8962);
 
   @override
   void initState() {
     super.initState();
     IncidentService().initialize();
+    _loadUserLocation();
+  }
+
+  Future<void> _loadUserLocation() async {
+    try {
+      final loc = await LocationService.getCurrentLocation();
+      if (loc != null && mounted) {
+        setState(() {
+          _userLocation = loc;
+        });
+      }
+    } catch (_) {}
   }
 
   @override
@@ -34,20 +49,20 @@ class _IncidentListScreenState extends State<IncidentListScreen> {
                 _buildHeader(),
                 const SizedBox(height: 14),
 
-                // ตัวเลือกจังหวัด
+                // ตัวเลือกรัศมีแสดงเหตุ (Proximity Filter)
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       const Row(
                         children: [
-                          Icon(Icons.location_on, color: Color(0xFFEB5757), size: 20),
-                          SizedBox(width: 4),
+                          Icon(Icons.radar_rounded, color: Color(0xFF2563EB), size: 20),
+                          SizedBox(width: 6),
                           Text(
-                            'พื้นที่แสดงเหตุ:',
+                            'ขอบเขตแสดงเหตุ:',
                             style: TextStyle(
-                              fontSize: 15,
+                              fontSize: 14,
                               fontWeight: FontWeight.bold,
                               color: Colors.black87,
                             ),
@@ -55,22 +70,25 @@ class _IncidentListScreenState extends State<IncidentListScreen> {
                         ],
                       ),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                         decoration: BoxDecoration(
-                          color: Colors.white,
+                          color: const Color(0xFFEFF6FF),
                           borderRadius: BorderRadius.circular(16),
                           border: Border.all(color: const Color(0xFF5B9EE1), width: 1.5),
                         ),
                         child: DropdownButtonHideUnderline(
-                          child: DropdownButton<String>(
-                            value: _selectedProvince,
+                          child: DropdownButton<double>(
+                            value: _selectedRadiusKm,
                             isDense: true,
-                            icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Color(0xFF5B9EE1)),
-                            items: ['เชียงใหม่', 'พะเยา', 'เชียงราย', 'ลำปาง']
-                                .map((prov) => DropdownMenuItem(value: prov, child: Text(prov)))
-                                .toList(),
+                            icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Color(0xFF2563EB)),
+                            items: const [
+                              DropdownMenuItem(value: 5.0, child: Text('📍 ไม่เกิน 5 กม. (รอบตัว)', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold))),
+                              DropdownMenuItem(value: 15.0, child: Text('📍 ไม่เกิน 15 กม. (แนะนำ)', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: Color(0xFF2563EB)))),
+                              DropdownMenuItem(value: 30.0, child: Text('📍 ไม่เกิน 30 กม. (ทั้งโซน)', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold))),
+                              DropdownMenuItem(value: 0.0, child: Text('🗺️ ทั้งหมด (ไม่จำกัดระยะ)', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold))),
+                            ],
                             onChanged: (val) {
-                              if (val != null) setState(() => _selectedProvince = val);
+                              if (val != null) setState(() => _selectedRadiusKm = val);
                             },
                           ),
                         ),
@@ -78,11 +96,11 @@ class _IncidentListScreenState extends State<IncidentListScreen> {
                     ],
                   ),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 14),
 
                 // แท็บสลับประเภทเหตุ
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
                   child: Container(
                     decoration: BoxDecoration(
                       color: const Color(0xFFF1F5F9),
@@ -102,9 +120,12 @@ class _IncidentListScreenState extends State<IncidentListScreen> {
                               ),
                               alignment: Alignment.center,
                               child: Text(
-                                'เหตุในบริเวณพื้นที่',
+                                _selectedRadiusKm > 0
+                                    ? 'เหตุใกล้ฉัน (≤ ${_selectedRadiusKm.toInt()} กม.)'
+                                    : 'เหตุทั้งหมด',
                                 style: TextStyle(
                                   fontWeight: FontWeight.bold,
+                                  fontSize: 13,
                                   color: _selectedTab == 0 ? Colors.white : Colors.grey.shade600,
                                 ),
                               ),
@@ -126,6 +147,7 @@ class _IncidentListScreenState extends State<IncidentListScreen> {
                                 'รายงานของฉัน (SOS)',
                                 style: TextStyle(
                                   fontWeight: FontWeight.bold,
+                                  fontSize: 13,
                                   color: _selectedTab == 1 ? Colors.white : Colors.grey.shade600,
                                 ),
                               ),
@@ -150,40 +172,62 @@ class _IncidentListScreenState extends State<IncidentListScreen> {
                       }
 
                       final allList = snapshot.data ?? [];
-                      // กรองตามแท็บ
+                      // กรองตามระยะทาง & แท็บ
                       final filtered = allList.where((item) {
                         if (_selectedTab == 1) {
                           // My SOS reports
                           return true;
                         } else {
-                          // Area incidents
-                          return item.province.contains(_selectedProvince);
+                          // Area incidents by radius
+                          if (_selectedRadiusKm <= 0) return true;
+                          final meters = LocationService.calculateDistanceInMeters(
+                            _userLocation,
+                            LatLng(item.latitude, item.longitude),
+                          );
+                          return (meters / 1000.0) <= _selectedRadiusKm;
                         }
                       }).toList();
 
                       if (filtered.isEmpty) {
                         return Center(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.check_circle_outline_rounded,
-                                  color: Colors.grey.shade400, size: 56),
-                              const SizedBox(height: 12),
-                              Text(
-                                _selectedTab == 1
-                                    ? 'คุณยังไม่มีประวัติแจ้งเหตุฉุกเฉิน'
-                                    : 'ไม่มีรายงานเหตุฉุกเฉินในพื้นที่ $_selectedProvince',
-                                style: TextStyle(color: Colors.grey.shade600, fontSize: 14),
-                              ),
-                            ],
+                          child: Padding(
+                            padding: const EdgeInsets.all(32),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.check_circle_outline_rounded,
+                                    color: Colors.green.shade400, size: 56),
+                                const SizedBox(height: 12),
+                                Text(
+                                  _selectedTab == 1
+                                      ? 'คุณยังไม่มีประวัติแจ้งเหตุฉุกเฉิน'
+                                      : 'ไม่มีเหตุฉุกเฉินในรัศมี ${_selectedRadiusKm.toInt()} กม. จากตำแหน่งคุณ',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(color: Colors.grey.shade700, fontSize: 14, fontWeight: FontWeight.w600),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  'เส้นทางของคุณปลอดภัย ไร้สิ่งกีดขวาง 🎉',
+                                  style: TextStyle(color: Colors.grey.shade500, fontSize: 12),
+                                ),
+                              ],
+                            ),
                           ),
                         );
                       }
 
                       return ListView.builder(
-                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
                         itemCount: filtered.length,
-                        itemBuilder: (context, index) => _buildIncidentCard(filtered[index]),
+                        itemBuilder: (context, index) {
+                          final item = filtered[index];
+                          final meters = LocationService.calculateDistanceInMeters(
+                            _userLocation,
+                            LatLng(item.latitude, item.longitude),
+                          );
+                          final double km = meters / 1000.0;
+                          return _buildIncidentCard(item, km);
+                        },
                       );
                     },
                   ),
@@ -232,7 +276,7 @@ class _IncidentListScreenState extends State<IncidentListScreen> {
     );
   }
 
-  Widget _buildIncidentCard(IncidentReport item) {
+  Widget _buildIncidentCard(IncidentReport item, double distanceKm) {
     return InkWell(
       onTap: () {
         Navigator.push(
@@ -244,15 +288,20 @@ class _IncidentListScreenState extends State<IncidentListScreen> {
       },
       borderRadius: BorderRadius.circular(22),
       child: Container(
-        margin: const EdgeInsets.only(bottom: 16),
-        padding: const EdgeInsets.all(18),
+        margin: const EdgeInsets.only(bottom: 14),
+        padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(22),
-          border: Border.all(color: const Color(0xFF5B9EE1), width: 1.8),
+          border: Border.all(
+            color: item.status == 'cancelled'
+                ? Colors.grey.shade300
+                : const Color(0xFF5B9EE1).withValues(alpha: 0.7),
+            width: 1.5,
+          ),
           boxShadow: [
             BoxShadow(
-              color: const Color(0xFF5B9EE1).withValues(alpha: 0.12),
+              color: const Color(0xFF5B9EE1).withValues(alpha: 0.08),
               blurRadius: 10,
               offset: const Offset(0, 3),
             ),
@@ -265,27 +314,44 @@ class _IncidentListScreenState extends State<IncidentListScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    item.address.isNotEmpty ? item.address : item.province,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.bold),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          item.address.isNotEmpty ? item.address : item.province,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFEFF6FF),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          '📏 ${distanceKm.toStringAsFixed(1)} กม.',
+                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF2563EB)),
+                        ),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 2),
                   Text(
                     item.id,
-                    style: TextStyle(fontSize: 12.5, color: Colors.grey.shade600, fontWeight: FontWeight.w600),
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600, fontWeight: FontWeight.w600),
                   ),
                   const SizedBox(height: 4),
                   Text(
                     item.type,
-                    style: const TextStyle(fontSize: 13.5, color: Colors.black87),
+                    style: const TextStyle(fontSize: 13, color: Colors.black87),
                   ),
                   if (item.assignedAmbulancePlate != null && item.assignedAmbulancePlate!.isNotEmpty) ...[
                     const SizedBox(height: 2),
                     Text(
-                      'เลขรถรับเคส : ${item.assignedAmbulancePlate}',
-                      style: TextStyle(fontSize: 12.5, color: Colors.grey.shade700),
+                      'รถกู้ชีพ: ${item.assignedAmbulancePlate}',
+                      style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
                     ),
                   ],
                   const SizedBox(height: 8),
@@ -300,15 +366,18 @@ class _IncidentListScreenState extends State<IncidentListScreen> {
                         child: Text(
                           item.statusText,
                           style: TextStyle(
-                            fontSize: 12,
+                            fontSize: 11.5,
                             fontWeight: FontWeight.bold,
                             color: item.statusColor,
                           ),
                         ),
                       ),
                       const SizedBox(width: 8),
-                      if (item.assignedAmbulancePlate != null)
-                        const Text('🚑', style: TextStyle(fontSize: 15)),
+                      if (item.canBeCancelled)
+                        Text(
+                          '• สามารถแตะเพื่อยกเลิกได้',
+                          style: TextStyle(fontSize: 11, color: Colors.red.shade400, fontWeight: FontWeight.bold),
+                        ),
                     ],
                   ),
                 ],
