@@ -7,23 +7,17 @@ import 'features/driver_radar/presentation/driver_main_screen.dart';
 import 'features/ambulance/presentation/ambulance_main_screen.dart';
 import 'features/agency/presentation/agency_main_screen.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Launch the App UI immediately (Enters directly to Driver / Map screen)
-  runApp(const RouteAlertApp());
-
-  // Initialize background services (DotEnv & Firebase) asynchronously
-  _initServices();
-}
-
-Future<void> _initServices() async {
+  // 1. Load .env config
   try {
     await dotenv.load(fileName: ".env");
   } catch (e) {
-    debugPrint('DotEnv load warning: $e');
+    debugPrint('DotEnv load notice: $e');
   }
 
+  // 2. Initialize Firebase synchronously before runApp to guarantee services are ready
   try {
     if (Firebase.apps.isEmpty) {
       await Firebase.initializeApp(
@@ -31,8 +25,11 @@ Future<void> _initServices() async {
       );
     }
   } catch (e) {
-    debugPrint('Firebase init error: $e');
+    debugPrint('Firebase init notice: $e');
   }
+
+  // 3. Launch the App UI (Enters directly to Driver / Map screen)
+  runApp(const RouteAlertApp());
 }
 
 class RouteAlertApp extends StatelessWidget {
