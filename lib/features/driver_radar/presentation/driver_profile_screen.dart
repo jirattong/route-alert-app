@@ -582,6 +582,8 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                   children: [
                     Text(
                       name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
@@ -591,6 +593,8 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                     const SizedBox(height: 2),
                     Text(
                       email,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
                     ),
                     const SizedBox(height: 8),
@@ -871,18 +875,23 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
           ),
         ],
       ),
-      child: ListTile(
-        onTap: onTap,
-        leading: Icon(icon, color: const Color(0xFF5B9EE1)),
-        title: Text(
-          title,
-          style: const TextStyle(
-            fontSize: 14.5,
-            fontWeight: FontWeight.w600,
-            color: Colors.black87,
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(18),
+        child: ListTile(
+          onTap: onTap,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          leading: Icon(icon, color: const Color(0xFF5B9EE1)),
+          title: Text(
+            title,
+            style: const TextStyle(
+              fontSize: 14.5,
+              fontWeight: FontWeight.w600,
+              color: Colors.black87,
+            ),
           ),
+          trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 16, color: Colors.grey),
         ),
-        trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 16, color: Colors.grey),
       ),
     );
   }

@@ -29,7 +29,11 @@ class DefaultFirebaseOptions {
   static String _env(String key, String fallback) {
     try {
       final val = dotenv.env[key];
-      if (val != null && val.trim().isNotEmpty) return val.trim();
+      if (val != null &&
+          val.trim().isNotEmpty &&
+          !val.trim().toLowerCase().startsWith('your-')) {
+        return val.trim();
+      }
     } catch (_) {}
     return fallback;
   }
