@@ -16,12 +16,10 @@ class DriverMainScreen extends StatefulWidget {
 
 class _DriverMainScreenState extends State<DriverMainScreen> {
   int _currentIndex = 0;
-  bool _isShowingSosScreen = false;
 
   void _onSelectTab(int index) {
     setState(() {
       _currentIndex = index;
-      _isShowingSosScreen = false; // ปิดหน้า SOS เมื่อสลับแท็บ
     });
   }
 
@@ -35,9 +33,16 @@ class _DriverMainScreenState extends State<DriverMainScreen> {
       return;
     }
 
-    setState(() {
-      _isShowingSosScreen = true;
-    });
+    if (!mounted) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (ctx) => SosReportScreen(
+          onClose: () => Navigator.pop(ctx),
+        ),
+      ),
+    );
   }
 
   void _showSosLoginRequiredDialog() {
@@ -114,9 +119,15 @@ class _DriverMainScreenState extends State<DriverMainScreen> {
                     // If user logged in successfully, open SOS directly
                     final user = await FaceAuthRepository.getCurrentUser();
                     if (user != null && user.id != 'guest' && mounted) {
-                      setState(() {
-                        _isShowingSosScreen = true;
-                      });
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          fullscreenDialog: true,
+                          builder: (modalCtx) => SosReportScreen(
+                            onClose: () => Navigator.pop(modalCtx),
+                          ),
+                        ),
+                      );
                     }
                   });
                 },
@@ -161,12 +172,6 @@ class _DriverMainScreenState extends State<DriverMainScreen> {
     );
   }
 
-  void _closeSosScreen() {
-    setState(() {
-      _isShowingSosScreen = false;
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
     final List<Widget> basePages = [
@@ -181,12 +186,10 @@ class _DriverMainScreenState extends State<DriverMainScreen> {
     ];
 
     return Scaffold(
-      body: _isShowingSosScreen
-          ? SosReportScreen(onClose: _closeSosScreen)
-          : IndexedStack(
-              index: _currentIndex,
-              children: basePages,
-            ),
+      body: IndexedStack(
+        index: _currentIndex,
+        children: basePages,
+      ),
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
           color: Colors.white,

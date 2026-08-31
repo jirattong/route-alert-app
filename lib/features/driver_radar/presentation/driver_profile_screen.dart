@@ -109,6 +109,20 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
   }
 
   void _showEditProfileDialog() {
+    if (_currentUser == null || _currentUser?.id == 'guest') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          backgroundColor: Colors.orangeAccent,
+          content: Text('⚠️ กรุณาเข้าสู่ระบบหรือสมัครสมาชิกก่อนแก้ไขข้อมูลส่วนตัว'),
+        ),
+      );
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (context) => const FaceLoginScreen()),
+      ).then((_) => _loadData());
+      return;
+    }
+
     final nameCtrl = TextEditingController(text: _currentUser?.name ?? '');
     final phoneCtrl = TextEditingController(text: _phone);
     final plateCtrl = TextEditingController(text: _carPlate);
@@ -197,6 +211,19 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
   }
 
   void _showChangePasswordDialog() {
+    if (_currentUser == null || _currentUser?.id == 'guest') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          backgroundColor: Colors.orangeAccent,
+          content: Text('⚠️ กรุณาเข้าสู่ระบบหรือสมัครสมาชิกก่อนเปลี่ยนรหัสผ่าน'),
+        ),
+      );
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (context) => const FaceLoginScreen()),
+      ).then((_) => _loadData());
+      return;
+    }
     final oldPassCtrl = TextEditingController();
     final newPassCtrl = TextEditingController();
     final confirmPassCtrl = TextEditingController();
@@ -378,10 +405,42 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                     _buildMenuTile('ประวัติการช่วยเหลือ (History)', Icons.history_rounded, _showYieldHistoryDialog),
                     const SizedBox(height: 32),
 
-                    SizedBox(
-                      width: double.infinity,
-                      child: (_currentUser == null || _currentUser?.id == 'guest')
-                          ? ElevatedButton.icon(
+                    if (_currentUser == null || _currentUser?.id == 'guest')
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => const FaceLoginScreen(),
+                              ),
+                            ).then((_) => _loadData());
+                          },
+                          icon: const Icon(Icons.login_rounded, color: Colors.white, size: 20),
+                          label: const Text(
+                            'เข้าสู่ระบบ / ลงทะเบียน (Sign in / Register)',
+                            style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white),
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF00A896),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(24),
+                            ),
+                          ),
+                        ),
+                      )
+                    else
+                      Column(
+                        children: [
+                          SizedBox(
+                            width: double.infinity,
+                            height: 48,
+                            child: OutlinedButton.icon(
                               onPressed: () {
                                 Navigator.push(
                                   context,
@@ -390,23 +449,28 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                                   ),
                                 ).then((_) => _loadData());
                               },
-                              icon: const Icon(Icons.login_rounded, color: Colors.white, size: 20),
+                              icon: const Icon(Icons.swap_horiz_rounded, color: Color(0xFF00A896), size: 20),
                               label: const Text(
-                                'เข้าสู่ระบบ / ลงทะเบียน (Sign in / Register)',
+                                'สลับบัญชี / เข้าสู่ระบบด้วยบัญชีอื่น',
                                 style: TextStyle(
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.white),
+                                  fontSize: 14.5,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF00A896),
+                                ),
                               ),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: const Color(0xFF00A896),
-                                padding: const EdgeInsets.symmetric(vertical: 14),
+                              style: OutlinedButton.styleFrom(
+                                side: const BorderSide(color: Color(0xFF00A896), width: 1.5),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(24),
                                 ),
                               ),
-                            )
-                          : ElevatedButton.icon(
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          SizedBox(
+                            width: double.infinity,
+                            height: 48,
+                            child: ElevatedButton.icon(
                               onPressed: () async {
                                 await FaceAuthRepository.logout();
                                 await _loadData();
@@ -422,19 +486,21 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                               label: const Text(
                                 'ออกจากระบบ (Logout)',
                                 style: TextStyle(
-                                    fontSize: 16,
+                                    fontSize: 15,
                                     fontWeight: FontWeight.bold,
                                     color: Colors.white),
                               ),
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: Colors.redAccent.shade400,
-                                padding: const EdgeInsets.symmetric(vertical: 14),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(24),
                                 ),
+                                elevation: 0,
                               ),
                             ),
-                    ),
+                          ),
+                        ],
+                      ),
                     const SizedBox(height: 20),
                   ],
                 ),
@@ -475,7 +541,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
   Widget _buildUserProfileCard() {
     final bool isGuest = _currentUser == null || _currentUser?.id == 'guest';
     final name = isGuest ? 'ผู้ใช้ทั่วไป (Guest Mode)' : (_currentUser?.name ?? 'ผู้ขับขี่ทั่วไป');
-    final email = isGuest ? 'โหมดใช้งานด่วน • ยังไม่ได้ลงทะเบียน' : (_currentUser?.email ?? 'driver@routealert.com');
+    final email = isGuest ? 'โหมดใช้งานด่วน • ยังไม่ได้เข้าสู่ระบบ' : (_currentUser?.email ?? 'driver@routealert.com');
 
     return Container(
       width: double.infinity,
@@ -491,53 +557,92 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
           ),
         ],
       ),
-      child: Row(
+      child: Column(
         children: [
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: const Color(0xFF5B9EE1).withValues(alpha: 0.15),
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(Icons.person, color: Color(0xFF5B9EE1), size: 36),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  name,
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.black87,
-                  ),
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: isGuest
+                      ? const Color(0xFF00A896).withValues(alpha: 0.15)
+                      : const Color(0xFF5B9EE1).withValues(alpha: 0.15),
+                  shape: BoxShape.circle,
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  email,
-                  style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+                child: Icon(
+                  isGuest ? Icons.person_outline_rounded : Icons.person,
+                  color: isGuest ? const Color(0xFF00A896) : const Color(0xFF5B9EE1),
+                  size: 36,
                 ),
-                const SizedBox(height: 8),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF5B9EE1).withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: const Text(
-                    'บทบาท: ผู้ใช้ทั่วไป (Driver / Citizen)',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: Color(0xFF5B9EE1),
-                      fontWeight: FontWeight.bold,
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      name,
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black87,
+                      ),
                     ),
-                  ),
+                    const SizedBox(height: 2),
+                    Text(
+                      email,
+                      style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: isGuest
+                            ? const Color(0xFF00A896).withValues(alpha: 0.12)
+                            : const Color(0xFF5B9EE1).withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        isGuest
+                            ? 'โหมดผู้ใช้ทั่วไป (ยังไม่ได้ล็อกอิน)'
+                            : 'บทบาท: ${_currentUser?.role ?? "ผู้ใช้ทั่วไป"}',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: isGuest ? const Color(0xFF00A896) : const Color(0xFF5B9EE1),
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
+          if (isGuest) ...[
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              height: 44,
+              child: ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => const FaceLoginScreen()),
+                  ).then((_) => _loadData());
+                },
+                icon: const Icon(Icons.login_rounded, color: Colors.white, size: 18),
+                label: const Text(
+                  'เข้าสู่ระบบ / ลงทะเบียนบัญชี (Sign In)',
+                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF00A896),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  elevation: 0,
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );
