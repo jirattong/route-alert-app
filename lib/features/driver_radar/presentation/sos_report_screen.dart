@@ -7,6 +7,7 @@ import '../../../core/models/incident_report.dart';
 import '../../../core/services/incident_service.dart';
 import '../../../core/services/location_service.dart';
 import '../../../core/services/ai_vision_triage_service.dart';
+import '../../auth_face_login/data/services/face_auth_repository.dart';
 
 class SosReportScreen extends StatefulWidget {
   final VoidCallback onClose;
@@ -156,6 +157,17 @@ class _SosReportScreenState extends State<SosReportScreen> {
       return;
     }
 
+    final phone = _phoneController.text.trim();
+    if (phone.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          backgroundColor: Colors.orangeAccent,
+          content: Text('⚠️ กรุณาระบุเบอร์โทรศัพท์ติดต่อกลับ เพื่อให้เจ้าหน้าที่ 1669 โทรยืนยันเหตุ'),
+        ),
+      );
+      return;
+    }
+
     setState(() => _isSubmitting = true);
 
     final lat = _currentGps?.latitude ?? 19.0284;
@@ -170,6 +182,14 @@ class _SosReportScreenState extends State<SosReportScreen> {
           '[AI Triage: ${_aiTriageResult!.severityCode} (${(_aiTriageResult!.confidenceScore * 100).toInt()}%)] $descriptionText';
     }
 
+    final currentUser = await FaceAuthRepository.getCurrentUser();
+    final String repName = (currentUser != null && currentUser.id != 'guest')
+        ? currentUser.name
+        : 'ผู้แจ้งเหตุ (ยืนยันตัวตนแล้ว)';
+    final String repEmail = (currentUser != null && currentUser.id != 'guest')
+        ? currentUser.email
+        : 'verified_user@routealert.app';
+
     final newReport = IncidentReport(
       id: 'Case #AVCB${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}',
       type: _selectedIncidentType!,
@@ -180,9 +200,9 @@ class _SosReportScreenState extends State<SosReportScreen> {
       province: 'เชียงใหม่',
       address: locAddress,
       photoBase64: _imageBase64,
-      reporterName: 'ผู้แจ้งเหตุ (Driver App)',
-      reporterEmail: 'user@routealert.app',
-      reporterPhone: _phoneController.text.trim(),
+      reporterName: repName,
+      reporterEmail: repEmail,
+      reporterPhone: phone,
       status: 'pending',
       createdAt: DateTime.now(),
     );

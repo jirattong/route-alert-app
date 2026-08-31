@@ -31,11 +31,12 @@ class FaceAuthRepository {
   static Future<bool> registerUser(UserFaceProfile profile) async {
     final prefs = await SharedPreferences.getInstance();
     final List<String> userList = prefs.getStringList(_usersKey) ?? [];
+    final cleanEmail = profile.email.trim().toLowerCase();
 
     userList.removeWhere((item) {
       try {
         final data = json.decode(item);
-        return data['email'] == profile.email;
+        return (data['email'] as String?)?.trim().toLowerCase() == cleanEmail;
       } catch (_) {
         return false;
       }
@@ -54,9 +55,10 @@ class FaceAuthRepository {
   /// Syncs a user profile to Firebase Firestore
   static Future<void> _syncUserToCloud(UserFaceProfile profile) async {
     try {
+      final cleanEmail = profile.email.trim().toLowerCase();
       await _firestore
           .collection(_firestoreCollection)
-          .doc(profile.email)
+          .doc(cleanEmail)
           .set(profile.toMap(), SetOptions(merge: true));
     } catch (_) {
       // Offline fallback: will remain saved in local storage
@@ -75,14 +77,25 @@ class FaceAuthRepository {
         final List<String> updatedCacheList = [];
 
         for (final doc in snapshot.docs) {
-          final profile = UserFaceProfile.fromMap(doc.data());
-          cloudUsers.add(profile);
-          updatedCacheList.add(profile.toJson());
+          final data = doc.data();
+          if (data.containsKey('name') || data.containsKey('email')) {
+            final profile = UserFaceProfile.fromMap(data);
+            cloudUsers.add(profile);
+            updatedCacheList.add(profile.toJson());
+
+            // Cache password locally if available
+            if (data['password'] != null && data['email'] != null) {
+              final cleanEmail = (data['email'] as String).trim().toLowerCase();
+              await prefs.setString('pwd_$cleanEmail', data['password'].toString());
+            }
+          }
         }
 
         // Update local cache
-        await prefs.setStringList(_usersKey, updatedCacheList);
-        return cloudUsers;
+        if (cloudUsers.isNotEmpty) {
+          await prefs.setStringList(_usersKey, updatedCacheList);
+          return cloudUsers;
+        }
       }
     } catch (_) {
       // Fall through to local cache if network is offline
@@ -261,14 +274,69 @@ class FaceAuthRepository {
     return await updateUserFaceEmbedding(email, []);
   }
 
+  /// Authenticates user with email and password against registered database
+  static Future<FaceAuthMatchResult> authenticateWithPassword({
+    required String email,
+    required String password,
+  }) async {
+    final cleanEmail = email.trim().toLowerCase();
+
+    // 1. Fetch fresh list of all registered users
+    final users = await getAllUsers();
+    final user = users.cast<UserFaceProfile?>().firstWhere(
+      (u) => u?.email.trim().toLowerCase() == cleanEmail,
+      orElse: () => null,
+    );
+
+    if (user == null) {
+      return FaceAuthMatchResult(
+        isSuccess: false,
+        similarityScore: 0.0,
+        message: 'ไม่พบบัญชีผู้ใช้นี้ในระบบ กรุณาสมัครสมาชิกก่อนเข้าใช้งาน',
+      );
+    }
+
+    // 2. Retrieve password from Cloud Firestore or Local Cache
+    String? storedPassword;
+    try {
+      final doc = await _firestore.collection(_firestoreCollection).doc(cleanEmail).get();
+      if (doc.exists && doc.data() != null && doc.data()!['password'] != null) {
+        storedPassword = doc.data()!['password'].toString();
+      }
+    } catch (_) {}
+
+    if (storedPassword == null) {
+      final prefs = await SharedPreferences.getInstance();
+      storedPassword = prefs.getString('pwd_$cleanEmail');
+    }
+
+    // 3. Check password match
+    if (storedPassword == null || storedPassword != password) {
+      return FaceAuthMatchResult(
+        isSuccess: false,
+        similarityScore: 0.0,
+        message: 'รหัสผ่านไม่ถูกต้อง กรุณาตรวจสอบรหัสผ่านของคุณอีกครั้ง',
+      );
+    }
+
+    // 4. Set current session
+    await setCurrentUser(user);
+    return FaceAuthMatchResult(
+      isSuccess: true,
+      matchedUser: user,
+      similarityScore: 1.0,
+      message: 'ยินดีต้อนรับคุณ ${user.name}',
+    );
+  }
+
   /// Updates user password in Firestore and Local Storage Cache
   static Future<bool> updateUserPassword(String email, String newPassword) async {
     final cleanEmail = email.trim().toLowerCase();
     try {
-      await _firestore.collection(_firestoreCollection).doc(cleanEmail).update({
+      await _firestore.collection(_firestoreCollection).doc(cleanEmail).set({
         'password': newPassword,
         'updatedAt': FieldValue.serverTimestamp(),
-      });
+      }, SetOptions(merge: true));
     } catch (_) {}
 
     final prefs = await SharedPreferences.getInstance();

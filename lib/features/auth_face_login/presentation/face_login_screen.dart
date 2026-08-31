@@ -8,6 +8,7 @@ import '../data/models/user_face_profile.dart';
 import '../data/services/face_auth_repository.dart';
 import 'face_scan_screen.dart';
 import 'user_type_screen.dart';
+import '../../driver_radar/presentation/driver_main_screen.dart';
 
 class FaceLoginScreen extends StatefulWidget {
   const FaceLoginScreen({super.key});
@@ -156,7 +157,10 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
 
     if (email.isEmpty || password.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('กรุณากรอกอีเมลและรหัสผ่านให้ครบถ้วน')),
+        const SnackBar(
+          backgroundColor: Colors.orangeAccent,
+          content: Text('⚠️ กรุณากรอกอีเมลและรหัสผ่านให้ครบถ้วน'),
+        ),
       );
       return;
     }
@@ -164,26 +168,43 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final users = await FaceAuthRepository.getAllUsers();
-      final user = users.firstWhere(
-        (u) => u.email.trim().toLowerCase() == email.toLowerCase(),
-        orElse: () => UserFaceProfile(
-          id: email,
-          email: email,
-          name: email.split('@').first,
-          role: 'driver',
-          faceEmbedding: [],
-          registeredAt: DateTime.now(),
-        ),
+      final result = await FaceAuthRepository.authenticateWithPassword(
+        email: email,
+        password: password,
       );
-
-      await FaceAuthRepository.setCurrentUser(user);
 
       if (!mounted) return;
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => const UserTypeScreen()),
-      );
+
+      if (result.isSuccess && result.matchedUser != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: const Color(0xFF00A896),
+            content: Text('🎉 ${result.message}'),
+          ),
+        );
+
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const UserTypeScreen()),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: Colors.redAccent,
+            content: Text('⚠️ ${result.message}'),
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: Colors.redAccent,
+            content: Text('เกิดข้อผิดพลาดในการเข้าสู่ระบบ: $e'),
+          ),
+        );
+      }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -195,6 +216,23 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
       MaterialPageRoute(
         builder: (_) => const FaceScanScreen(mode: FaceScanMode.login),
       ),
+    );
+  }
+
+  void _onEnterAsGuest() async {
+    final guestUser = UserFaceProfile(
+      id: 'guest',
+      email: 'guest@routealert.app',
+      name: 'ผู้ใช้ทั่วไป (Guest)',
+      role: 'driver',
+      faceEmbedding: [],
+      registeredAt: DateTime.now(),
+    );
+    await FaceAuthRepository.setCurrentUser(guestUser);
+    if (!mounted) return;
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (_) => const DriverMainScreen()),
     );
   }
 
@@ -724,6 +762,25 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
 
     return Scaffold(
       backgroundColor: backgroundColor,
+      appBar: Navigator.canPop(context)
+          ? AppBar(
+              backgroundColor: Colors.transparent,
+              elevation: 0,
+              leading: IconButton(
+                icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.black87),
+                onPressed: () => Navigator.pop(context),
+              ),
+              title: Text(
+                isLogin ? 'เข้าสู่ระบบ (Sign In)' : 'ลงทะเบียน (Register)',
+                style: const TextStyle(
+                  color: Colors.black87,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              centerTitle: true,
+            )
+          : null,
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
@@ -938,6 +995,56 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
         _buildFaceLoginButton(),
         const SizedBox(height: 12),
         _buildGoogleSignInButton(),
+        const SizedBox(height: 16),
+        _buildGuestModeButton(),
+      ],
+    );
+  }
+
+  Widget _buildGuestModeButton() {
+    return Column(
+      children: [
+        Row(
+          children: [
+            Expanded(child: Divider(color: Colors.grey.shade400, thickness: 1)),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              child: Text(
+                'หรือเข้าใช้งานด่วน',
+                style: TextStyle(
+                  color: Colors.grey.shade600,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+            Expanded(child: Divider(color: Colors.grey.shade400, thickness: 1)),
+          ],
+        ),
+        const SizedBox(height: 14),
+        SizedBox(
+          width: double.infinity,
+          height: 48,
+          child: OutlinedButton.icon(
+            onPressed: _onEnterAsGuest,
+            icon: const Icon(Icons.explore_rounded, color: Color(0xFF00A896), size: 20),
+            label: const Text(
+              'เข้าใช้งานแบบผู้ใช้ทั่วไป (Guest Mode)',
+              style: TextStyle(
+                color: Color(0xFF00A896),
+                fontSize: 14.5,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            style: OutlinedButton.styleFrom(
+              side: const BorderSide(color: Color(0xFF00A896), width: 1.5),
+              backgroundColor: Colors.white.withValues(alpha: 0.8),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(24),
+              ),
+            ),
+          ),
+        ),
       ],
     );
   }
@@ -1923,6 +2030,7 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
   int _step = 1; // 1: Email, 2: OTP, 3: New Password
   bool _isLoading = false;
   String? _errorMessage;
+  String? _debugOtp;
 
   // Step 1: Email
   late final TextEditingController _emailController;
@@ -2018,7 +2126,12 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
     }
 
     final result = await EmailOtpService.sendOtp(email: email);
-    setState(() => _isLoading = false);
+    setState(() {
+      _isLoading = false;
+      if (result.isSuccess) {
+        _debugOtp = result.debugOtpCode;
+      }
+    });
 
     if (result.isSuccess) {
       setState(() {
@@ -2256,7 +2369,53 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
           textAlign: TextAlign.center,
           style: const TextStyle(color: Colors.white70, fontSize: 13),
         ),
-        const SizedBox(height: 20),
+        if (_debugOtp != null) ...[
+          const SizedBox(height: 14),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            decoration: BoxDecoration(
+              color: const Color(0xFF00A896).withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFF00A896).withValues(alpha: 0.35)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.key_rounded, color: Color(0xFF00A896), size: 18),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'รหัส OTP เพื่อยืนยัน: $_debugOtp',
+                    style: const TextStyle(
+                      color: Color(0xFF00A896),
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                TextButton(
+                  onPressed: () {
+                    for (int i = 0; i < 6 && i < _debugOtp!.length; i++) {
+                      _otpControllers[i].text = _debugOtp![i];
+                    }
+                    _verifyResetOtp();
+                  },
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    backgroundColor: const Color(0xFF00A896),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  child: const Text(
+                    'กรอกทันที',
+                    style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+        const SizedBox(height: 18),
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: List.generate(6, (index) {

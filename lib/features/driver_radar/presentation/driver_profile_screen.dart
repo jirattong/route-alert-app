@@ -36,6 +36,20 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
   }
 
   void _onReEnrollFace() async {
+    if (_currentUser == null || _currentUser?.id == 'guest') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          backgroundColor: Colors.orangeAccent,
+          content: Text('⚠️ กรุณาเข้าสู่ระบบหรือลงทะเบียนก่อนบันทึก Face ID'),
+        ),
+      );
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (context) => const FaceLoginScreen()),
+      ).then((_) => _loadData());
+      return;
+    }
+
     final newEmbedding = await Navigator.push<List<double>>(
       context,
       MaterialPageRoute(
@@ -366,34 +380,60 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
 
                     SizedBox(
                       width: double.infinity,
-                      child: ElevatedButton.icon(
-                        onPressed: () async {
-                          await FaceAuthRepository.logout();
-                          if (!context.mounted) return;
-                          Navigator.pushAndRemoveUntil(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => const FaceLoginScreen(),
+                      child: (_currentUser == null || _currentUser?.id == 'guest')
+                          ? ElevatedButton.icon(
+                              onPressed: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => const FaceLoginScreen(),
+                                  ),
+                                ).then((_) => _loadData());
+                              },
+                              icon: const Icon(Icons.login_rounded, color: Colors.white, size: 20),
+                              label: const Text(
+                                'เข้าสู่ระบบ / ลงทะเบียน (Sign in / Register)',
+                                style: TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.white),
+                              ),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF00A896),
+                                padding: const EdgeInsets.symmetric(vertical: 14),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(24),
+                                ),
+                              ),
+                            )
+                          : ElevatedButton.icon(
+                              onPressed: () async {
+                                await FaceAuthRepository.logout();
+                                await _loadData();
+                                if (!context.mounted) return;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    backgroundColor: Color(0xFF00A896),
+                                    content: Text('ออกจากระบบแล้ว (สลับเป็นโหมดผู้ใช้ทั่วไป)'),
+                                  ),
+                                );
+                              },
+                              icon: const Icon(Icons.logout_rounded, color: Colors.white, size: 20),
+                              label: const Text(
+                                'ออกจากระบบ (Logout)',
+                                style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.white),
+                              ),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.redAccent.shade400,
+                                padding: const EdgeInsets.symmetric(vertical: 14),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(24),
+                                ),
+                              ),
                             ),
-                            (route) => false,
-                          );
-                        },
-                        icon: const Icon(Icons.logout_rounded, color: Colors.white, size: 20),
-                        label: const Text(
-                          'ออกจากระบบ (Logout)',
-                          style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white),
-                        ),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.redAccent.shade400,
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(24),
-                          ),
-                        ),
-                      ),
                     ),
                     const SizedBox(height: 20),
                   ],
@@ -433,8 +473,9 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
   }
 
   Widget _buildUserProfileCard() {
-    final name = _currentUser?.name ?? 'ผู้ขับขี่ทั่วไป';
-    final email = _currentUser?.email ?? 'driver@routealert.com';
+    final bool isGuest = _currentUser == null || _currentUser?.id == 'guest';
+    final name = isGuest ? 'ผู้ใช้ทั่วไป (Guest Mode)' : (_currentUser?.name ?? 'ผู้ขับขี่ทั่วไป');
+    final email = isGuest ? 'โหมดใช้งานด่วน • ยังไม่ได้ลงทะเบียน' : (_currentUser?.email ?? 'driver@routealert.com');
 
     return Container(
       width: double.infinity,
@@ -604,7 +645,8 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
   }
 
   Widget _buildFaceManagementCard() {
-    final hasFace = _currentUser?.hasFaceEnrolled ?? false;
+    final bool isGuest = _currentUser == null || _currentUser?.id == 'guest';
+    final hasFace = !isGuest && (_currentUser?.hasFaceEnrolled ?? false);
 
     return Container(
       width: double.infinity,
@@ -626,8 +668,12 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
           Row(
             children: [
               Icon(
-                hasFace ? Icons.face_retouching_natural_rounded : Icons.face_unlock_rounded,
-                color: hasFace ? const Color(0xFF00A896) : Colors.grey,
+                hasFace
+                    ? Icons.face_retouching_natural_rounded
+                    : Icons.face_unlock_rounded,
+                color: hasFace
+                    ? const Color(0xFF00A896)
+                    : const Color(0xFF5B9EE1),
                 size: 24,
               ),
               const SizedBox(width: 10),
@@ -643,12 +689,16 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            hasFace
-                ? '✅ ลงทะเบียนใบหน้าแล้ว (สามารถสแกนเข้าสู่ระบบได้ทันที)'
-                : '⚪ ยังไม่ได้ลงทะเบียนใบหน้า',
+            isGuest
+                ? '⚪ โหมดผู้ใช้ทั่วไป (เข้าสู่ระบบเพื่อเปิดใช้งาน Face ID)'
+                : (hasFace
+                    ? '✅ ลงทะเบียนใบหน้าแล้ว (สามารถสแกนเข้าสู่ระบบได้ทันที)'
+                    : '⚪ ยังไม่ได้ลงทะเบียนใบหน้า'),
             style: TextStyle(
               fontSize: 12.5,
-              color: hasFace ? const Color(0xFF00A896) : Colors.grey.shade600,
+              color: hasFace
+                  ? const Color(0xFF00A896)
+                  : Colors.grey.shade600,
               fontWeight: FontWeight.w600,
             ),
           ),
@@ -657,11 +707,25 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
             children: [
               Expanded(
                 child: OutlinedButton.icon(
-                  onPressed: _onReEnrollFace,
+                  onPressed: isGuest
+                      ? () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => const FaceLoginScreen(),
+                            ),
+                          ).then((_) => _loadData());
+                        }
+                      : _onReEnrollFace,
                   icon: const Icon(Icons.camera_front_rounded, size: 16),
                   label: Text(
-                    hasFace ? 'สแกนใบหน้าใหม่' : 'ลงทะเบียน Face ID',
-                    style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold),
+                    isGuest
+                        ? 'เข้าสู่ระบบ / สมัครสมาชิก'
+                        : (hasFace ? 'สแกนใบหน้าใหม่' : 'ลงทะเบียน Face ID'),
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: const Color(0xFF5B9EE1),
@@ -676,7 +740,8 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                 const SizedBox(width: 8),
                 IconButton(
                   onPressed: _onRemoveFace,
-                  icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent),
+                  icon: const Icon(Icons.delete_outline_rounded,
+                      color: Colors.redAccent),
                   tooltip: 'ลบข้อมูลใบหน้า',
                 ),
               ],
