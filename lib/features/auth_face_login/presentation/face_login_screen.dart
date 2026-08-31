@@ -45,13 +45,14 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
   @override
   void initState() {
     super.initState();
-    _passwordController.addListener(() {
-      if (!isLogin && mounted) {
-        setState(() {});
-      }
-    });
-
+    _passwordController.addListener(_onPasswordInputChanged);
     _emailController.addListener(_onEmailInputChanged);
+  }
+
+  void _onPasswordInputChanged() {
+    if (!isLogin && mounted) {
+      setState(() {});
+    }
   }
 
   void _onEmailInputChanged() {
@@ -121,12 +122,27 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
 
   @override
   void dispose() {
+    _emailController.removeListener(_onEmailInputChanged);
+    _passwordController.removeListener(_onPasswordInputChanged);
     _emailDebounceTimer?.cancel();
     _nameController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
     _rePasswordController.dispose();
     super.dispose();
+  }
+
+  void _onBackPressed() {
+    FocusScope.of(context).unfocus();
+    if (Navigator.canPop(context)) {
+      Navigator.pop(context);
+    } else {
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (_) => const DriverMainScreen()),
+        (route) => false,
+      );
+    }
   }
 
   // --- Password Strength Rules (NIST / Enterprise Standard) ---
@@ -230,10 +246,7 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
     );
     await FaceAuthRepository.setCurrentUser(guestUser);
     if (!mounted) return;
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(builder: (_) => const DriverMainScreen()),
-    );
+    _onBackPressed();
   }
 
   void _onGoogleLogin() async {
@@ -760,29 +773,34 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
     final Color backgroundColor =
         isLogin ? const Color(0xFFE2F0FE) : const Color(0xFFE3F8EB);
 
-    return Scaffold(
-      backgroundColor: backgroundColor,
-      appBar: Navigator.canPop(context)
-          ? AppBar(
-              backgroundColor: Colors.transparent,
-              elevation: 0,
-              leading: IconButton(
-                icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.black87),
-                onPressed: () => Navigator.pop(context),
-              ),
-              title: Text(
-                isLogin ? 'เข้าสู่ระบบ (Sign In)' : 'ลงทะเบียน (Register)',
-                style: const TextStyle(
-                  color: Colors.black87,
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              centerTitle: true,
-            )
-          : null,
-      body: SafeArea(
-        child: Center(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) {
+          _onBackPressed();
+        }
+      },
+      child: Scaffold(
+        backgroundColor: backgroundColor,
+        appBar: AppBar(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.black87),
+            onPressed: _onBackPressed,
+          ),
+          title: Text(
+            isLogin ? 'เข้าสู่ระบบ (Sign In)' : 'ลงทะเบียน (Register)',
+            style: const TextStyle(
+              color: Colors.black87,
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          centerTitle: true,
+        ),
+        body: SafeArea(
+          child: Center(
           child: SingleChildScrollView(
             padding: const EdgeInsets.symmetric(horizontal: 28.0, vertical: 20.0),
             child: Column(
@@ -811,8 +829,9 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
           ),
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 
   Widget _buildAppLogo() {
     return Container(
