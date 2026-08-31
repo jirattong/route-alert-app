@@ -408,6 +408,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                     if (_currentUser == null || _currentUser?.id == 'guest')
                       SizedBox(
                         width: double.infinity,
+                        height: 50,
                         child: ElevatedButton.icon(
                           onPressed: () async {
                             await Navigator.push(
@@ -428,80 +429,45 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                           ),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: const Color(0xFF00A896),
-                            padding: const EdgeInsets.symmetric(vertical: 14),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(24),
                             ),
+                            elevation: 0,
                           ),
                         ),
                       )
                     else
-                      Column(
-                        children: [
-                          SizedBox(
-                            width: double.infinity,
-                            height: 48,
-                            child: OutlinedButton.icon(
-                              onPressed: () async {
-                                await Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) => const FaceLoginScreen(),
-                                  ),
-                                );
-                                if (mounted) _loadData();
-                              },
-                              icon: const Icon(Icons.swap_horiz_rounded, color: Color(0xFF00A896), size: 20),
-                              label: const Text(
-                                'สลับบัญชี / เข้าสู่ระบบด้วยบัญชีอื่น',
-                                style: TextStyle(
-                                  fontSize: 14.5,
-                                  fontWeight: FontWeight.bold,
-                                  color: Color(0xFF00A896),
-                                ),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 50,
+                        child: ElevatedButton.icon(
+                          onPressed: () async {
+                            await FaceAuthRepository.logout();
+                            await _loadData();
+                            if (!context.mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                backgroundColor: Color(0xFF00A896),
+                                content: Text('ออกจากระบบแล้ว (สลับเป็นโหมดผู้ใช้ทั่วไป)'),
                               ),
-                              style: OutlinedButton.styleFrom(
-                                side: const BorderSide(color: Color(0xFF00A896), width: 1.5),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(24),
-                                ),
-                              ),
-                            ),
+                            );
+                          },
+                          icon: const Icon(Icons.logout_rounded, color: Colors.white, size: 20),
+                          label: const Text(
+                            'ออกจากระบบ (Logout)',
+                            style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white),
                           ),
-                          const SizedBox(height: 12),
-                          SizedBox(
-                            width: double.infinity,
-                            height: 48,
-                            child: ElevatedButton.icon(
-                              onPressed: () async {
-                                await FaceAuthRepository.logout();
-                                await _loadData();
-                                if (!context.mounted) return;
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    backgroundColor: Color(0xFF00A896),
-                                    content: Text('ออกจากระบบแล้ว (สลับเป็นโหมดผู้ใช้ทั่วไป)'),
-                                  ),
-                                );
-                              },
-                              icon: const Icon(Icons.logout_rounded, color: Colors.white, size: 20),
-                              label: const Text(
-                                'ออกจากระบบ (Logout)',
-                                style: TextStyle(
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.white),
-                              ),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.redAccent.shade400,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(24),
-                                ),
-                                elevation: 0,
-                              ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.redAccent.shade400,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(24),
                             ),
+                            elevation: 0,
                           ),
-                        ],
+                        ),
                       ),
                     const SizedBox(height: 20),
                   ],
@@ -624,32 +590,6 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
               ),
             ],
           ),
-          if (isGuest) ...[
-            const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              height: 44,
-              child: ElevatedButton.icon(
-                onPressed: () async {
-                  await Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (context) => const FaceLoginScreen()),
-                  );
-                  if (mounted) _loadData();
-                },
-                icon: const Icon(Icons.login_rounded, color: Colors.white, size: 18),
-                label: const Text(
-                  'เข้าสู่ระบบ / ลงทะเบียนบัญชี (Sign In)',
-                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
-                ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF00A896),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                  elevation: 0,
-                ),
-              ),
-            ),
-          ],
         ],
       ),
     );
@@ -833,7 +773,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                   icon: const Icon(Icons.camera_front_rounded, size: 16),
                   label: Text(
                     isGuest
-                        ? 'เข้าสู่ระบบ / สมัครสมาชิก'
+                        ? 'เปิดใช้งาน Face ID (เข้าสู่ระบบ)'
                         : (hasFace ? 'สแกนใบหน้าใหม่' : 'ลงทะเบียน Face ID'),
                     style: const TextStyle(
                       fontSize: 12.5,

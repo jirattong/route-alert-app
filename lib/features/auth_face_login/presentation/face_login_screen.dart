@@ -7,8 +7,9 @@ import '../../../core/widgets/google_logo.dart';
 import '../data/models/user_face_profile.dart';
 import '../data/services/face_auth_repository.dart';
 import 'face_scan_screen.dart';
-import 'user_type_screen.dart';
 import '../../driver_radar/presentation/driver_main_screen.dart';
+import '../../ambulance/presentation/ambulance_main_screen.dart';
+import '../../agency/presentation/agency_main_screen.dart';
 
 class FaceLoginScreen extends StatefulWidget {
   const FaceLoginScreen({super.key});
@@ -145,6 +146,24 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
     }
   }
 
+  void _navigateToRoleScreen(UserFaceProfile user) {
+    if (!mounted) return;
+    Widget targetScreen;
+    if (user.role == 'ambulance') {
+      targetScreen = const AmbulanceMainScreen();
+    } else if (user.role == 'agency') {
+      targetScreen = const AgencyMainScreen();
+    } else {
+      targetScreen = const DriverMainScreen();
+    }
+
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => targetScreen),
+      (route) => false,
+    );
+  }
+
   // --- Password Strength Rules (NIST / Enterprise Standard) ---
   bool get _hasMinLength => _passwordController.text.length >= 8;
   bool get _hasUpperLower =>
@@ -199,10 +218,7 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
           ),
         );
 
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const UserTypeScreen()),
-        );
+        _navigateToRoleScreen(result.matchedUser!);
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -280,10 +296,7 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
           content: Text('🎉 เข้าสู่ระบบสำเร็จ ยินดีต้อนรับคุณ ${result.googleName}'),
         ),
       );
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => const UserTypeScreen()),
-      );
+      _navigateToRoleScreen(result.existingUser!);
       return;
     }
 
@@ -369,11 +382,7 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
                     );
                     await FaceAuthRepository.registerUser(profile);
                     if (mounted) {
-                      Navigator.pushReplacement(
-                        context,
-                        MaterialPageRoute(
-                            builder: (_) => const UserTypeScreen()),
-                      );
+                      _navigateToRoleScreen(profile);
                     }
                   }
                 },
@@ -752,20 +761,7 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
     await FaceAuthRepository.registerUser(newProfile);
     await FaceAuthRepository.updateUserPassword(email, password);
 
-    if (!mounted) return;
-    setState(() => _isLoading = false);
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        backgroundColor: Color(0xFF00A896),
-        content: Text('🎉 ลงทะเบียนสำเร็จ ยินดีต้อนรับสู่ RouteAlert'),
-      ),
-    );
-
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(builder: (_) => const UserTypeScreen()),
-    );
+    _navigateToRoleScreen(newProfile);
   }
 
   @override
@@ -2041,7 +2037,6 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
   int _step = 1; // 1: Email, 2: OTP, 3: New Password
   bool _isLoading = false;
   String? _errorMessage;
-  String? _debugOtp;
 
   // Step 1: Email
   late final TextEditingController _emailController;
@@ -2137,12 +2132,7 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
     }
 
     final result = await EmailOtpService.sendOtp(email: email);
-    setState(() {
-      _isLoading = false;
-      if (result.isSuccess) {
-        _debugOtp = result.debugOtpCode;
-      }
-    });
+    setState(() => _isLoading = false);
 
     if (result.isSuccess) {
       setState(() {
@@ -2380,52 +2370,7 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
           textAlign: TextAlign.center,
           style: const TextStyle(color: Colors.white70, fontSize: 13),
         ),
-        if (_debugOtp != null) ...[
-          const SizedBox(height: 14),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-            decoration: BoxDecoration(
-              color: const Color(0xFF00A896).withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0xFF00A896).withValues(alpha: 0.35)),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.key_rounded, color: Color(0xFF00A896), size: 18),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'รหัส OTP เพื่อยืนยัน: $_debugOtp',
-                    style: const TextStyle(
-                      color: Color(0xFF00A896),
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-                TextButton(
-                  onPressed: () {
-                    for (int i = 0; i < 6 && i < _debugOtp!.length; i++) {
-                      _otpControllers[i].text = _debugOtp![i];
-                    }
-                    _verifyResetOtp();
-                  },
-                  style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    backgroundColor: const Color(0xFF00A896),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                  ),
-                  child: const Text(
-                    'กรอกทันที',
-                    style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
+        const SizedBox(height: 22),
         const SizedBox(height: 18),
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,

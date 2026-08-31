@@ -16,6 +16,18 @@ class DriverMainScreen extends StatefulWidget {
 
 class _DriverMainScreenState extends State<DriverMainScreen> {
   int _currentIndex = 0;
+  late final List<Widget> _pages;
+
+  @override
+  void initState() {
+    super.initState();
+    _pages = [
+      DriverHomeScreen(onOpenSos: _openSosScreen),
+      IncidentListScreen(onOpenSos: _openSosScreen),
+      const DriverSettingsScreen(),
+      const DriverProfileScreen(),
+    ];
+  }
 
   void _onSelectTab(int index) {
     setState(() {
@@ -174,21 +186,10 @@ class _DriverMainScreenState extends State<DriverMainScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final List<Widget> basePages = [
-      DriverHomeScreen(
-        onOpenSos: _openSosScreen,
-      ),
-      IncidentListScreen(
-        onOpenSos: _openSosScreen,
-      ),
-      const DriverSettingsScreen(),
-      const DriverProfileScreen(),
-    ];
-
     return Scaffold(
       body: IndexedStack(
         index: _currentIndex,
-        children: basePages,
+        children: _pages,
       ),
       bottomNavigationBar: Container(
         decoration: BoxDecoration(

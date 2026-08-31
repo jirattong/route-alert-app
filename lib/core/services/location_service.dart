@@ -1,59 +1,84 @@
 import 'dart:async';
+import 'dart:io' show Platform;
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 
 class LocationService {
+  // Default coordinates (Chiang Mai Center: Thapae Gate)
+  static const LatLng defaultLocation = LatLng(18.7883, 98.9853);
+
   // ตรวจสอบและขอสิทธิ์การเข้าถึงพิกัด GPS
   static Future<bool> handleLocationPermission() async {
-    bool serviceEnabled;
-    LocationPermission permission;
-
-    serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) {
-      // ผู้ใช้ปิด GPS ไว้
-      return false;
+    if (!kIsWeb && (Platform.isWindows || Platform.isLinux)) {
+      return true;
     }
 
-    permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-      if (permission == LocationPermission.denied) {
+    try {
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
         return false;
       }
-    }
 
-    if (permission == LocationPermission.deniedForever) {
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          return false;
+        }
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        return false;
+      }
+
+      return true;
+    } catch (_) {
       return false;
     }
-
-    return true;
   }
 
   // ดึงตำแหน่งปัจจุบันครั้งแรก (One-time fetch)
   static Future<LatLng?> getCurrentLocation() async {
-    final hasPermission = await handleLocationPermission();
-    if (!hasPermission) return null;
+    if (!kIsWeb && (Platform.isWindows || Platform.isLinux)) {
+      return defaultLocation;
+    }
 
     try {
+      final hasPermission = await handleLocationPermission();
+      if (!hasPermission) return defaultLocation;
+
       Position position = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.medium,
+          timeLimit: Duration(seconds: 3),
+        ),
       );
       return LatLng(position.latitude, position.longitude);
     } catch (e) {
-      return null;
+      return defaultLocation;
     }
   }
 
   // สตรีมพิกัดสดแบบ Real-time (Position Stream)
   static Stream<LatLng> getLiveLocationStream() {
-    const LocationSettings locationSettings = LocationSettings(
-      accuracy: LocationAccuracy.high,
-      distanceFilter: 3, // อัปเดตเมื่อขยับเกิน 3 เมตร
-    );
+    if (!kIsWeb && (Platform.isWindows || Platform.isLinux)) {
+      // Return a safe empty stream on desktop to avoid Windows non-platform thread crashes
+      return const Stream.empty();
+    }
 
-    return Geolocator.getPositionStream(locationSettings: locationSettings).map(
-      (Position pos) => LatLng(pos.latitude, pos.longitude),
-    );
+    try {
+      const LocationSettings locationSettings = LocationSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 3, // อัปเดตเมื่อขยับเกิน 3 เมตร
+      );
+
+      return Geolocator.getPositionStream(locationSettings: locationSettings).map(
+        (Position pos) => LatLng(pos.latitude, pos.longitude),
+      ).handleError((_) => defaultLocation);
+    } catch (_) {
+      return const Stream.empty();
+    }
   }
 
   // คำนวณระยะห่างระหว่างพิกัด 2 จุด (คืนค่าเป็นกิโลเมตร)
