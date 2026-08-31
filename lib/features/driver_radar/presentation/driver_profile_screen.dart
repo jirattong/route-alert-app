@@ -409,13 +409,14 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                       SizedBox(
                         width: double.infinity,
                         child: ElevatedButton.icon(
-                          onPressed: () {
-                            Navigator.push(
+                          onPressed: () async {
+                            await Navigator.push(
                               context,
                               MaterialPageRoute(
                                 builder: (context) => const FaceLoginScreen(),
                               ),
-                            ).then((_) => _loadData());
+                            );
+                            if (mounted) _loadData();
                           },
                           icon: const Icon(Icons.login_rounded, color: Colors.white, size: 20),
                           label: const Text(
@@ -441,13 +442,14 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                             width: double.infinity,
                             height: 48,
                             child: OutlinedButton.icon(
-                              onPressed: () {
-                                Navigator.push(
+                              onPressed: () async {
+                                await Navigator.push(
                                   context,
                                   MaterialPageRoute(
                                     builder: (context) => const FaceLoginScreen(),
                                   ),
-                                ).then((_) => _loadData());
+                                );
+                                if (mounted) _loadData();
                               },
                               icon: const Icon(Icons.swap_horiz_rounded, color: Color(0xFF00A896), size: 20),
                               label: const Text(
@@ -628,11 +630,12 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
               width: double.infinity,
               height: 44,
               child: ElevatedButton.icon(
-                onPressed: () {
-                  Navigator.push(
+                onPressed: () async {
+                  await Navigator.push(
                     context,
                     MaterialPageRoute(builder: (context) => const FaceLoginScreen()),
-                  ).then((_) => _loadData());
+                  );
+                  if (mounted) _loadData();
                 },
                 icon: const Icon(Icons.login_rounded, color: Colors.white, size: 18),
                 label: const Text(
@@ -817,13 +820,14 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
               Expanded(
                 child: OutlinedButton.icon(
                   onPressed: isGuest
-                      ? () {
-                          Navigator.push(
+                      ? () async {
+                          await Navigator.push(
                             context,
                             MaterialPageRoute(
                               builder: (context) => const FaceLoginScreen(),
                             ),
-                          ).then((_) => _loadData());
+                          );
+                          if (mounted) _loadData();
                         }
                       : _onReEnrollFace,
                   icon: const Icon(Icons.camera_front_rounded, size: 16),

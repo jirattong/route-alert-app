@@ -773,34 +773,27 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
     final Color backgroundColor =
         isLogin ? const Color(0xFFE2F0FE) : const Color(0xFFE3F8EB);
 
-    return PopScope(
-      canPop: false,
-      onPopInvokedWithResult: (didPop, result) {
-        if (!didPop) {
-          _onBackPressed();
-        }
-      },
-      child: Scaffold(
-        backgroundColor: backgroundColor,
-        appBar: AppBar(
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-          leading: IconButton(
-            icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.black87),
-            onPressed: _onBackPressed,
-          ),
-          title: Text(
-            isLogin ? 'เข้าสู่ระบบ (Sign In)' : 'ลงทะเบียน (Register)',
-            style: const TextStyle(
-              color: Colors.black87,
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          centerTitle: true,
+    return Scaffold(
+      backgroundColor: backgroundColor,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.black87),
+          onPressed: _onBackPressed,
         ),
-        body: SafeArea(
-          child: Center(
+        title: Text(
+          isLogin ? 'เข้าสู่ระบบ (Sign In)' : 'ลงทะเบียน (Register)',
+          style: const TextStyle(
+            color: Colors.black87,
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        centerTitle: true,
+      ),
+      body: SafeArea(
+        child: Center(
           child: SingleChildScrollView(
             padding: const EdgeInsets.symmetric(horizontal: 28.0, vertical: 20.0),
             child: Column(
@@ -829,9 +822,8 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
           ),
         ),
       ),
-    ),
-  );
-}
+    );
+  }
 
   Widget _buildAppLogo() {
     return Container(
