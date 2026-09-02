@@ -23,6 +23,13 @@ class DriverHomeScreen extends StatefulWidget {
   State<DriverHomeScreen> createState() => _DriverHomeScreenState();
 }
 
+enum SimulationMode {
+  inPathOvertake, // 🏎️ โหมด: ตามหลังแซงผ่าน
+  turnBypass,     // ↪️ โหมด: เลี้ยวแยกหน้า (ไม่เตือน)
+  turnIn,         // ↩️ โหมด: เลี้ยวเข้าถนนเรา (เตือน)
+  opposingLane,   // 🔄 โหมด: สวนเลน (ปลอดภัย)
+}
+
 class _DriverHomeScreenState extends State<DriverHomeScreen>
     with SingleTickerProviderStateMixin {
   final MapController _mapController = MapController();
@@ -31,16 +38,21 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
   final double _driverHeading = 45.0; // Heading degree (NE)
   final double _driverSpeed = 50.0; // km/h
 
-  late LatLng _ambulanceLocation;
+  LatLng? _ambulanceLocation;
   double _ambulanceHeading = 45.0;
   double _ambulanceSpeed = 80.0;
+  bool _hasLiveAmbulance = false;
+
+  // Route-Aware Polyline & Navigation State
+  List<LatLng>? _ambulanceRoutePoints;
+  String? _ambulanceTurnIntent;
+  SimulationMode _simulationMode = SimulationMode.inPathOvertake;
 
   // Fleet of active ambulances
   List<EmergencyVehicleData> _activeFleet = [];
 
   // AI Deep Learning Trajectory Prediction State
   TrajectoryPredictionResult? _aiPrediction;
-  bool _isOpposingLaneSimulation = false;
   bool _hasPassedAnnouncement = false;
 
   // Geofence radii in meters
@@ -73,7 +85,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
   @override
   void initState() {
     super.initState();
-    _ambulanceLocation = const LatLng(19.0140, 99.8820); // Starts ~2km behind driver
+    _ambulanceLocation = null;
 
     _pulseController = AnimationController(
       vsync: this,
@@ -118,11 +130,29 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
 
     _mqttSubscription = EmergencyMqttService().emergencyStream.listen((data) {
       if (!mounted) return;
-      setState(() {
-        _ambulanceLocation = LatLng(data.latitude, data.longitude);
-        _ambulanceSpeed = data.speed;
-      });
-      _runAiTrajectoryEvaluation();
+      if (data.sirenActive) {
+        setState(() {
+          _ambulanceLocation = LatLng(data.latitude, data.longitude);
+          _ambulanceSpeed = data.speed;
+          _ambulanceRoutePoints = data.routePoints;
+          _ambulanceTurnIntent = data.turnIntent;
+          _hasLiveAmbulance = true;
+        });
+        _runAiTrajectoryEvaluation();
+      } else {
+        setState(() {
+          _hasLiveAmbulance = false;
+          if (!_isSimulating) {
+            _ambulanceLocation = null;
+            _ambulanceRoutePoints = null;
+            _ambulanceTurnIntent = null;
+            _isInBlueZone = false;
+            _isInRedZone = false;
+            _aiPrediction = null;
+            _currentDistanceMeters = 99999.0;
+          }
+        });
+      }
     });
 
     _fleetSubscription = EmergencyMqttService().activeFleetStream.listen((fleet) {
@@ -130,7 +160,9 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
       setState(() {
         _activeFleet = fleet;
       });
-      _runAiTrajectoryEvaluation();
+      if (_hasLiveAmbulance || _isSimulating) {
+        _runAiTrajectoryEvaluation();
+      }
     });
   }
 
@@ -169,35 +201,139 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
     if (initialPos != null && mounted) {
       setState(() {
         _currentLocation = initialPos;
-        _ambulanceLocation = LatLng(
-          initialPos.latitude - 0.016,
-          initialPos.longitude - 0.016,
-        );
       });
       _mapController.move(_currentLocation, 14.5);
-      EmergencyMqttService().seedSimulatedFleet(_currentLocation);
-      _runAiTrajectoryEvaluation();
-    } else {
-      if (mounted) {
-        EmergencyMqttService().seedSimulatedFleet(_currentLocation);
+      if (_isSimulating || _hasLiveAmbulance) {
+        _runAiTrajectoryEvaluation();
       }
-      _runAiTrajectoryEvaluation();
     }
 
     _locationSubscription =
         LocationService.getLiveLocationStream().listen((newPos) {
       if (!mounted) return;
       setState(() => _currentLocation = newPos);
-      _runAiTrajectoryEvaluation();
+      if (_isSimulating || _hasLiveAmbulance) {
+        _runAiTrajectoryEvaluation();
+      }
     });
   }
 
-  /// Toggle Simulation: Supports full In-Path Overtake and Opposing Lane Pass
+  void _cycleSimulationMode() {
+    setState(() {
+      switch (_simulationMode) {
+        case SimulationMode.inPathOvertake:
+          _simulationMode = SimulationMode.turnBypass;
+          break;
+        case SimulationMode.turnBypass:
+          _simulationMode = SimulationMode.turnIn;
+          break;
+        case SimulationMode.turnIn:
+          _simulationMode = SimulationMode.opposingLane;
+          break;
+        case SimulationMode.opposingLane:
+          _simulationMode = SimulationMode.inPathOvertake;
+          break;
+      }
+    });
+    _resetSimulation();
+  }
+
+  void _resetSimulation() {
+    _simulationTimer?.cancel();
+    setState(() {
+      _isSimulating = false;
+      _hasVibrated = false;
+      _hasPassedAnnouncement = false;
+
+      switch (_simulationMode) {
+        case SimulationMode.inPathOvertake:
+          _ambulanceLocation = LatLng(
+            _currentLocation.latitude - 0.016,
+            _currentLocation.longitude - 0.016,
+          );
+          _ambulanceHeading = 45.0;
+          _ambulanceTurnIntent = 'มุ่งหน้าตรงตามช่องทางจราจร';
+          _ambulanceRoutePoints = [
+            _ambulanceLocation!,
+            _currentLocation,
+            LatLng(_currentLocation.latitude + 0.020, _currentLocation.longitude + 0.020),
+          ];
+          break;
+
+        case SimulationMode.turnBypass:
+          _ambulanceLocation = LatLng(
+            _currentLocation.latitude - 0.016,
+            _currentLocation.longitude - 0.016,
+          );
+          _ambulanceHeading = 45.0;
+          _ambulanceTurnIntent = 'เตรียมเลี้ยวขวาที่แยกข้างหน้า (ไม่ตรงมา)';
+          final intersection = LatLng(
+            _currentLocation.latitude - 0.004,
+            _currentLocation.longitude - 0.004,
+          );
+          _ambulanceRoutePoints = [
+            _ambulanceLocation!,
+            intersection,
+            LatLng(intersection.latitude - 0.004, intersection.longitude + 0.018),
+          ];
+          break;
+
+        case SimulationMode.turnIn:
+          _ambulanceLocation = LatLng(
+            _currentLocation.latitude - 0.006,
+            _currentLocation.longitude - 0.016,
+          );
+          _ambulanceHeading = 90.0;
+          _ambulanceTurnIntent = 'เตรียมเลี้ยวซ้ายเข้าถนนของผู้ใช้';
+          final turnPoint = LatLng(
+            _currentLocation.latitude - 0.006,
+            _currentLocation.longitude,
+          );
+          _ambulanceRoutePoints = [
+            _ambulanceLocation!,
+            turnPoint,
+            _currentLocation,
+            LatLng(_currentLocation.latitude + 0.015, _currentLocation.longitude),
+          ];
+          break;
+
+        case SimulationMode.opposingLane:
+          _ambulanceLocation = LatLng(
+            _currentLocation.latitude + 0.016,
+            _currentLocation.longitude + 0.016 - 0.002,
+          );
+          _ambulanceHeading = 225.0;
+          _ambulanceTurnIntent = 'วิ่งเลนตรงข้าม (ทิศทางสวนกัน)';
+          _ambulanceRoutePoints = [
+            _ambulanceLocation!,
+            LatLng(_currentLocation.latitude - 0.020, _currentLocation.longitude - 0.020),
+          ];
+          break;
+      }
+    });
+    _runAiTrajectoryEvaluation();
+  }
+
+  /// Toggle Simulation: Supports Multi-Scenario Route-Aware Realism
   void _toggleSimulation() {
     if (_isSimulating) {
       _simulationTimer?.cancel();
-      setState(() => _isSimulating = false);
+      setState(() {
+        _isSimulating = false;
+        if (!_hasLiveAmbulance) {
+          _ambulanceLocation = null;
+          _ambulanceRoutePoints = null;
+          _ambulanceTurnIntent = null;
+          _isInBlueZone = false;
+          _isInRedZone = false;
+          _aiPrediction = null;
+          _currentDistanceMeters = 99999.0;
+        }
+      });
     } else {
+      if (_ambulanceLocation == null) {
+        _resetSimulation();
+      }
       setState(() {
         _isSimulating = true;
         _hasVibrated = false;
@@ -207,35 +343,94 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
       _simulationTimer =
           Timer.periodic(const Duration(milliseconds: 400), (timer) {
         if (!mounted) return;
+        final currentAmb = _ambulanceLocation ?? _currentLocation;
 
-        if (_isOpposingLaneSimulation) {
-          // Opposing Lane: Moves Southwest from ahead past driver to behind
-          final targetLat = _currentLocation.latitude - 0.020;
-          if (_ambulanceLocation.latitude <= targetLat) {
-            timer.cancel();
-            setState(() => _isSimulating = false);
-            return;
-          }
-          setState(() {
-            _ambulanceLocation = LatLng(
-              _ambulanceLocation.latitude - 0.0007,
-              _ambulanceLocation.longitude - 0.0007,
-            );
-          });
-        } else {
-          // In-Path: Starts behind, drives faster than driver, overtakes and continues ahead!
-          final targetLat = _currentLocation.latitude + 0.020;
-          if (_ambulanceLocation.latitude >= targetLat) {
-            timer.cancel();
-            setState(() => _isSimulating = false);
-            return;
-          }
-          setState(() {
-            _ambulanceLocation = LatLng(
-              _ambulanceLocation.latitude + 0.0007,
-              _ambulanceLocation.longitude + 0.0007,
-            );
-          });
+        switch (_simulationMode) {
+          case SimulationMode.inPathOvertake:
+            final targetLat = _currentLocation.latitude + 0.020;
+            if (currentAmb.latitude >= targetLat) {
+              timer.cancel();
+              setState(() => _isSimulating = false);
+              return;
+            }
+            setState(() {
+              _ambulanceLocation = LatLng(
+                currentAmb.latitude + 0.0007,
+                currentAmb.longitude + 0.0007,
+              );
+            });
+            break;
+
+          case SimulationMode.turnBypass:
+            final intersectionLat = _currentLocation.latitude - 0.004;
+            if (currentAmb.latitude < intersectionLat) {
+              // Moving towards intersection
+              setState(() {
+                _ambulanceLocation = LatLng(
+                  currentAmb.latitude + 0.0007,
+                  currentAmb.longitude + 0.0007,
+                );
+                _ambulanceHeading = 45.0;
+              });
+            } else {
+              // Turning East away from driver!
+              if (currentAmb.longitude >= _currentLocation.longitude + 0.018) {
+                timer.cancel();
+                setState(() => _isSimulating = false);
+                return;
+              }
+              setState(() {
+                _ambulanceLocation = LatLng(
+                  intersectionLat,
+                  currentAmb.longitude + 0.0008,
+                );
+                _ambulanceHeading = 90.0;
+              });
+            }
+            break;
+
+          case SimulationMode.turnIn:
+            final turnPointLon = _currentLocation.longitude;
+            if (currentAmb.longitude < turnPointLon) {
+              // Driving along side road East towards entry
+              setState(() {
+                _ambulanceLocation = LatLng(
+                  currentAmb.latitude,
+                  currentAmb.longitude + 0.0008,
+                );
+                _ambulanceHeading = 90.0;
+              });
+            } else {
+              // Turning into driver's road and driving North
+              if (currentAmb.latitude >= _currentLocation.latitude + 0.015) {
+                timer.cancel();
+                setState(() => _isSimulating = false);
+                return;
+              }
+              setState(() {
+                _ambulanceLocation = LatLng(
+                  currentAmb.latitude + 0.0007,
+                  turnPointLon,
+                );
+                _ambulanceHeading = 0.0;
+              });
+            }
+            break;
+
+          case SimulationMode.opposingLane:
+            final targetLat = _currentLocation.latitude - 0.020;
+            if (currentAmb.latitude <= targetLat) {
+              timer.cancel();
+              setState(() => _isSimulating = false);
+              return;
+            }
+            setState(() {
+              _ambulanceLocation = LatLng(
+                currentAmb.latitude - 0.0007,
+                currentAmb.longitude - 0.0007,
+              );
+            });
+            break;
         }
 
         _runAiTrajectoryEvaluation();
@@ -243,59 +438,41 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
     }
   }
 
-  void _resetSimulation() {
-    _simulationTimer?.cancel();
-    setState(() {
-      _isSimulating = false;
-      _hasVibrated = false;
-      _hasPassedAnnouncement = false;
-      if (_isOpposingLaneSimulation) {
-        // Starts ahead in opposing lane
-        _ambulanceLocation = LatLng(
-          _currentLocation.latitude + 0.016,
-          _currentLocation.longitude + 0.016 - 0.002,
-        );
-        _ambulanceHeading = 225.0;
-      } else {
-        // Starts behind on same road
-        _ambulanceLocation = LatLng(
-          _currentLocation.latitude - 0.016,
-          _currentLocation.longitude - 0.016,
-        );
-        _ambulanceHeading = 45.0;
-      }
-    });
-    _runAiTrajectoryEvaluation();
-  }
-
-  void _toggleOpposingLaneMode() {
-    setState(() {
-      _isOpposingLaneSimulation = !_isOpposingLaneSimulation;
-    });
-    _resetSimulation();
-  }
-
-  /// AI Deep Learning Trajectory Evaluation
+  /// AI Deep Learning & Route-Aware Trajectory Evaluation
   void _runAiTrajectoryEvaluation() {
+    final ambPos = _ambulanceLocation;
+    if (ambPos == null && !_isSimulating) {
+      setState(() {
+        _isInBlueZone = false;
+        _isInRedZone = false;
+        _aiPrediction = null;
+        _currentDistanceMeters = 99999.0;
+      });
+      return;
+    }
+    final targetAmb = ambPos ?? _currentLocation;
+
     final ai = AiTrajectoryService();
 
     final pred = ai.evaluateTrajectoryConflict(
       driverPos: _currentLocation,
       driverSpeedKmh: _driverSpeed,
       driverHeadingDeg: _driverHeading,
-      ambulancePos: _ambulanceLocation,
+      ambulancePos: targetAmb,
       ambulanceSpeedKmh: _ambulanceSpeed,
       ambulanceHeadingDeg: _ambulanceHeading,
       maxWarningDistanceMeters: _outerRadarMeters,
+      routePoints: _ambulanceRoutePoints,
+      turnIntent: _ambulanceTurnIntent,
     );
 
     final meters = LocationService.calculateDistanceInMeters(
       _currentLocation,
-      _ambulanceLocation,
+      targetAmb,
     );
 
-    final inRed = pred.shouldAlert && (meters <= _innerAlertMeters || pred.category == TrajectoryConflictCategory.criticalInPath);
-    final inBlue = pred.shouldAlert && meters <= _outerRadarMeters;
+    final inRed = pred.shouldAlert && (meters <= _innerAlertMeters || pred.category == TrajectoryConflictCategory.criticalInPath || pred.category == TrajectoryConflictCategory.turnInApproaching);
+    final inBlue = pred.shouldAlert && meters <= _outerRadarMeters && !inRed;
 
     // Trigger Critical Alert (Red Zone)
     if (inRed && !_hasVibrated) {
@@ -308,8 +485,8 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
       VoiceAlertService().speakCriticalAlert(meters.round());
       if (_isBackgroundActive) {
         CriticalNotificationService().showRadarAlert(
-          title: '🚨 เตือนภัยฉุกเฉิน! รถพยาบาลกำลังตามหลังมา',
-          body: 'ความเสี่ยง AI ${(pred.yieldProbability * 100).toInt()}% • อยู่ห่าง ${meters.toInt()} ม. ในช่องทางของคุณ กรุณาชะลอและเบี่ยงทาง',
+          title: pred.statusTitleTH,
+          body: pred.explanationTH,
           isCritical: true,
         );
       }
@@ -317,8 +494,8 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
       VoiceAlertService().speakOuterRadarAlert();
       if (_isBackgroundActive) {
         CriticalNotificationService().showRadarAlert(
-          title: '📡 เรดาร์พบรถพยาบาลกำลังมุ่งหน้ามา',
-          body: 'ระยะ ${(meters / 1000).toStringAsFixed(1)} กม. คาดว่าจะถึงใน ${pred.timeToConflictSec.round()} วินาที',
+          title: pred.statusTitleTH,
+          body: pred.explanationTH,
           isCritical: false,
         );
       }
@@ -447,15 +624,15 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                   ),
 
                   // 2.2 🟢 Live Presence Indicator Pill (แสดงจำนวนผู้ใช้งานออนไลน์รอบตัวสดๆ)
-                  if (!_isInRedZone)
+                  if (!_isInRedZone && _activeHeadsUp == null)
                     Positioned(
-                      top: 76,
-                      left: 16,
+                      top: 14,
+                      left: 14,
                       child: InkWell(
                         onTap: () => _showLivePresenceModal(context),
                         borderRadius: BorderRadius.circular(20),
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                           decoration: BoxDecoration(
                             color: Colors.white.withValues(alpha: 0.95),
                             borderRadius: BorderRadius.circular(20),
@@ -480,10 +657,10 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                                 ),
                               ),
                               const SizedBox(width: 6),
-                              const Text(
-                                '🟢 ออนไลน์สด: 4 หน่วยรอบตัว (แตะดู)',
-                                style: TextStyle(
-                                  fontSize: 11.5,
+                              Text(
+                                'ออนไลน์: ${1 + _activeFleet.length} หน่วย',
+                                style: const TextStyle(
+                                  fontSize: 11,
                                   fontWeight: FontWeight.bold,
                                   color: Color(0xFF065F46),
                                 ),
@@ -494,18 +671,18 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                       ),
                     ),
 
-                  // 3. ปุ่มจัดกึ่งกลาง GPS + ปุ่ม SOS ขวาล่าง
+                  // 3. ปุ่มจัดกึ่งกลาง GPS + ปุ่ม SOS ขวาล่าง (Vertical Action Column)
                   Positioned(
-                    right: 20,
-                    bottom: 160,
+                    right: 16,
+                    bottom: 154,
                     child: InkWell(
                       onTap: () {
                         _mapController.move(_currentLocation, 15.0);
                       },
                       borderRadius: BorderRadius.circular(25),
                       child: Container(
-                        width: 48,
-                        height: 48,
+                        width: 44,
+                        height: 44,
                         decoration: BoxDecoration(
                           color: Colors.white,
                           shape: BoxShape.circle,
@@ -521,7 +698,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                         child: const Icon(
                           Icons.my_location_rounded,
                           color: Color(0xFF2563EB),
-                          size: 24,
+                          size: 22,
                         ),
                       ),
                     ),
@@ -529,25 +706,25 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
 
                   // ปุ่ม SOS ขวาล่าง
                   Positioned(
-                    right: 20,
+                    right: 16,
                     bottom: 84,
                     child: InkWell(
                       onTap: widget.onOpenSos,
                       borderRadius: BorderRadius.circular(35),
                       child: Container(
-                        width: 66,
-                        height: 66,
+                        width: 58,
+                        height: 58,
                         decoration: BoxDecoration(
                           color: Colors.white,
                           shape: BoxShape.circle,
                           border: Border.all(
-                              color: const Color(0xFFEB5757), width: 3),
+                              color: const Color(0xFFEB5757), width: 2.5),
                           boxShadow: [
                             BoxShadow(
                               color:
                                   const Color(0xFFEB5757).withValues(alpha: 0.35),
-                              blurRadius: 14,
-                              spreadRadius: 2,
+                              blurRadius: 12,
+                              spreadRadius: 1,
                             ),
                           ],
                         ),
@@ -555,7 +732,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                           child: Text(
                             'SOS',
                             style: TextStyle(
-                              fontSize: 18,
+                              fontSize: 16,
                               fontWeight: FontWeight.w900,
                               color: Color(0xFFEB5757),
                             ),
@@ -565,53 +742,122 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                     ),
                   ),
 
-                  // 4. แถบสวิตช์ทำงานเบื้องหลัง + ปุ่มทดสอบ Notification
+                  // 4. ปุ่มแผงควบคุมการจำลอง AI Simulation Panel (ไม่ชนกับปุ่ม SOS ขวา)
                   Positioned(
+                    bottom: 84,
                     left: 16,
-                    right: 16,
-                    bottom: 14,
+                    right: 86, // เว้นระยะ 86px ให้ปุ่ม SOS ไม่ทับกัน 100%
                     child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 10),
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
                       decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(24),
-                        border: Border.all(
-                            color: const Color(0xFF5B9EE1), width: 1.6),
+                        color: Colors.white.withValues(alpha: 0.96),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: Colors.grey.shade300),
                         boxShadow: [
                           BoxShadow(
-                            color: const Color(0xFF5B9EE1).withValues(alpha: 0.18),
-                            blurRadius: 10,
-                            offset: const Offset(0, 3),
+                            color: Colors.black.withValues(alpha: 0.10),
+                            blurRadius: 8,
                           ),
                         ],
                       ),
                       child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
+                          IconButton(
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                            icon: Icon(
+                              _isSimulating
+                                  ? Icons.pause_circle_filled_rounded
+                                  : Icons.play_circle_fill_rounded,
+                              color: _isSimulating
+                                  ? const Color(0xFFEF4444)
+                                  : const Color(0xFF2563EB),
+                              size: 28,
+                            ),
+                            onPressed: _toggleSimulation,
+                            tooltip: 'กดเพื่อจำลองรถพยาบาลวิ่ง',
+                          ),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: InkWell(
+                              onTap: _cycleSimulationMode,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                                decoration: BoxDecoration(
+                                  color: _getSimulationModeBgColor(),
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(
+                                    color: _getSimulationModeBorderColor(),
+                                  ),
+                                ),
+                                child: Text(
+                                  _getSimulationModeLabel(),
+                                  style: TextStyle(
+                                    fontSize: 10.5,
+                                    fontWeight: FontWeight.bold,
+                                    color: _getSimulationModeTextColor(),
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  textAlign: TextAlign.center,
+                                ),
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+                            icon: const Icon(Icons.refresh_rounded, size: 18, color: Colors.black87),
+                            onPressed: _resetSimulation,
+                            tooltip: 'รีเซ็ตพิกัดจำลอง',
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  // 5. แถบสวิตช์ทำงานเบื้องหลัง + ปุ่มทดสอบ Notification (แถบล่างสุด ไม่ชนใคร)
+                  Positioned(
+                    left: 16,
+                    right: 16,
+                    bottom: 12,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                            color: const Color(0xFF5B9EE1), width: 1.4),
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFF5B9EE1).withValues(alpha: 0.15),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.security_rounded, size: 16, color: Color(0xFF00A896)),
+                          const SizedBox(width: 6),
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                const Row(
-                                  children: [
-                                    Icon(Icons.security_rounded, size: 16, color: Color(0xFF00A896)),
-                                    SizedBox(width: 4),
-                                    Text(
-                                      'ทำงานเบื้องหลัง (Background)',
-                                      style: TextStyle(
-                                        fontSize: 13.5,
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.black87,
-                                      ),
-                                    ),
-                                  ],
+                                const Text(
+                                  'ทำงานเบื้องหลัง (Background)',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.black87,
+                                  ),
                                 ),
                                 Text(
-                                  _isBackgroundActive ? '✅ เปิดแจ้งเตือนแม้พับแอพหรือล็อกจอ' : '⚪ ปิดการทำงานเบื้องหลัง',
+                                  _isBackgroundActive ? 'เปิดเตือนเมื่อพับแอพ' : 'ปิดการทำงานเบื้องหลัง',
                                   style: TextStyle(
-                                    fontSize: 11,
+                                    fontSize: 10,
                                     fontWeight: FontWeight.w600,
                                     color: _isBackgroundActive ? const Color(0xFF00A896) : Colors.grey,
                                   ),
@@ -622,24 +868,24 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                           InkWell(
                             onTap: _triggerTestBackgroundNotification,
                             child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
                               margin: const EdgeInsets.only(right: 6),
                               decoration: BoxDecoration(
                                 color: const Color(0xFFE2F0FE),
-                                borderRadius: BorderRadius.circular(12),
+                                borderRadius: BorderRadius.circular(10),
                               ),
                               child: const Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Icon(Icons.notifications_active, size: 14, color: Color(0xFF2563EB)),
-                                  SizedBox(width: 3),
-                                  Text('ทดสอบยิง', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Color(0xFF2563EB))),
+                                  Icon(Icons.notifications_active, size: 12, color: Color(0xFF2563EB)),
+                                  SizedBox(width: 2),
+                                  Text('ทดสอบ', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF2563EB))),
                                 ],
                               ),
                             ),
                           ),
                           Transform.scale(
-                            scale: 0.85,
+                            scale: 0.75,
                             child: Switch(
                               value: _isBackgroundActive,
                               activeThumbColor: Colors.white,
@@ -661,80 +907,6 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                       ),
                     ),
                   ),
-
-                  // 5. ปุ่มแผงควบคุมการจำลอง AI Simulation Panel (สำหรับ Demo อาจารย์)
-                  Positioned(
-                    bottom: 84,
-                    left: 16,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.96),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: Colors.grey.shade300),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.12),
-                            blurRadius: 8,
-                          ),
-                        ],
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          IconButton(
-                            icon: Icon(
-                              _isSimulating
-                                  ? Icons.pause_circle_filled_rounded
-                                  : Icons.play_circle_fill_rounded,
-                              color: _isSimulating
-                                  ? const Color(0xFFEF4444)
-                                  : const Color(0xFF2563EB),
-                              size: 30,
-                            ),
-                            onPressed: _toggleSimulation,
-                            tooltip: 'กดเพื่อจำลองรถพยาบาลวิ่ง',
-                          ),
-                          InkWell(
-                            onTap: _toggleOpposingLaneMode,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                              decoration: BoxDecoration(
-                                color: _isOpposingLaneSimulation
-                                    ? const Color(0xFFFEF3C7)
-                                    : const Color(0xFFE0F2FE),
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(
-                                  color: _isOpposingLaneSimulation
-                                      ? const Color(0xFFF59E0B)
-                                      : const Color(0xFF0284C7),
-                                ),
-                              ),
-                              child: Row(
-                                children: [
-                                  Text(
-                                    _isOpposingLaneSimulation ? '🔄 โหมด: สวนเลน' : '🏎️ โหมด: ตามหลังแซงผ่าน',
-                                    style: TextStyle(
-                                      fontSize: 11.5,
-                                      fontWeight: FontWeight.bold,
-                                      color: _isOpposingLaneSimulation
-                                          ? const Color(0xFFB45309)
-                                          : const Color(0xFF0369A1),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.refresh_rounded, size: 20, color: Colors.black87),
-                            onPressed: _resetSimulation,
-                            tooltip: 'รีเซ็ตพิกัดจำลอง',
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
                 ],
               ),
             ),
@@ -742,6 +914,58 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
         ),
       ),
     );
+  }
+
+  String _getSimulationModeLabel() {
+    switch (_simulationMode) {
+      case SimulationMode.inPathOvertake:
+        return '🏎️ โหมด: ตามหลังแซงผ่าน';
+      case SimulationMode.turnBypass:
+        return '↪️ โหมด: เลี้ยวแยกหน้า (ไม่เตือน)';
+      case SimulationMode.turnIn:
+        return '↩️ โหมด: เลี้ยวเข้าถนนเรา (เตือน)';
+      case SimulationMode.opposingLane:
+        return '🔄 โหมด: สวนเลน (ปลอดภัย)';
+    }
+  }
+
+  Color _getSimulationModeBgColor() {
+    switch (_simulationMode) {
+      case SimulationMode.inPathOvertake:
+        return const Color(0xFFE0F2FE);
+      case SimulationMode.turnBypass:
+        return const Color(0xFFDCFCE7);
+      case SimulationMode.turnIn:
+        return const Color(0xFFFFEDD5);
+      case SimulationMode.opposingLane:
+        return const Color(0xFFFEF3C7);
+    }
+  }
+
+  Color _getSimulationModeBorderColor() {
+    switch (_simulationMode) {
+      case SimulationMode.inPathOvertake:
+        return const Color(0xFF0284C7);
+      case SimulationMode.turnBypass:
+        return const Color(0xFF16A34A);
+      case SimulationMode.turnIn:
+        return const Color(0xFFEA580C);
+      case SimulationMode.opposingLane:
+        return const Color(0xFFF59E0B);
+    }
+  }
+
+  Color _getSimulationModeTextColor() {
+    switch (_simulationMode) {
+      case SimulationMode.inPathOvertake:
+        return const Color(0xFF0369A1);
+      case SimulationMode.turnBypass:
+        return const Color(0xFF15803D);
+      case SimulationMode.turnIn:
+        return const Color(0xFFC2410C);
+      case SimulationMode.opposingLane:
+        return const Color(0xFFB45309);
+    }
   }
 
   Widget _buildHeader() {
@@ -801,16 +1025,16 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
           ),
           Row(
             children: [
-              // 🌙 โหมดกลางคืน (Night Driving Mode)
+              // 🌙/☀️ โหมดกลางคืน (Night Driving Mode)
               IconButton(
                 icon: Icon(
                   _isNightMode
-                      ? Icons.light_mode_rounded
-                      : Icons.dark_mode_rounded,
+                      ? Icons.wb_sunny_rounded
+                      : Icons.nightlight_round,
                   color: _isNightMode
                       ? const Color(0xFFFBBF24)
                       : const Color(0xFF475569),
-                  size: 22,
+                  size: 20,
                 ),
                 tooltip: _isNightMode
                     ? 'สลับเป็นโหมดกลางวัน'
@@ -819,12 +1043,12 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                   setState(() => _isNightMode = !_isNightMode);
                 },
               ),
-              // 💤 โหมดพักจอ (OLED Sleep Saver)
+              // ⚡ โหมดพักจอ OLED (Battery Saver)
               IconButton(
                 icon: const Icon(
-                  Icons.bedtime_outlined,
-                  color: Color(0xFF6366F1),
-                  size: 22,
+                  Icons.energy_savings_leaf_rounded,
+                  color: Color(0xFF10B981),
+                  size: 20,
                 ),
                 tooltip: 'โหมดพักหน้าจอประหยัดแบตเตอรี่ (OLED Black)',
                 onPressed: () {
@@ -1043,7 +1267,9 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            'รถพยาบาลตามหลังมาในช่องทางเดียวกัน ($meters ม.)',
+                            pred.turnIntent != null
+                                ? '${pred.turnIntent} ($meters ม.)'
+                                : 'รถพยาบาลตามหลังมาในช่องทางเดียวกัน ($meters ม.)',
                             style: const TextStyle(
                               fontSize: 12.5,
                               fontWeight: FontWeight.w600,
@@ -1120,14 +1346,16 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                     color: Colors.black.withValues(alpha: 0.28),
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: const Row(
+                  child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.graphic_eq_rounded, size: 14, color: Colors.cyanAccent),
-                      SizedBox(width: 5),
+                      const Icon(Icons.alt_route_rounded, size: 14, color: Colors.cyanAccent),
+                      const SizedBox(width: 5),
                       Text(
-                        '🔊 AI Spectrogram CNN: ตรวจพบคลื่นเสียงไซเรน Yelp (98.5%)',
-                        style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Colors.cyanAccent),
+                        pred.isRouteAwareActive
+                            ? '🛰️ Route-Aware AI: ล็อกเส้นทางถนนจริง (${pred.turnIntent ?? "ตรงตามเลน"})'
+                            : '🔊 AI Spectrogram CNN: ตรวจพบคลื่นเสียงไซเรน Yelp (98.5%)',
+                        style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Colors.cyanAccent),
                       ),
                     ],
                   ),
@@ -1163,7 +1391,129 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
       );
     }
 
-    // 2. PASSED / OVERTAKEN (Moving Away)
+    // 2. TURN IN APPROACHING (Route-Aware Early Warning)
+    if (pred.category == TrajectoryConflictCategory.turnInApproaching) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFFF7ED),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: const Color(0xFFF97316), width: 2),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFFF97316).withValues(alpha: 0.25),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF97316).withValues(alpha: 0.2),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.turn_left_rounded, color: Color(0xFFC2410C), size: 22),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    '⚠️ รถพยาบาลเตรียมเลี้ยวเข้าถนนของคุณ!',
+                    style: TextStyle(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFFC2410C),
+                    ),
+                  ),
+                  Text(
+                    'AI Route-Aware: ตรวจพบเส้นทางจะเลี้ยวเข้าถนนที่คุณอยู่ ($meters ม.) กรุณาชะลอ',
+                    style: const TextStyle(fontSize: 11, color: Color(0xFF9A3412)),
+                  ),
+                ],
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFEDD5),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Text('AI 92%', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFFC2410C))),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // 3. TURN BYPASS (Route-Aware Smart Filter - No Alert!)
+    if (pred.category == TrajectoryConflictCategory.turnBypass) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF0FDF4),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: const Color(0xFF10B981), width: 2),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFF10B981).withValues(alpha: 0.18),
+              blurRadius: 10,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: const Color(0xFF10B981).withValues(alpha: 0.2),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.turn_right_rounded, color: Color(0xFF047857), size: 22),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    '↪️ รถพยาบาลเลี้ยวแยกหน้า (Turn Bypass)',
+                    style: TextStyle(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF047857),
+                    ),
+                  ),
+                  Text(
+                    pred.turnIntent != null
+                        ? '${pred.turnIntent} • ไม่กีดขวางเส้นทางของคุณ'
+                        : 'AI Route-Aware: ตรวจพบรถพยาบาลจะเลี้ยวออกที่แยกหน้า ปลอดภัย 100%',
+                    style: const TextStyle(fontSize: 11, color: Color(0xFF065F46)),
+                  ),
+                ],
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: const Color(0xFFD1FAE5),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Text('Route-Aware', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Color(0xFF047857))),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // 4. PASSED / OVERTAKEN (Moving Away)
     if (pred.category == TrajectoryConflictCategory.movingAway) {
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -1223,7 +1573,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
       );
     }
 
-    // 3. OPPOSING LANE (Filtered out)
+    // 5. OPPOSING LANE (Filtered out)
     if (pred.category == TrajectoryConflictCategory.opposingLane) {
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -1283,7 +1633,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
       );
     }
 
-    // 4. APPROACHING CORRIDOR (Blue Zone)
+    // 6. APPROACHING CORRIDOR (Blue Zone)
     if (_isInBlueZone) {
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -1346,7 +1696,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
       );
     }
 
-    // 5. DEFAULT SAFE ZONE
+    // 7. DEFAULT SAFE ZONE
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       decoration: BoxDecoration(
@@ -1390,40 +1740,55 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
   Widget _buildMapView() {
     final List<Marker> ambulanceMarkers = [];
 
-    // Primary simulated ambulance marker with live heading rotation
-    ambulanceMarkers.add(
-      Marker(
-        point: _ambulanceLocation,
-        width: 52,
-        height: 52,
-        child: Container(
-          decoration: BoxDecoration(
-            color: Colors.white,
-            shape: BoxShape.circle,
-            border: Border.all(
-              color: _isOpposingLaneSimulation ? const Color(0xFFF59E0B) : const Color(0xFFEF4444),
-              width: 2.5,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: (_isOpposingLaneSimulation ? const Color(0xFFF59E0B) : const Color(0xFFEF4444))
-                    .withValues(alpha: 0.4),
-                blurRadius: 10,
+    // 1. Primary simulated or live ambulance marker with live heading rotation
+    if (_ambulanceLocation != null && (_isSimulating || _hasLiveAmbulance)) {
+      ambulanceMarkers.add(
+        Marker(
+          point: _ambulanceLocation!,
+          width: 52,
+          height: 52,
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: _simulationMode == SimulationMode.opposingLane
+                    ? const Color(0xFFF59E0B)
+                    : (_simulationMode == SimulationMode.turnBypass
+                        ? const Color(0xFF10B981)
+                        : const Color(0xFFEF4444)),
+                width: 2.5,
               ),
-            ],
-          ),
-          child: Center(
-            child: Transform.rotate(
-              angle: (_ambulanceHeading - 45) * math.pi / 180,
-              child: const Text('🚑', style: TextStyle(fontSize: 24)),
+              boxShadow: [
+                BoxShadow(
+                  color: (_simulationMode == SimulationMode.opposingLane
+                          ? const Color(0xFFF59E0B)
+                          : (_simulationMode == SimulationMode.turnBypass
+                              ? const Color(0xFF10B981)
+                              : const Color(0xFFEF4444)))
+                      .withValues(alpha: 0.4),
+                  blurRadius: 10,
+                ),
+              ],
+            ),
+            child: Center(
+              child: Transform.rotate(
+                angle: (_ambulanceHeading - 45) * math.pi / 180,
+                child: const Text('🚑', style: TextStyle(fontSize: 24)),
+              ),
             ),
           ),
         ),
-      ),
-    );
+      );
+    }
 
-    // Active fleet markers
+    // 2. Other Active fleet markers (from MQTT)
     for (var amb in _activeFleet) {
+      if (_ambulanceLocation != null &&
+          (amb.latitude - _ambulanceLocation!.latitude).abs() < 0.0001 &&
+          (amb.longitude - _ambulanceLocation!.longitude).abs() < 0.0001) {
+        continue;
+      }
       ambulanceMarkers.add(
         Marker(
           point: LatLng(amb.latitude, amb.longitude),
@@ -1472,6 +1837,25 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
               : null,
         ),
 
+        // Route-Aware Ambulance Corridor Polyline
+        if (_ambulanceRoutePoints != null &&
+            _ambulanceRoutePoints!.isNotEmpty &&
+            (_isSimulating || _hasLiveAmbulance))
+          PolylineLayer(
+            polylines: [
+              Polyline(
+                points: _ambulanceRoutePoints!,
+                strokeWidth: 5.5,
+                color: (_simulationMode == SimulationMode.turnBypass
+                        ? const Color(0xFF10B981)
+                        : const Color(0xFFEF4444))
+                    .withValues(alpha: 0.8),
+                borderStrokeWidth: 2.0,
+                borderColor: Colors.white,
+              ),
+            ],
+          ),
+
         // วงกลม Geofence อิงหน่วยเมตร
         CircleLayer(
           circles: [
@@ -1502,7 +1886,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
             Marker(
               point: _currentLocation,
               width: 90,
-              height: 60,
+              height: 70,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -1540,81 +1924,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
               ),
             ),
 
-            // 2. Nearby Citizen Driver Marker (ผู้ร่วมทาง)
-            Marker(
-              point: const LatLng(19.0340, 99.9020),
-              width: 90,
-              height: 60,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF047857),
-                      borderRadius: BorderRadius.circular(8),
-                      boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
-                    ),
-                    child: const Text(
-                      '🚗 #D402 (55 km/h)',
-                      style: TextStyle(color: Colors.white, fontSize: 9.5, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Container(
-                    width: 30,
-                    height: 30,
-                    decoration: const BoxDecoration(
-                      color: Color(0xFF10B981),
-                      shape: BoxShape.circle,
-                      boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 6)],
-                    ),
-                    child: const Center(
-                      child: Text('🚗', style: TextStyle(fontSize: 14)),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            // 3. Hospital ER Center Marker (รพ.มหาราช)
-            Marker(
-              point: const LatLng(19.0220, 99.8910),
-              width: 100,
-              height: 60,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF0284C7),
-                      borderRadius: BorderRadius.circular(8),
-                      boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
-                    ),
-                    child: const Text(
-                      '🏥 รพ.มหาราช (ER พร้อม)',
-                      style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Container(
-                    width: 30,
-                    height: 30,
-                    decoration: const BoxDecoration(
-                      color: Color(0xFF0284C7),
-                      shape: BoxShape.circle,
-                      boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 6)],
-                    ),
-                    child: const Center(
-                      child: Icon(Icons.local_hospital_rounded, color: Colors.white, size: 16),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            // 4. Ambulance Markers (รถพยาบาลฉุกเฉิน)
+            // 2. Ambulance Markers (รถพยาบาลฉุกเฉินเฉพาะเมื่อมีรถออนไลน์หรือเปิดจำลอง)
             ...ambulanceMarkers,
           ],
         ),
@@ -1655,9 +1965,9 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                       color: const Color(0xFFECFDF5),
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: const Text(
-                      '4 Active',
-                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF047857)),
+                    child: Text(
+                      '${1 + _activeFleet.length} Active',
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF047857)),
                     ),
                   ),
                 ],
@@ -1674,42 +1984,30 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                 subtitle: Text('ความเร็ว ${_driverSpeed.toInt()} km/h • กำลังเชื่อมต่อเรดาร์ AI'),
                 trailing: const Text('🟢 Online', style: TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.bold, fontSize: 12)),
               ),
-              Divider(color: Colors.grey.shade200, height: 1),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: const BoxDecoration(color: Color(0xFFF0FDF4), shape: BoxShape.circle),
-                  child: const Text('🚗', style: TextStyle(fontSize: 20)),
+              if (_activeFleet.isEmpty && !_isSimulating)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  child: Center(
+                    child: Text(
+                      'ยังไม่มีรถพยาบาลเปิดสัญญาณเตือนออนไลน์ในขณะนี้',
+                      style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+                    ),
+                  ),
                 ),
-                title: const Text('ผู้ขับขี่ร่วมทาง (#D402)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                subtitle: const Text('ห่าง 1.2 กม. • ความเร็ว 55 km/h • เปิดเรดาร์'),
-                trailing: const Text('🟢 Online', style: TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.bold, fontSize: 12)),
-              ),
-              Divider(color: Colors.grey.shade200, height: 1),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: const BoxDecoration(color: Color(0xFFFEF2F2), shape: BoxShape.circle),
-                  child: const Text('🚑', style: TextStyle(fontSize: 20)),
+              for (var amb in _activeFleet) ...[
+                Divider(color: Colors.grey.shade200, height: 1),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: const BoxDecoration(color: Color(0xFFFEF2F2), shape: BoxShape.circle),
+                    child: const Text('🚑', style: TextStyle(fontSize: 20)),
+                  ),
+                  title: Text(amb.callSign, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                  subtitle: Text('ความเร็ว ${amb.speed.toInt()} km/h • ${amb.emergencyType}'),
+                  trailing: const Text('🚨 Active', style: TextStyle(color: Color(0xFFDC2626), fontWeight: FontWeight.bold, fontSize: 12)),
                 ),
-                title: const Text('รถพยาบาลฉุกเฉิน (รพ.มหาราช)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                subtitle: Text('ความเร็ว ${_ambulanceSpeed.toInt()} km/h • บรอดแคสต์ GPS ผ่าน MQTT'),
-                trailing: const Text('🚨 Active', style: TextStyle(color: Color(0xFFDC2626), fontWeight: FontWeight.bold, fontSize: 12)),
-              ),
-              Divider(color: Colors.grey.shade200, height: 1),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: const BoxDecoration(color: Color(0xFFF0F9FF), shape: BoxShape.circle),
-                  child: const Text('🏥', style: TextStyle(fontSize: 20)),
-                ),
-                title: const Text('ศูนย์สั่งการ รพ.มหาราชนคร (Agency ER)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                subtitle: const Text('เตียงฉุกเฉินพร้อมรับ 5/8 เตียง • มอนิเตอร์เหตุสด'),
-                trailing: const Text('🟢 Standby', style: TextStyle(color: Color(0xFF0284C7), fontWeight: FontWeight.bold, fontSize: 12)),
-              ),
+              ],
             ],
           ),
         ),

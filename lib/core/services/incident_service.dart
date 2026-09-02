@@ -157,11 +157,15 @@ class IncidentService {
     }
   }
 
-  /// Ambulance role: Accept incident dispatch
-  Future<bool> acceptIncidentByAmbulance({
+  /// Hospital role: Confirm incident and dispatch ambulance with pinned hospital location
+  Future<bool> dispatchIncidentByHospital({
     required String id,
-    required String ambulancePlate,
     required String ambulanceId,
+    required String ambulancePlate,
+    String? ambulanceCallSign,
+    String? hospitalName,
+    double? hospitalLatitude,
+    double? hospitalLongitude,
   }) async {
     try {
       final local = await getLocalIncidents();
@@ -169,9 +173,13 @@ class IncidentService {
       if (idx != -1) {
         local[idx] = local[idx].copyWith(
           status: 'assigned',
-          statusStep: 1, // กำลังเดินทางไปรับเคส
-          assignedAmbulancePlate: ambulancePlate,
+          statusStep: 1, // 1: กำลังเดินทางไปรับเคส
           assignedAmbulanceId: ambulanceId,
+          assignedAmbulancePlate: ambulancePlate,
+          assignedAmbulanceCallSign: ambulanceCallSign ?? 'กู้ชีพ $ambulancePlate',
+          hospitalName: hospitalName,
+          hospitalLatitude: hospitalLatitude,
+          hospitalLongitude: hospitalLongitude,
         );
         await _saveToLocalCache(local);
         if (!_incidentsController.isClosed) {
@@ -186,20 +194,116 @@ class IncidentService {
             .update({
           'status': 'assigned',
           'statusStep': 1,
-          'assignedAmbulancePlate': ambulancePlate,
           'assignedAmbulanceId': ambulanceId,
+          'assignedAmbulancePlate': ambulancePlate,
+          'assignedAmbulanceCallSign': ambulanceCallSign ?? 'กู้ชีพ $ambulancePlate',
+          if (hospitalName != null) 'hospitalName': hospitalName,
+          if (hospitalLatitude != null) 'hospitalLatitude': hospitalLatitude,
+          if (hospitalLongitude != null) 'hospitalLongitude': hospitalLongitude,
         });
       } catch (_) {}
 
       return true;
     } catch (e) {
-      debugPrint('acceptIncidentByAmbulance error: $e');
+      debugPrint('dispatchIncidentByHospital error: $e');
       return false;
     }
   }
 
+  /// Ambulance role: Arrived at incident scene (Step 2)
+  Future<bool> reportAmbulanceAtScene(String id) async {
+    return updateIncidentProgressStep(
+      id: id,
+      step: 2,
+      status: 'at_scene',
+    );
+  }
+
+  /// Ambulance role: Transporting patient to hospital (Step 3)
+  Future<bool> reportAmbulanceTransporting(String id) async {
+    return updateIncidentProgressStep(
+      id: id,
+      step: 3,
+      status: 'transporting',
+    );
+  }
+
+  /// Ambulance role: Approaching hospital ER (Step 4 - < 1.5 km alert)
+  Future<bool> reportAmbulanceApproachingHospital(String id) async {
+    return updateIncidentProgressStep(
+      id: id,
+      step: 4,
+      status: 'approaching_er',
+    );
+  }
+
+  /// Ambulance role: Submit Medical Tele-Report (Vital Signs & Condition)
+  Future<bool> submitMedicalTeleReport({
+    required String id,
+    required String patientCondition,
+    required String vitalSigns,
+    String? medicalNotes,
+    bool callActive = true,
+  }) async {
+    try {
+      final local = await getLocalIncidents();
+      final idx = local.indexWhere((i) => i.id == id);
+      if (idx != -1) {
+        local[idx] = local[idx].copyWith(
+          patientCondition: patientCondition,
+          vitalSigns: vitalSigns,
+          medicalNotes: medicalNotes,
+          callSessionActive: callActive,
+        );
+        await _saveToLocalCache(local);
+        if (!_incidentsController.isClosed) {
+          _incidentsController.add(local);
+        }
+      }
+
+      try {
+        await FirebaseFirestore.instance
+            .collection(_collectionName)
+            .doc(id)
+            .update({
+          'patientCondition': patientCondition,
+          'vitalSigns': vitalSigns,
+          if (medicalNotes != null) 'medicalNotes': medicalNotes,
+          'callSessionActive': callActive,
+        });
+      } catch (_) {}
+
+      return true;
+    } catch (e) {
+      debugPrint('submitMedicalTeleReport error: $e');
+      return false;
+    }
+  }
+
+  /// Ambulance / Hospital role: Mission completed (Step 5 - Resolved)
+  Future<bool> resolveIncident(String id) async {
+    return updateIncidentProgressStep(
+      id: id,
+      step: 5,
+      status: 'resolved',
+    );
+  }
+
+  /// Ambulance role: Accept incident dispatch (compatible helper)
+  Future<bool> acceptIncidentByAmbulance({
+    required String id,
+    required String ambulancePlate,
+    required String ambulanceId,
+  }) async {
+    return dispatchIncidentByHospital(
+      id: id,
+      ambulanceId: ambulanceId,
+      ambulancePlate: ambulancePlate,
+    );
+  }
+
   /// Ambulance role: Progress through incident stages
-  /// step 1: กำลังไปรับเคส, step 2: ถึงจุดเกิดเหตุ, step 3: กำลังไป รพ., step 4: ถึง รพ. (Resolved)
+  /// step 1: กำลังไปรับเคส, step 2: ถึงจุดเกิดเหตุ, step 3: กำลังไป รพ., step 4: ใกล้ถึง รพ., step 5: ถึง รพ.
   Future<bool> updateIncidentProgressStep({
     required String id,
     required int step,

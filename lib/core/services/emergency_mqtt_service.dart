@@ -14,6 +14,9 @@ class EmergencyVehicleData {
   final String emergencyType;
   final bool sirenActive;
   final DateTime timestamp;
+  final List<LatLng>? routePoints;
+  final String? turnIntent;
+  final String? destinationName;
 
   EmergencyVehicleData({
     required this.id,
@@ -24,6 +27,9 @@ class EmergencyVehicleData {
     required this.emergencyType,
     required this.sirenActive,
     required this.timestamp,
+    this.routePoints,
+    this.turnIntent,
+    this.destinationName,
   });
 
   Map<String, dynamic> toMap() {
@@ -36,10 +42,29 @@ class EmergencyVehicleData {
       'emergencyType': emergencyType,
       'sirenActive': sirenActive,
       'timestamp': timestamp.toIso8601String(),
+      if (routePoints != null)
+        'routePoints': routePoints!
+            .map((p) => [p.latitude, p.longitude])
+            .toList(),
+      if (turnIntent != null) 'turnIntent': turnIntent,
+      if (destinationName != null) 'destinationName': destinationName,
     };
   }
 
   factory EmergencyVehicleData.fromMap(Map<String, dynamic> map) {
+    List<LatLng>? parsedRoute;
+    if (map['routePoints'] != null && map['routePoints'] is List) {
+      parsedRoute = (map['routePoints'] as List).map((pt) {
+        if (pt is List && pt.length >= 2) {
+          return LatLng(
+            (pt[0] as num).toDouble(),
+            (pt[1] as num).toDouble(),
+          );
+        }
+        return const LatLng(13.7563, 100.5018);
+      }).toList();
+    }
+
     return EmergencyVehicleData(
       id: map['id'] ?? 'AMB_01',
       callSign: map['callSign'] ?? 'Ambulance 1669',
@@ -51,6 +76,9 @@ class EmergencyVehicleData {
       timestamp: map['timestamp'] != null
           ? DateTime.parse(map['timestamp'])
           : DateTime.now(),
+      routePoints: parsedRoute,
+      turnIntent: map['turnIntent'],
+      destinationName: map['destinationName'],
     );
   }
 
@@ -124,7 +152,11 @@ class EmergencyMqttService {
 
       try {
         final data = EmergencyVehicleData.fromJson(payload);
-        _activeFleet[data.id] = data;
+        if (data.sirenActive) {
+          _activeFleet[data.id] = data;
+        } else {
+          _activeFleet.remove(data.id);
+        }
         _emergencyStreamController.add(data);
         _fleetStreamController.add(_activeFleet.values.toList());
       } catch (_) {}
@@ -133,7 +165,11 @@ class EmergencyMqttService {
 
   /// Broadcasts ambulance live location to other drivers on the road
   void broadcastAmbulanceLocation(EmergencyVehicleData data) {
-    _activeFleet[data.id] = data;
+    if (data.sirenActive) {
+      _activeFleet[data.id] = data;
+    } else {
+      _activeFleet.remove(data.id);
+    }
     _emergencyStreamController.add(data);
     _fleetStreamController.add(_activeFleet.values.toList());
 

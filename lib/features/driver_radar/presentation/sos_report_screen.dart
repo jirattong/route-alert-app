@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:latlong2/latlong.dart';
 import '../../../core/models/incident_report.dart';
+import '../../../core/services/hospital_location_service.dart';
 import '../../../core/services/incident_service.dart';
 import '../../../core/services/location_service.dart';
 import '../../../core/services/ai_vision_triage_service.dart';
@@ -190,6 +191,9 @@ class _SosReportScreenState extends State<SosReportScreen> {
         ? currentUser.email
         : 'verified_user@routealert.app';
 
+    // 🏥 ค้นหาโรงพยาบาลที่ใกล้พิกัดของผู้แจ้งที่สุดอัตโนมัติ
+    final nearestHospital = HospitalLocationService().findNearestHospital(LatLng(lat, lng));
+
     final newReport = IncidentReport(
       id: 'Case #AVCB${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}',
       type: _selectedIncidentType!,
@@ -204,6 +208,12 @@ class _SosReportScreenState extends State<SosReportScreen> {
       reporterEmail: repEmail,
       reporterPhone: phone,
       status: 'pending',
+      targetHospitalId: nearestHospital.profile.hospitalId,
+      hospitalName: nearestHospital.profile.hospitalName,
+      hospitalLatitude: nearestHospital.profile.latitude,
+      hospitalLongitude: nearestHospital.profile.longitude,
+      hospitalDistanceKm: nearestHospital.distanceKm,
+      eta: '${nearestHospital.etaMinutes} นาที',
       createdAt: DateTime.now(),
     );
 
@@ -327,6 +337,77 @@ class _SosReportScreenState extends State<SosReportScreen> {
                         ],
                       ),
                     ),
+                    const SizedBox(height: 12),
+
+                    // 🏥 ปลายทางโรงพยาบาลที่ใกล้ที่สุด (AI Nearest Hospital Routing)
+                    if (!_isLoadingGps && _currentGps != null)
+                      Builder(
+                        builder: (context) {
+                          final nearest = HospitalLocationService().findNearestHospital(_currentGps!);
+                          return Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF0FDF4),
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(color: const Color(0xFF22C55E), width: 1.4),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: const Color(0xFF22C55E).withValues(alpha: 0.1),
+                                  blurRadius: 6,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ],
+                            ),
+                            child: Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(6),
+                                  decoration: const BoxDecoration(
+                                    color: Color(0xFFDCFCE7),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(Icons.local_hospital_rounded, color: Color(0xFF16A34A), size: 20),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          const Text(
+                                            'ส่งตรงถึงศูนย์สั่งการ รพ. ที่ใกล้ที่สุด',
+                                            style: TextStyle(fontSize: 11, color: Color(0xFF166534), fontWeight: FontWeight.w600),
+                                          ),
+                                          const SizedBox(width: 5),
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                                            decoration: BoxDecoration(
+                                              color: const Color(0xFF16A34A),
+                                              borderRadius: BorderRadius.circular(6),
+                                            ),
+                                            child: const Text('อัตโนมัติ', style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold)),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        nearest.profile.hospitalName,
+                                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF14532D)),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      Text(
+                                        'ระยะห่าง ${nearest.distanceKm} กม. • เวลาประเมินถึง ${nearest.etaMinutes} นาที',
+                                        style: const TextStyle(fontSize: 11, color: Color(0xFF15803D), fontWeight: FontWeight.w500),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
                     const SizedBox(height: 18),
 
                     // ประเภทเหตุ

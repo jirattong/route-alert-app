@@ -14,12 +14,22 @@ class IncidentReport {
   final String reporterName;
   final String reporterEmail;
   final String reporterPhone;
-  final String status; // 'pending' | 'assigned' | 'in_progress' | 'at_scene' | 'transporting' | 'resolved'
-  final int statusStep; // 0: รอยืนยัน, 1: กำลังไปรับเคส, 2: ถึงจุดเกิดเหตุ, 3: กำลังไป รพ., 4: ถึง รพ. เรียบร้อย
+  final String status; // 'pending' | 'assigned' | 'at_scene' | 'transporting' | 'approaching_er' | 'resolved' | 'cancelled'
+  final int statusStep; // 0: รอยืนยัน, 1: กำลังไปรับเคส, 2: ถึงจุดเกิดเหตุ, 3: กำลังไป รพ., 4: ใกล้ถึง รพ., 5: ถึง รพ. เรียบร้อย
   final bool isErPrepared; // โรงพยาบาลเตรียมห้องฉุกเฉินแล้วหรือไม่
   final String eta; // e.g. "4 นาที"
   final String? assignedAmbulanceId;
   final String? assignedAmbulancePlate;
+  final String? assignedAmbulanceCallSign;
+  final String? targetHospitalId; // ID ของ รพ. ที่ใกล้ที่สุดที่ได้รับเคส
+  final String? hospitalName;
+  final double? hospitalLatitude;
+  final double? hospitalLongitude;
+  final double? hospitalDistanceKm; // ระยะทางจากจุดเกิดเหตุถึง รพ. (กม.)
+  final String? patientCondition; // อาการคนไข้เบื้องต้น
+  final String? vitalSigns; // e.g. "BP: 120/80, HR: 88, SpO2: 98%"
+  final String? medicalNotes; // บันทึกการรักษาบนรถ
+  final bool callSessionActive; // กำลังคุยสายด่วนรายงานอาการกับ ER
   final DateTime createdAt;
 
   IncidentReport({
@@ -41,6 +51,16 @@ class IncidentReport {
     this.eta = '5 นาที',
     this.assignedAmbulanceId,
     this.assignedAmbulancePlate,
+    this.assignedAmbulanceCallSign,
+    this.targetHospitalId,
+    this.hospitalName,
+    this.hospitalLatitude,
+    this.hospitalLongitude,
+    this.hospitalDistanceKm,
+    this.patientCondition,
+    this.vitalSigns,
+    this.medicalNotes,
+    this.callSessionActive = false,
     required this.createdAt,
   });
 
@@ -52,6 +72,8 @@ class IncidentReport {
         return const Color(0xFF94A3B8); // Slate Grey
       case 'resolved':
         return const Color(0xFF10B981); // Emerald
+      case 'approaching_er':
+        return const Color(0xFFDC2626); // Crimson Red (Critical Alert)
       case 'transporting':
       case 'at_scene':
       case 'in_progress':
@@ -69,18 +91,20 @@ class IncidentReport {
       case 'cancelled':
         return 'ยกเลิกการแจ้งเหตุ';
       case 'resolved':
-        return 'ช่วยเหลือเสร็จสิ้น';
+        return 'ช่วยเหลือเสร็จสิ้น (ถึง รพ. แล้ว)';
+      case 'approaching_er':
+        return '🚨 รถพยาบาลใกล้ถึง รพ. ใน 3 นาที (เตรียม ER)';
       case 'transporting':
-        return 'กำลังนำส่งโรงพยาบาล';
+        return 'กำลังนำส่งผู้ป่วยกลับโรงพยาบาล';
       case 'at_scene':
-        return 'ถึงจุดเกิดเหตุแล้ว';
+        return 'รถพยาบาลถึงจุดเกิดเหตุแล้ว';
       case 'in_progress':
         return 'กำลังดำเนินการช่วยเหลือ';
       case 'assigned':
         return 'กำลังเดินทางไปยังที่เกิดเหตุ';
       case 'pending':
       default:
-        return 'กำลังรอยืนยัน';
+        return 'รอยืนยันจากโรงพยาบาล';
     }
   }
 
@@ -104,6 +128,16 @@ class IncidentReport {
       'eta': eta,
       'assignedAmbulanceId': assignedAmbulanceId,
       'assignedAmbulancePlate': assignedAmbulancePlate,
+      'assignedAmbulanceCallSign': assignedAmbulanceCallSign,
+      'targetHospitalId': targetHospitalId,
+      'hospitalName': hospitalName,
+      'hospitalLatitude': hospitalLatitude,
+      'hospitalLongitude': hospitalLongitude,
+      'hospitalDistanceKm': hospitalDistanceKm,
+      'patientCondition': patientCondition,
+      'vitalSigns': vitalSigns,
+      'medicalNotes': medicalNotes,
+      'callSessionActive': callSessionActive,
       'createdAt': createdAt.toIso8601String(),
     };
   }
@@ -128,6 +162,16 @@ class IncidentReport {
       eta: map['eta'] ?? '5 นาที',
       assignedAmbulanceId: map['assignedAmbulanceId'],
       assignedAmbulancePlate: map['assignedAmbulancePlate'],
+      assignedAmbulanceCallSign: map['assignedAmbulanceCallSign'],
+      targetHospitalId: map['targetHospitalId'],
+      hospitalName: map['hospitalName'],
+      hospitalLatitude: (map['hospitalLatitude'] as num?)?.toDouble(),
+      hospitalLongitude: (map['hospitalLongitude'] as num?)?.toDouble(),
+      hospitalDistanceKm: (map['hospitalDistanceKm'] as num?)?.toDouble(),
+      patientCondition: map['patientCondition'],
+      vitalSigns: map['vitalSigns'],
+      medicalNotes: map['medicalNotes'],
+      callSessionActive: map['callSessionActive'] == true,
       createdAt: map['createdAt'] != null
           ? DateTime.tryParse(map['createdAt'].toString()) ?? DateTime.now()
           : DateTime.now(),
@@ -157,6 +201,16 @@ class IncidentReport {
     String? eta,
     String? assignedAmbulanceId,
     String? assignedAmbulancePlate,
+    String? assignedAmbulanceCallSign,
+    String? targetHospitalId,
+    String? hospitalName,
+    double? hospitalLatitude,
+    double? hospitalLongitude,
+    double? hospitalDistanceKm,
+    String? patientCondition,
+    String? vitalSigns,
+    String? medicalNotes,
+    bool? callSessionActive,
     DateTime? createdAt,
   }) {
     return IncidentReport(
@@ -179,6 +233,17 @@ class IncidentReport {
       assignedAmbulanceId: assignedAmbulanceId ?? this.assignedAmbulanceId,
       assignedAmbulancePlate:
           assignedAmbulancePlate ?? this.assignedAmbulancePlate,
+      assignedAmbulanceCallSign:
+          assignedAmbulanceCallSign ?? this.assignedAmbulanceCallSign,
+      targetHospitalId: targetHospitalId ?? this.targetHospitalId,
+      hospitalName: hospitalName ?? this.hospitalName,
+      hospitalLatitude: hospitalLatitude ?? this.hospitalLatitude,
+      hospitalLongitude: hospitalLongitude ?? this.hospitalLongitude,
+      hospitalDistanceKm: hospitalDistanceKm ?? this.hospitalDistanceKm,
+      patientCondition: patientCondition ?? this.patientCondition,
+      vitalSigns: vitalSigns ?? this.vitalSigns,
+      medicalNotes: medicalNotes ?? this.medicalNotes,
+      callSessionActive: callSessionActive ?? this.callSessionActive,
       createdAt: createdAt ?? this.createdAt,
     );
   }
