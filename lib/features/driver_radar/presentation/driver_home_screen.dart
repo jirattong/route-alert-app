@@ -8,8 +8,13 @@ import '../../../core/services/location_service.dart';
 import '../../../core/services/driver_storage_service.dart';
 import '../../../core/services/emergency_mqtt_service.dart';
 import '../../../core/services/voice_alert_service.dart';
+import '../../../core/models/incident_report.dart';
 import '../../../core/services/critical_notification_service.dart';
+import '../../../core/services/incident_service.dart';
 import '../../../core/services/ai_trajectory_service.dart';
+import '../../../core/services/theme_settings_service.dart';
+import '../../../core/models/emergency_proximity_tier.dart';
+import 'incident_detail_screen.dart';
 
 class DriverHomeScreen extends StatefulWidget {
   final VoidCallback? onOpenSos;
@@ -101,9 +106,12 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
     );
 
     _listenToSettingsChanges();
+    _isNightMode = ThemeSettingsService.isNightMode.value;
+    ThemeSettingsService.isNightMode.addListener(_onNightModeChanged);
     _initLiveLocation();
     _initMqttRadar();
     _initHeadsUpListener();
+    IncidentService().initialize();
   }
 
   void _initHeadsUpListener() {
@@ -186,6 +194,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
 
   @override
   void dispose() {
+    ThemeSettingsService.isNightMode.removeListener(_onNightModeChanged);
     _headsUpDismissTimer?.cancel();
     _headsUpSubscription?.cancel();
     _locationSubscription?.cancel();
@@ -194,6 +203,14 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
     _simulationTimer?.cancel();
     _pulseController.dispose();
     super.dispose();
+  }
+
+  void _onNightModeChanged() {
+    if (mounted) {
+      setState(() {
+        _isNightMode = ThemeSettingsService.isNightMode.value;
+      });
+    }
   }
 
   Future<void> _initLiveLocation() async {
@@ -623,10 +640,29 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                     child: _buildFloatingHeadsUpBanner(),
                   ),
 
+                  // 2.3 🚨 Active SOS Tracking Banner (เคสฉุกเฉินที่กำลังดำเนินการ)
+                  Positioned(
+                    top: _isInRedZone ? 114 : 76,
+                    left: 14,
+                    right: 14,
+                    child: StreamBuilder<List<IncidentReport>>(
+                      stream: IncidentService().incidentsStream,
+                      builder: (context, snapshot) {
+                        final list = snapshot.data ?? [];
+                        final activeReports = list.where(
+                          (i) => i.status != 'resolved' && i.status != 'cancelled',
+                        ).toList();
+                        if (activeReports.isEmpty) return const SizedBox.shrink();
+                        final top = activeReports.first;
+                        return _buildActiveSosTrackingBanner(top);
+                      },
+                    ),
+                  ),
+
                   // 2.2 🟢 Live Presence Indicator Pill (แสดงจำนวนผู้ใช้งานออนไลน์รอบตัวสดๆ)
                   if (!_isInRedZone && _activeHeadsUp == null)
                     Positioned(
-                      top: 14,
+                      top: 130,
                       left: 14,
                       child: InkWell(
                         onTap: () => _showLivePresenceModal(context),
@@ -634,12 +670,17 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                         child: Container(
                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                           decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.95),
+                            color: _isNightMode
+                                ? const Color(0xFF1E293B).withValues(alpha: 0.95)
+                                : Colors.white.withValues(alpha: 0.95),
                             borderRadius: BorderRadius.circular(20),
-                            border: Border.all(color: const Color(0xFF10B981), width: 1.5),
+                            border: Border.all(
+                              color: _isNightMode ? const Color(0xFF059669) : const Color(0xFF10B981),
+                              width: 1.5,
+                            ),
                             boxShadow: [
                               BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.08),
+                                color: Colors.black.withValues(alpha: _isNightMode ? 0.35 : 0.08),
                                 blurRadius: 8,
                                 offset: const Offset(0, 2),
                               ),
@@ -651,18 +692,64 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                               Container(
                                 width: 8,
                                 height: 8,
-                                decoration: const BoxDecoration(
-                                  color: Color(0xFF10B981),
+                                decoration: BoxDecoration(
+                                  color: _isNightMode ? const Color(0xFF34D399) : const Color(0xFF10B981),
                                   shape: BoxShape.circle,
                                 ),
                               ),
                               const SizedBox(width: 6),
                               Text(
                                 'ออนไลน์: ${1 + _activeFleet.length} หน่วย',
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize: 11,
                                   fontWeight: FontWeight.bold,
-                                  color: Color(0xFF065F46),
+                                  color: _isNightMode ? const Color(0xFF34D399) : const Color(0xFF065F46),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+
+                  // 2.4 ⚖️ ปุ่มกฎหมายระยะ 50 ม. (พ.ร.บ. จราจร ม.76)
+                  if (!_isInRedZone && _activeHeadsUp == null)
+                    Positioned(
+                      top: 130,
+                      right: 14,
+                      child: InkWell(
+                        onTap: () => _showLegalDistanceModal(context),
+                        borderRadius: BorderRadius.circular(20),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: _isNightMode
+                                ? const Color(0xFF1E293B).withValues(alpha: 0.95)
+                                : Colors.white.withValues(alpha: 0.95),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(
+                              color: const Color(0xFFDC2626),
+                              width: 1.5,
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: _isNightMode ? 0.35 : 0.08),
+                                blurRadius: 8,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.gavel_rounded, size: 13, color: Color(0xFFDC2626)),
+                              SizedBox(width: 4),
+                              Text(
+                                'กฎหมายระยะ 50 ม.',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFFDC2626),
                                 ),
                               ),
                             ],
@@ -684,20 +771,23 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                         width: 44,
                         height: 44,
                         decoration: BoxDecoration(
-                          color: Colors.white,
+                          color: _isNightMode ? const Color(0xFF1E293B) : Colors.white,
                           shape: BoxShape.circle,
-                          border: Border.all(color: const Color(0xFF2563EB), width: 1.8),
+                          border: Border.all(
+                            color: _isNightMode ? const Color(0xFF3B82F6) : const Color(0xFF2563EB),
+                            width: 1.8,
+                          ),
                           boxShadow: [
                             BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.15),
+                              color: Colors.black.withValues(alpha: _isNightMode ? 0.4 : 0.15),
                               blurRadius: 8,
                               offset: const Offset(0, 2),
                             ),
                           ],
                         ),
-                        child: const Icon(
+                        child: Icon(
                           Icons.my_location_rounded,
-                          color: Color(0xFF2563EB),
+                          color: _isNightMode ? const Color(0xFF60A5FA) : const Color(0xFF2563EB),
                           size: 22,
                         ),
                       ),
@@ -715,14 +805,13 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                         width: 58,
                         height: 58,
                         decoration: BoxDecoration(
-                          color: Colors.white,
+                          color: _isNightMode ? const Color(0xFF1E293B) : Colors.white,
                           shape: BoxShape.circle,
                           border: Border.all(
                               color: const Color(0xFFEB5757), width: 2.5),
                           boxShadow: [
                             BoxShadow(
-                              color:
-                                  const Color(0xFFEB5757).withValues(alpha: 0.35),
+                              color: const Color(0xFFEB5757).withValues(alpha: _isNightMode ? 0.45 : 0.35),
                               blurRadius: 12,
                               spreadRadius: 1,
                             ),
@@ -750,12 +839,16 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.96),
+                        color: _isNightMode
+                            ? const Color(0xFF1E293B).withValues(alpha: 0.96)
+                            : Colors.white.withValues(alpha: 0.96),
                         borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: Colors.grey.shade300),
+                        border: Border.all(
+                          color: _isNightMode ? const Color(0xFF334155) : Colors.grey.shade300,
+                        ),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.10),
+                            color: Colors.black.withValues(alpha: _isNightMode ? 0.35 : 0.10),
                             blurRadius: 8,
                           ),
                         ],
@@ -771,7 +864,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                                   : Icons.play_circle_fill_rounded,
                               color: _isSimulating
                                   ? const Color(0xFFEF4444)
-                                  : const Color(0xFF2563EB),
+                                  : (_isNightMode ? const Color(0xFF60A5FA) : const Color(0xFF2563EB)),
                               size: 28,
                             ),
                             onPressed: _toggleSimulation,
@@ -807,7 +900,11 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                           IconButton(
                             padding: EdgeInsets.zero,
                             constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
-                            icon: const Icon(Icons.refresh_rounded, size: 18, color: Colors.black87),
+                            icon: Icon(
+                              Icons.refresh_rounded,
+                              size: 18,
+                              color: _isNightMode ? Colors.white70 : Colors.black87,
+                            ),
                             onPressed: _resetSimulation,
                             tooltip: 'รีเซ็ตพิกัดจำลอง',
                           ),
@@ -825,13 +922,17 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                       padding: const EdgeInsets.symmetric(
                           horizontal: 14, vertical: 8),
                       decoration: BoxDecoration(
-                        color: Colors.white,
+                        color: _isNightMode ? const Color(0xFF1E293B) : Colors.white,
                         borderRadius: BorderRadius.circular(20),
                         border: Border.all(
-                            color: const Color(0xFF5B9EE1), width: 1.4),
+                            color: _isNightMode
+                                ? const Color(0xFF3B82F6).withValues(alpha: 0.6)
+                                : const Color(0xFF5B9EE1),
+                            width: 1.4),
                         boxShadow: [
                           BoxShadow(
-                            color: const Color(0xFF5B9EE1).withValues(alpha: 0.15),
+                            color: (_isNightMode ? Colors.black : const Color(0xFF5B9EE1))
+                                .withValues(alpha: _isNightMode ? 0.35 : 0.15),
                             blurRadius: 8,
                             offset: const Offset(0, 2),
                           ),
@@ -839,19 +940,23 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                       ),
                       child: Row(
                         children: [
-                          const Icon(Icons.security_rounded, size: 16, color: Color(0xFF00A896)),
+                          Icon(
+                            Icons.security_rounded,
+                            size: 16,
+                            color: _isNightMode ? const Color(0xFF34D399) : const Color(0xFF00A896),
+                          ),
                           const SizedBox(width: 6),
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                const Text(
+                                Text(
                                   'ทำงานเบื้องหลัง (Background)',
                                   style: TextStyle(
                                     fontSize: 12,
                                     fontWeight: FontWeight.bold,
-                                    color: Colors.black87,
+                                    color: _isNightMode ? Colors.white : Colors.black87,
                                   ),
                                 ),
                                 Text(
@@ -859,7 +964,9 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                                   style: TextStyle(
                                     fontSize: 10,
                                     fontWeight: FontWeight.w600,
-                                    color: _isBackgroundActive ? const Color(0xFF00A896) : Colors.grey,
+                                    color: _isBackgroundActive
+                                        ? (_isNightMode ? const Color(0xFF34D399) : const Color(0xFF00A896))
+                                        : (_isNightMode ? const Color(0xFF94A3B8) : Colors.grey),
                                   ),
                                 ),
                               ],
@@ -868,18 +975,29 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                           InkWell(
                             onTap: _triggerTestBackgroundNotification,
                             child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                               margin: const EdgeInsets.only(right: 6),
                               decoration: BoxDecoration(
-                                color: const Color(0xFFE2F0FE),
+                                color: _isNightMode ? const Color(0xFF334155) : const Color(0xFFE2F0FE),
                                 borderRadius: BorderRadius.circular(10),
                               ),
-                              child: const Row(
+                              child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Icon(Icons.notifications_active, size: 12, color: Color(0xFF2563EB)),
-                                  SizedBox(width: 2),
-                                  Text('ทดสอบ', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF2563EB))),
+                                  Icon(
+                                    Icons.notifications_active,
+                                    size: 12,
+                                    color: _isNightMode ? const Color(0xFF93C5FD) : const Color(0xFF2563EB),
+                                  ),
+                                  const SizedBox(width: 3),
+                                  Text(
+                                    'ทดสอบ',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                      color: _isNightMode ? const Color(0xFF93C5FD) : const Color(0xFF2563EB),
+                                    ),
+                                  ),
                                 ],
                               ),
                             ),
@@ -930,6 +1048,18 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
   }
 
   Color _getSimulationModeBgColor() {
+    if (_isNightMode) {
+      switch (_simulationMode) {
+        case SimulationMode.inPathOvertake:
+          return const Color(0xFF0C4A6E);
+        case SimulationMode.turnBypass:
+          return const Color(0xFF064E3B);
+        case SimulationMode.turnIn:
+          return const Color(0xFF7C2D12);
+        case SimulationMode.opposingLane:
+          return const Color(0xFF78350F);
+      }
+    }
     switch (_simulationMode) {
       case SimulationMode.inPathOvertake:
         return const Color(0xFFE0F2FE);
@@ -943,6 +1073,18 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
   }
 
   Color _getSimulationModeBorderColor() {
+    if (_isNightMode) {
+      switch (_simulationMode) {
+        case SimulationMode.inPathOvertake:
+          return const Color(0xFF0284C7);
+        case SimulationMode.turnBypass:
+          return const Color(0xFF059669);
+        case SimulationMode.turnIn:
+          return const Color(0xFFEA580C);
+        case SimulationMode.opposingLane:
+          return const Color(0xFFD97706);
+      }
+    }
     switch (_simulationMode) {
       case SimulationMode.inPathOvertake:
         return const Color(0xFF0284C7);
@@ -956,6 +1098,18 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
   }
 
   Color _getSimulationModeTextColor() {
+    if (_isNightMode) {
+      switch (_simulationMode) {
+        case SimulationMode.inPathOvertake:
+          return const Color(0xFF7DD3FC);
+        case SimulationMode.turnBypass:
+          return const Color(0xFF86EFAC);
+        case SimulationMode.turnIn:
+          return const Color(0xFFFDBA74);
+        case SimulationMode.opposingLane:
+          return const Color(0xFFFDE68A);
+      }
+    }
     switch (_simulationMode) {
       case SimulationMode.inPathOvertake:
         return const Color(0xFF0369A1);
@@ -1040,7 +1194,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                     ? 'สลับเป็นโหมดกลางวัน'
                     : 'โหมดขับขี่กลางคืน (Night Mode)',
                 onPressed: () {
-                  setState(() => _isNightMode = !_isNightMode);
+                  ThemeSettingsService.toggle();
                 },
               ),
               // ⚡ โหมดพักจอ OLED (Battery Saver)
@@ -1203,24 +1357,39 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
     final pred = _aiPrediction;
     if (pred == null) return const SizedBox.shrink();
 
+    final tier = EmergencyProximityTier.fromDistance(
+      meters.toDouble(),
+      hasAmbulance: _hasLiveAmbulance || _isSimulating,
+    );
+
     // 1. CRITICAL RED ALERT (In Path)
     if (_isInRedZone) {
+      final isIllegalZone = tier == EmergencyProximityTier.illegalHazard;
+
       return AnimatedBuilder(
         animation: _pulseController,
         builder: (context, child) {
           return Container(
             decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [Color(0xFFDC2626), Color(0xFF991B1B)],
+              gradient: LinearGradient(
+                colors: isIllegalZone
+                    ? const [Color(0xFFDC2626), Color(0xFF7F1D1D)]
+                    : (tier == EmergencyProximityTier.criticalYield
+                        ? const [Color(0xFFEA580C), Color(0xFF9A3412)]
+                        : const [Color(0xFFDC2626), Color(0xFF991B1B)]),
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
               borderRadius: BorderRadius.circular(24),
-              border: Border.all(color: Colors.white, width: 2.5),
+              border: Border.all(
+                color: isIllegalZone ? Colors.yellowAccent : Colors.white,
+                width: isIllegalZone ? 3.0 : 2.5,
+              ),
               boxShadow: [
                 BoxShadow(
-                  color: const Color(0xFFDC2626).withValues(alpha: 0.6),
-                  blurRadius: 20,
+                  color: (isIllegalZone ? const Color(0xFFDC2626) : const Color(0xFFEA580C))
+                      .withValues(alpha: 0.65),
+                  blurRadius: 22,
                   spreadRadius: 3,
                   offset: const Offset(0, 6),
                 ),
@@ -1239,7 +1408,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                       child: Container(
                         padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
-                          color: Colors.white,
+                          color: isIllegalZone ? Colors.yellowAccent : Colors.white,
                           shape: BoxShape.circle,
                           boxShadow: [
                             BoxShadow(
@@ -1248,7 +1417,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                             ),
                           ],
                         ),
-                        child: const Text('🚨', style: TextStyle(fontSize: 26)),
+                        child: Text(isIllegalZone ? '🛑' : '🚨', style: const TextStyle(fontSize: 26)),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -1256,24 +1425,28 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
-                            'เตือนภัยฉุกเฉินระดับวิกฤต!',
-                            style: TextStyle(
-                              fontSize: 16,
+                          Text(
+                            isIllegalZone
+                                ? '🚨 ผิดกฎหมาย! ห้ามตามหลัง < 50 ม.'
+                                : tier.titleTH,
+                            style: const TextStyle(
+                              fontSize: 15.5,
                               fontWeight: FontWeight.w900,
                               color: Colors.white,
-                              letterSpacing: 0.3,
+                              letterSpacing: 0.2,
                             ),
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            pred.turnIntent != null
-                                ? '${pred.turnIntent} ($meters ม.)'
-                                : 'รถพยาบาลตามหลังมาในช่องทางเดียวกัน ($meters ม.)',
-                            style: const TextStyle(
-                              fontSize: 12.5,
+                            isIllegalZone
+                                ? 'พ.ร.บ. จราจรทางบก ม.76 (ชะลอและเว้นระยะทันที!)'
+                                : (pred.turnIntent != null
+                                    ? '${pred.turnIntent} ($meters ม.)'
+                                    : 'รถพยาบาลตามหลังมาในเลนเดียวกัน ($meters ม.)'),
+                            style: TextStyle(
+                              fontSize: 12,
                               fontWeight: FontWeight.w600,
-                              color: Color(0xFFFFE4E6),
+                              color: isIllegalZone ? Colors.yellow.shade100 : const Color(0xFFFFE4E6),
                             ),
                           ),
                         ],
@@ -1285,7 +1458,10 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                       decoration: BoxDecoration(
                         color: Colors.black.withValues(alpha: 0.35),
                         borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: Colors.white70, width: 1.2),
+                        border: Border.all(
+                          color: isIllegalZone ? Colors.yellowAccent : Colors.white70,
+                          width: 1.2,
+                        ),
                       ),
                       child: Column(
                         children: [
@@ -1293,10 +1469,10 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                             meters >= 1000
                                 ? (meters / 1000).toStringAsFixed(1)
                                 : '$meters',
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 18,
                               fontWeight: FontWeight.w900,
-                              color: Colors.white,
+                              color: isIllegalZone ? Colors.yellowAccent : Colors.white,
                               height: 1,
                             ),
                           ),
@@ -1314,24 +1490,43 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                     ),
                   ],
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 10),
+
+                // Multi-Segment Distance Bar (ขอบเขตระยะห่างตามกฎหมาย 4 ระดับสี)
+                _buildProximityStepsMeter(tier, meters),
+                const SizedBox(height: 8),
 
                 // Flashing Action Bar
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
                   decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.18),
+                    color: isIllegalZone
+                        ? const Color(0xFF450A0A)
+                        : Colors.white.withValues(alpha: 0.18),
                     borderRadius: BorderRadius.circular(12),
+                    border: isIllegalZone
+                        ? Border.all(color: Colors.yellowAccent.withValues(alpha: 0.6))
+                        : null,
                   ),
-                  child: const Row(
+                  child: Row(
                     children: [
-                      Icon(Icons.warning_amber_rounded, color: Colors.amberAccent, size: 18),
-                      SizedBox(width: 6),
+                      Icon(
+                        isIllegalZone ? Icons.gavel_rounded : Icons.warning_amber_rounded,
+                        color: isIllegalZone ? Colors.yellowAccent : Colors.amberAccent,
+                        size: 18,
+                      ),
+                      const SizedBox(width: 6),
                       Expanded(
                         child: Text(
-                          'กรุณาชะลอความเร็วและเบี่ยงซ้ายเพื่อเปิดทางทันที!',
-                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white),
+                          isIllegalZone
+                              ? 'คำเตือนกฎหมาย: ห้ามขับตามหลังฉุกเฉิน < 50 ม. ฝ่าฝืนปรับสูงสุด 1,000 บ.'
+                              : 'กรุณาชะลอความเร็วและเบี่ยงซ้ายเพื่อเปิดทางทันที!',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.bold,
+                            color: isIllegalZone ? Colors.yellowAccent : Colors.white,
+                          ),
                         ),
                       ),
                     ],
@@ -1384,6 +1579,20 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                     ),
                   ),
                 ),
+                const SizedBox(height: 6),
+
+                // Quick Legal Reference Link
+                InkWell(
+                  onTap: () => _showLegalDistanceModal(context),
+                  child: const Text(
+                    '⚖️ ดูข้อกำหนด พ.ร.บ. จราจรทางบก ม.76 (ห้ามตามหลัง < 50 ม.)',
+                    style: TextStyle(
+                      color: Colors.white70,
+                      fontSize: 11,
+                      decoration: TextDecoration.underline,
+                    ),
+                  ),
+                ),
               ],
             ),
           );
@@ -1396,12 +1605,12 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         decoration: BoxDecoration(
-          color: const Color(0xFFFFF7ED),
+          color: _isNightMode ? const Color(0xFF1E293B) : const Color(0xFFFFF7ED),
           borderRadius: BorderRadius.circular(20),
           border: Border.all(color: const Color(0xFFF97316), width: 2),
           boxShadow: [
             BoxShadow(
-              color: const Color(0xFFF97316).withValues(alpha: 0.25),
+              color: const Color(0xFFF97316).withValues(alpha: _isNightMode ? 0.35 : 0.25),
               blurRadius: 12,
               offset: const Offset(0, 4),
             ),
@@ -1415,7 +1624,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                 color: const Color(0xFFF97316).withValues(alpha: 0.2),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.turn_left_rounded, color: Color(0xFFC2410C), size: 22),
+              child: const Icon(Icons.turn_left_rounded, color: Color(0xFFEA580C), size: 22),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -1423,17 +1632,20 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text(
+                  Text(
                     '⚠️ รถพยาบาลเตรียมเลี้ยวเข้าถนนของคุณ!',
                     style: TextStyle(
                       fontSize: 13.5,
                       fontWeight: FontWeight.bold,
-                      color: Color(0xFFC2410C),
+                      color: _isNightMode ? const Color(0xFFFDBA74) : const Color(0xFFC2410C),
                     ),
                   ),
                   Text(
                     'AI Route-Aware: ตรวจพบเส้นทางจะเลี้ยวเข้าถนนที่คุณอยู่ ($meters ม.) กรุณาชะลอ',
-                    style: const TextStyle(fontSize: 11, color: Color(0xFF9A3412)),
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: _isNightMode ? const Color(0xFFCBD5E1) : const Color(0xFF9A3412),
+                    ),
                   ),
                 ],
               ),
@@ -1441,10 +1653,17 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
-                color: const Color(0xFFFFEDD5),
+                color: _isNightMode ? const Color(0xFF7C2D12) : const Color(0xFFFFEDD5),
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: const Text('AI 92%', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFFC2410C))),
+              child: Text(
+                'AI 92%',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  color: _isNightMode ? const Color(0xFFFDBA74) : const Color(0xFFC2410C),
+                ),
+              ),
             ),
           ],
         ),
@@ -1456,12 +1675,12 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         decoration: BoxDecoration(
-          color: const Color(0xFFF0FDF4),
+          color: _isNightMode ? const Color(0xFF1E293B) : const Color(0xFFF0FDF4),
           borderRadius: BorderRadius.circular(20),
           border: Border.all(color: const Color(0xFF10B981), width: 2),
           boxShadow: [
             BoxShadow(
-              color: const Color(0xFF10B981).withValues(alpha: 0.18),
+              color: const Color(0xFF10B981).withValues(alpha: _isNightMode ? 0.3 : 0.18),
               blurRadius: 10,
               offset: const Offset(0, 3),
             ),
@@ -1475,7 +1694,11 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                 color: const Color(0xFF10B981).withValues(alpha: 0.2),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.turn_right_rounded, color: Color(0xFF047857), size: 22),
+              child: Icon(
+                Icons.turn_right_rounded,
+                color: _isNightMode ? const Color(0xFF34D399) : const Color(0xFF047857),
+                size: 22,
+              ),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -1483,19 +1706,22 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text(
+                  Text(
                     '↪️ รถพยาบาลเลี้ยวแยกหน้า (Turn Bypass)',
                     style: TextStyle(
                       fontSize: 13.5,
                       fontWeight: FontWeight.bold,
-                      color: Color(0xFF047857),
+                      color: _isNightMode ? const Color(0xFF6EE7B7) : const Color(0xFF047857),
                     ),
                   ),
                   Text(
                     pred.turnIntent != null
                         ? '${pred.turnIntent} • ไม่กีดขวางเส้นทางของคุณ'
                         : 'AI Route-Aware: ตรวจพบรถพยาบาลจะเลี้ยวออกที่แยกหน้า ปลอดภัย 100%',
-                    style: const TextStyle(fontSize: 11, color: Color(0xFF065F46)),
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: _isNightMode ? const Color(0xFFCBD5E1) : const Color(0xFF065F46),
+                    ),
                   ),
                 ],
               ),
@@ -1503,10 +1729,17 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
-                color: const Color(0xFFD1FAE5),
+                color: _isNightMode ? const Color(0xFF064E3B) : const Color(0xFFD1FAE5),
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: const Text('Route-Aware', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Color(0xFF047857))),
+              child: Text(
+                'Route-Aware',
+                style: TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.bold,
+                  color: _isNightMode ? const Color(0xFF86EFAC) : const Color(0xFF047857),
+                ),
+              ),
             ),
           ],
         ),
@@ -1518,12 +1751,12 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         decoration: BoxDecoration(
-          color: const Color(0xFFECFDF5),
+          color: _isNightMode ? const Color(0xFF1E293B) : const Color(0xFFECFDF5),
           borderRadius: BorderRadius.circular(20),
           border: Border.all(color: const Color(0xFF10B981), width: 2),
           boxShadow: [
             BoxShadow(
-              color: const Color(0xFF10B981).withValues(alpha: 0.18),
+              color: const Color(0xFF10B981).withValues(alpha: _isNightMode ? 0.3 : 0.18),
               blurRadius: 12,
               offset: const Offset(0, 4),
             ),
@@ -1540,7 +1773,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
               child: const Icon(Icons.check_rounded, color: Colors.white, size: 22),
             ),
             const SizedBox(width: 12),
-            const Expanded(
+            Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
@@ -1550,12 +1783,15 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                     style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.bold,
-                      color: Color(0xFF047857),
+                      color: _isNightMode ? const Color(0xFF6EE7B7) : const Color(0xFF047857),
                     ),
                   ),
                   Text(
                     'ปลอดภัยแล้ว ขอบคุณที่ร่วมเปิดทางช่วยชีวิตผู้ป่วยฉุกเฉิน',
-                    style: TextStyle(fontSize: 11.5, color: Color(0xFF065F46)),
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      color: _isNightMode ? const Color(0xFFCBD5E1) : const Color(0xFF065F46),
+                    ),
                   ),
                 ],
               ),
@@ -1563,10 +1799,17 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
-                color: const Color(0xFFD1FAE5),
+                color: _isNightMode ? const Color(0xFF064E3B) : const Color(0xFFD1FAE5),
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: const Text('AI 5%', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF047857))),
+              child: Text(
+                'AI 5%',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  color: _isNightMode ? const Color(0xFF86EFAC) : const Color(0xFF047857),
+                ),
+              ),
             ),
           ],
         ),
@@ -1578,12 +1821,12 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         decoration: BoxDecoration(
-          color: const Color(0xFFFFFBEB),
+          color: _isNightMode ? const Color(0xFF1E293B) : const Color(0xFFFFFBEB),
           borderRadius: BorderRadius.circular(20),
           border: Border.all(color: const Color(0xFFF59E0B), width: 2),
           boxShadow: [
             BoxShadow(
-              color: const Color(0xFFF59E0B).withValues(alpha: 0.15),
+              color: const Color(0xFFF59E0B).withValues(alpha: _isNightMode ? 0.3 : 0.15),
               blurRadius: 10,
               offset: const Offset(0, 3),
             ),
@@ -1597,10 +1840,14 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                 color: const Color(0xFFF59E0B).withValues(alpha: 0.2),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.swap_vert_rounded, color: Color(0xFFB45309), size: 22),
+              child: Icon(
+                Icons.swap_vert_rounded,
+                color: _isNightMode ? const Color(0xFFFCD34D) : const Color(0xFFB45309),
+                size: 22,
+              ),
             ),
             const SizedBox(width: 12),
-            const Expanded(
+            Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
@@ -1610,12 +1857,15 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                     style: TextStyle(
                       fontSize: 13.5,
                       fontWeight: FontWeight.bold,
-                      color: Color(0xFFB45309),
+                      color: _isNightMode ? const Color(0xFFFCD34D) : const Color(0xFFB45309),
                     ),
                   ),
                   Text(
                     'AI ตรวจสอบแล้วว่าอยู่คนละฝั่งถนน • ไม่ต้องหลบทาง ปลอดภัย 100%',
-                    style: TextStyle(fontSize: 11, color: Color(0xFF92400E)),
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: _isNightMode ? const Color(0xFFCBD5E1) : const Color(0xFF92400E),
+                    ),
                   ),
                 ],
               ),
@@ -1623,10 +1873,17 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
-                color: const Color(0xFFFEF3C7),
+                color: _isNightMode ? const Color(0xFF78350F) : const Color(0xFFFEF3C7),
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: const Text('AI 4%', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFFB45309))),
+              child: Text(
+                'AI 4%',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  color: _isNightMode ? const Color(0xFFFDE68A) : const Color(0xFFB45309),
+                ),
+              ),
             ),
           ],
         ),
@@ -1638,12 +1895,12 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         decoration: BoxDecoration(
-          color: const Color(0xFFEFF6FF),
+          color: _isNightMode ? const Color(0xFF1E293B) : const Color(0xFFEFF6FF),
           borderRadius: BorderRadius.circular(20),
           border: Border.all(color: const Color(0xFF2563EB), width: 1.8),
           boxShadow: [
             BoxShadow(
-              color: const Color(0xFF2563EB).withValues(alpha: 0.18),
+              color: const Color(0xFF2563EB).withValues(alpha: _isNightMode ? 0.35 : 0.18),
               blurRadius: 12,
               offset: const Offset(0, 4),
             ),
@@ -1665,17 +1922,20 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text(
+                  Text(
                     '📡 รถพยาบาลกำลังตามหลังมาในเส้นทาง',
                     style: TextStyle(
                       fontSize: 13.5,
                       fontWeight: FontWeight.bold,
-                      color: Color(0xFF1D4ED8),
+                      color: _isNightMode ? const Color(0xFF93C5FD) : const Color(0xFF1D4ED8),
                     ),
                   ),
                   Text(
                     'ระยะ ${(meters / 1000).toStringAsFixed(1)} กม. • คาดว่าจะถึงใน ${pred.timeToConflictSec.round()} วิ',
-                    style: const TextStyle(fontSize: 11, color: Color(0xFF1E40AF)),
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: _isNightMode ? const Color(0xFFCBD5E1) : const Color(0xFF1E40AF),
+                    ),
                   ),
                 ],
               ),
@@ -1700,21 +1960,29 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: _isNightMode ? const Color(0xFF1E293B) : Colors.white,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.4), width: 1.5),
+        border: Border.all(
+          color: const Color(0xFF10B981).withValues(alpha: _isNightMode ? 0.6 : 0.4),
+          width: 1.5,
+        ),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF10B981).withValues(alpha: 0.08),
+            color: (_isNightMode ? Colors.black : const Color(0xFF10B981))
+                .withValues(alpha: _isNightMode ? 0.35 : 0.08),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
         ],
       ),
-      child: const Row(
+      child: Row(
         children: [
-          Icon(Icons.shield_outlined, color: Color(0xFF059669), size: 22),
-          SizedBox(width: 10),
+          Icon(
+            Icons.shield_outlined,
+            color: _isNightMode ? const Color(0xFF34D399) : const Color(0xFF059669),
+            size: 22,
+          ),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1722,16 +1990,30 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
               children: [
                 Text(
                   '🛡️ สถานะปกติ (Safe Zone)',
-                  style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.bold, color: Color(0xFF059669)),
+                  style: TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.bold,
+                    color: _isNightMode ? const Color(0xFF34D399) : const Color(0xFF059669),
+                  ),
                 ),
                 Text(
                   'ไม่พบรถฉุกเฉินในเส้นทางของคุณ',
-                  style: TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: _isNightMode ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                  ),
                 ),
               ],
             ),
           ),
-          Text('3.0 KM', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Color(0xFF059669))),
+          Text(
+            '3.0 KM',
+            style: TextStyle(
+              fontSize: 11.5,
+              fontWeight: FontWeight.bold,
+              color: _isNightMode ? const Color(0xFF34D399) : const Color(0xFF059669),
+            ),
+          ),
         ],
       ),
     );
@@ -1837,48 +2119,11 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
               : null,
         ),
 
-        // Route-Aware Ambulance Corridor Polyline
-        if (_ambulanceRoutePoints != null &&
-            _ambulanceRoutePoints!.isNotEmpty &&
-            (_isSimulating || _hasLiveAmbulance))
+        // เส้นทางรถกู้ภัยจำแนกสีตามขอบเขตระยะห่างกฎหมายจราจร (Proximity Route Polylines)
+        if (_isSimulating || _hasLiveAmbulance)
           PolylineLayer(
-            polylines: [
-              Polyline(
-                points: _ambulanceRoutePoints!,
-                strokeWidth: 5.5,
-                color: (_simulationMode == SimulationMode.turnBypass
-                        ? const Color(0xFF10B981)
-                        : const Color(0xFFEF4444))
-                    .withValues(alpha: 0.8),
-                borderStrokeWidth: 2.0,
-                borderColor: Colors.white,
-              ),
-            ],
+            polylines: _buildProximityRoutePolylines(),
           ),
-
-        // วงกลม Geofence อิงหน่วยเมตร
-        CircleLayer(
-          circles: [
-            // วงนอกสีฟ้า (Outer Radar Circle 3km)
-            CircleMarker(
-              point: _currentLocation,
-              radius: _outerRadarMeters,
-              useRadiusInMeter: true,
-              color: const Color(0xFF5B9EE1).withValues(alpha: 0.06),
-              borderColor: const Color(0xFF5B9EE1).withValues(alpha: 0.40),
-              borderStrokeWidth: 1.5,
-            ),
-            // วงในสีแดง (Critical Alert Danger Zone 500m)
-            CircleMarker(
-              point: _currentLocation,
-              radius: _innerAlertMeters,
-              useRadiusInMeter: true,
-              color: const Color(0xFFEF4444).withValues(alpha: 0.12),
-              borderColor: const Color(0xFFEF4444).withValues(alpha: 0.65),
-              borderStrokeWidth: 1.8,
-            ),
-          ],
-        ),
 
         MarkerLayer(
           markers: [
@@ -2090,5 +2335,438 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
         ),
       ),
     );
+  }
+
+  /// 🚨 Active SOS Tracking Banner (เด้งเตือนด้านบนเมื่อมีเคสฉุกเฉินที่กำลังประสานงาน)
+  Widget _buildActiveSosTrackingBanner(IncidentReport incident) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => IncidentDetailScreen(incident: incident),
+            ),
+          );
+        },
+        borderRadius: BorderRadius.circular(18),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: const Color(0xFFDC2626),
+            borderRadius: BorderRadius.circular(18),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFFDC2626).withValues(alpha: 0.4),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(7),
+                decoration: const BoxDecoration(
+                  color: Colors.white24,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.emergency_rounded, color: Colors.white, size: 20),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          '🚨 เหตุฉุกเฉินที่คุณแจ้ง (${incident.id})',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const Spacer(),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.25),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: const Text(
+                            'แตะเพื่อดูสด',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'สถานะ: ${incident.statusText} • ${incident.hospitalName ?? "ศูนย์ 1669"}',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 6),
+              const Icon(Icons.arrow_forward_ios_rounded, color: Colors.white70, size: 14),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 🚦 แถบแสดงขอบเขตระยะห่าง 4 ระดับสีใน HUD (Proximity Steps Meter)
+  Widget _buildProximityStepsMeter(EmergencyProximityTier currentTier, int meters) {
+    final steps = [
+      {
+        'tier': EmergencyProximityTier.illegalHazard,
+        'label': '< 50 ม.',
+        'sub': '🛑 ผิดกฎหมาย',
+        'color': const Color(0xFFDC2626),
+      },
+      {
+        'tier': EmergencyProximityTier.criticalYield,
+        'label': '50-150 ม.',
+        'sub': '⚠️ ชิดซ้ายทันที',
+        'color': const Color(0xFFEA580C),
+      },
+      {
+        'tier': EmergencyProximityTier.approaching,
+        'label': '150-500 ม.',
+        'sub': '⚡ เตรียมหลบ',
+        'color': const Color(0xFFF59E0B),
+      },
+      {
+        'tier': EmergencyProximityTier.radarAwareness,
+        'label': '500ม.-3กม.',
+        'sub': '📡 รัศมีเรดาร์',
+        'color': const Color(0xFF2563EB),
+      },
+    ];
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 5),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.35),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        children: steps.map((step) {
+          final tier = step['tier'] as EmergencyProximityTier;
+          final isCurrent = tier == currentTier;
+          final color = step['color'] as Color;
+
+          return Expanded(
+            child: Container(
+              margin: const EdgeInsets.symmetric(horizontal: 2),
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              decoration: BoxDecoration(
+                color: isCurrent ? color : Colors.white.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(8),
+                border: isCurrent
+                    ? Border.all(color: Colors.white, width: 1.8)
+                    : null,
+                boxShadow: isCurrent
+                    ? [
+                        BoxShadow(
+                          color: color.withValues(alpha: 0.5),
+                          blurRadius: 6,
+                        ),
+                      ]
+                    : null,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    step['label'] as String,
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w900,
+                      color: isCurrent ? Colors.white : Colors.white70,
+                    ),
+                  ),
+                  Text(
+                    step['sub'] as String,
+                    style: TextStyle(
+                      fontSize: 8.5,
+                      fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal,
+                      color: isCurrent ? Colors.white : Colors.white38,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  /// ⚖️ หน้าต่างแสดงกฎหมายระยะห่าง 50 เมตร และขอบเขตระยะเรดาร์
+  void _showLegalDistanceModal(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 22),
+        decoration: BoxDecoration(
+          color: _isNightMode ? const Color(0xFF0F172A) : Colors.white,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+        ),
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 42,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade400,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Row(
+                children: [
+                  Icon(Icons.gavel_rounded, color: Color(0xFFDC2626), size: 24),
+                  SizedBox(width: 8),
+                  Text(
+                    'กฎหมายจราจรและระยะห่างรถพยาบาล',
+                    style: TextStyle(fontSize: 16.5, fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFEF2F2),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: const Color(0xFFEF4444), width: 1.2),
+                ),
+                child: const Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '⚖️ พระราชบัญญัติจราจรทางบก พ.ศ. 2522 มาตรา 76',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFFB91C1C),
+                      ),
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      '• วรรคสอง: "ห้ามมิให้ผู้ขับขี่ขับรถตามหลังรถฉุกเฉินซึ่งกำลังปฏิบัติหน้าที่ในระยะต่ำกว่า 50 เมตร"\n• วรรคหนึ่ง (2): "สำหรับผู้ขับขี่ต้องหยุดรถหรือจอดรถให้อยู่ชิดขอบทางด้านซ้ายเพื่อเปิดทางแก่รถฉุกเฉิน"',
+                      style: TextStyle(fontSize: 12, color: Color(0xFF7F1D1D), height: 1.45),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+              const Text(
+                '🚦 ขอบเขตระยะห่าง 4 ระดับสีของระบบ RouteAlert:',
+                style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              _buildLegalDistanceRow(
+                color: const Color(0xFFDC2626),
+                title: '🔴 ระยะ < 50 เมตร (ผิดกฎหมาย / วิกฤต)',
+                desc: 'ห้ามขับตามหลังในระยะนี้โดยเด็ดขาด ชะลอรถและเว้นระยะห่างทันที',
+              ),
+              _buildLegalDistanceRow(
+                color: const Color(0xFFEA580C),
+                title: '🟠 ระยะ 50 - 150 เมตร (ระยะประชิด)',
+                desc: 'ต้องชิดขอบทางด้านซ้ายเพื่อเปิดทางให้รถพยาบาลผ่านทันที',
+              ),
+              _buildLegalDistanceRow(
+                color: const Color(0xFFF59E0B),
+                title: '🟡 ระยะ 150 - 500 เมตร (ระยะเข้าใกล้)',
+                desc: 'เตรียมพร้อมชะลอความเร็ว ให้สัญญาณไฟเลี้ยว และเบี่ยงเลนล่วงหน้า',
+              ),
+              _buildLegalDistanceRow(
+                color: const Color(0xFF2563EB),
+                title: '🔵 ระยะ 500 - 3,000 เมตร (เรดาร์นำทาง)',
+                desc: 'ระบบ Route-Aware AI ตรวจจับเส้นทางรถฉุกเฉินล่วงหน้าในรัศมี',
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                height: 46,
+                child: ElevatedButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF1E293B),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  ),
+                  child: const Text('เข้าใจแล้ว', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLegalDistanceRow({
+    required Color color,
+    required String title,
+    required String desc,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            margin: const EdgeInsets.only(top: 3),
+            width: 10,
+            height: 10,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.bold,
+                    color: color,
+                  ),
+                ),
+                Text(
+                  desc,
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    color: _isNightMode ? Colors.grey.shade400 : Colors.grey.shade700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// เส้นทางของรถกู้ภัยตามถนนจริง แบ่งสีตามขอบเขตระยะห่างกฎหมายจราจร (Proximity Route Polylines)
+  List<Polyline> _buildProximityRoutePolylines() {
+    final targetAmb = _ambulanceLocation;
+    if ((!_isSimulating && !_hasLiveAmbulance) || targetAmb == null) {
+      return [];
+    }
+
+    // กรณีรถพยาบาลเลี้ยวออก (Turn Bypass) เส้นทางจะเป็นสีเขียวเพื่อแสดงว่าปลอดภัย
+    if (_simulationMode == SimulationMode.turnBypass) {
+      final pts = _ambulanceRoutePoints ?? [targetAmb, _currentLocation];
+      return [
+        Polyline(
+          points: pts,
+          strokeWidth: 5.5,
+          color: const Color(0xFF10B981).withValues(alpha: 0.85),
+          borderColor: Colors.white,
+          borderStrokeWidth: 2.0,
+        ),
+      ];
+    }
+
+    final rawPoints = (_ambulanceRoutePoints != null && _ambulanceRoutePoints!.isNotEmpty)
+        ? _ambulanceRoutePoints!
+        : [targetAmb, _currentLocation];
+
+    if (rawPoints.length < 2) return [];
+
+    // เพิ่มความถี่ของจุดพิกัด (Dense Interpolation) เพื่อให้เส้นทางตัดสีตามระยะเมตรอย่างแม่นยำ
+    final List<LatLng> densePoints = [];
+    for (int i = 0; i < rawPoints.length - 1; i++) {
+      final p1 = rawPoints[i];
+      final p2 = rawPoints[i + 1];
+      densePoints.add(p1);
+
+      final segDist = LocationService.calculateDistanceInMeters(p1, p2);
+      if (segDist > 30) {
+        final steps = (segDist / 20).ceil();
+        for (int s = 1; s < steps; s++) {
+          final frac = s / steps;
+          final lat = p1.latitude + (p2.latitude - p1.latitude) * frac;
+          final lng = p1.longitude + (p2.longitude - p1.longitude) * frac;
+          densePoints.add(LatLng(lat, lng));
+        }
+      }
+    }
+    densePoints.add(rawPoints.last);
+
+    // จำแนกจุดเป็นช่วงเส้นตาม EmergencyProximityTier
+    final List<Polyline> polylines = [];
+    List<LatLng> currentSegment = [];
+    EmergencyProximityTier? currentTier;
+
+    for (int i = 0; i < densePoints.length; i++) {
+      final pt = densePoints[i];
+      final dist = LocationService.calculateDistanceInMeters(pt, _currentLocation);
+      final tier = EmergencyProximityTier.fromDistance(dist, hasAmbulance: true);
+
+      if (currentTier == null) {
+        currentTier = tier;
+        currentSegment.add(pt);
+      } else if (currentTier == tier) {
+        currentSegment.add(pt);
+      } else {
+        currentSegment.add(pt); // จุดเหลื่อมกันเพื่อให้เส้นเชื่อมกันสนิท
+        if (currentSegment.length >= 2) {
+          final isIllegal = currentTier == EmergencyProximityTier.illegalHazard;
+          polylines.add(
+            Polyline(
+              points: List.from(currentSegment),
+              strokeWidth: isIllegal ? 7.0 : 5.5,
+              color: currentTier.primaryColor.withValues(alpha: 0.92),
+              borderColor: isIllegal ? Colors.yellowAccent : Colors.white,
+              borderStrokeWidth: isIllegal ? 2.5 : 1.8,
+            ),
+          );
+        }
+        currentSegment = [pt];
+        currentTier = tier;
+      }
+    }
+
+    if (currentSegment.length >= 2 && currentTier != null) {
+      final isIllegal = currentTier == EmergencyProximityTier.illegalHazard;
+      polylines.add(
+        Polyline(
+          points: currentSegment,
+          strokeWidth: isIllegal ? 7.0 : 5.5,
+          color: currentTier.primaryColor.withValues(alpha: 0.92),
+          borderColor: isIllegal ? Colors.yellowAccent : Colors.white,
+          borderStrokeWidth: isIllegal ? 2.5 : 1.8,
+        ),
+      );
+    }
+
+    return polylines;
   }
 }

@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import '../../../core/services/location_service.dart';
+import '../../../core/services/theme_settings_service.dart';
 import '../../auth_face_login/data/services/face_auth_repository.dart';
 import '../../auth_face_login/presentation/face_login_screen.dart';
 import 'driver_home_screen.dart';
+import 'incident_detail_screen.dart';
 import 'incident_list_screen.dart';
 import 'sos_report_screen.dart';
 import 'driver_settings_screen.dart';
@@ -21,6 +24,7 @@ class _DriverMainScreenState extends State<DriverMainScreen> {
   @override
   void initState() {
     super.initState();
+    ThemeSettingsService.loadSettings();
     _pages = [
       DriverHomeScreen(onOpenSos: _openSosScreen),
       IncidentListScreen(onOpenSos: _openSosScreen),
@@ -45,13 +49,26 @@ class _DriverMainScreenState extends State<DriverMainScreen> {
       return;
     }
 
+    final currentPos = await LocationService.getCurrentLocation();
+
     if (!mounted) return;
     Navigator.push(
       context,
       MaterialPageRoute(
         fullscreenDialog: true,
         builder: (ctx) => SosReportScreen(
+          initialLocation: currentPos,
           onClose: () => Navigator.pop(ctx),
+          onSubmitted: (incident) {
+            Navigator.pop(ctx);
+            setState(() => _currentIndex = 1); // Switch to Incident tab!
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => IncidentDetailScreen(incident: incident),
+              ),
+            );
+          },
         ),
       ),
     );
@@ -107,10 +124,10 @@ class _DriverMainScreenState extends State<DriverMainScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              'เพื่อความปลอดภัยและป้องกันการแจ้งเหตุเท็จ/สแปม (Anti-Spam)\nระบบจำเป็นต้องยืนยันตัวตนผู้แจ้งเหตุกับศูนย์รับแจ้งเหตุ 1669',
+              'เพื่อความปลอดภัย ป้องกันการแจ้งเหตุเท็จ และเพื่อดึงเบอร์โทรศัพท์ติดต่อกลับส่งตรงให้ศูนย์สั่งการ 1669 ทันทีโดยไม่ต้องเสียเวลากรอกในยามเร่งด่วน\nกรุณายืนยันตัวตนก่อนเข้าหน้าแจ้งเหตุฉุกเฉิน (SOS)',
               textAlign: TextAlign.center,
               style: TextStyle(
-                fontSize: 13.5,
+                fontSize: 13,
                 color: Colors.grey.shade600,
                 height: 1.45,
               ),
@@ -131,12 +148,25 @@ class _DriverMainScreenState extends State<DriverMainScreen> {
                     // If user logged in successfully, open SOS directly
                     final user = await FaceAuthRepository.getCurrentUser();
                     if (user != null && user.id != 'guest' && mounted) {
+                      final currentPos = await LocationService.getCurrentLocation();
+                      if (!mounted) return;
                       Navigator.push(
                         context,
                         MaterialPageRoute(
                           fullscreenDialog: true,
                           builder: (modalCtx) => SosReportScreen(
+                            initialLocation: currentPos,
                             onClose: () => Navigator.pop(modalCtx),
+                            onSubmitted: (incident) {
+                              Navigator.pop(modalCtx);
+                              setState(() => _currentIndex = 1);
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => IncidentDetailScreen(incident: incident),
+                                ),
+                              );
+                            },
                           ),
                         ),
                       );
@@ -186,50 +216,60 @@ class _DriverMainScreenState extends State<DriverMainScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: IndexedStack(
-        index: _currentIndex,
-        children: _pages,
-      ),
-      bottomNavigationBar: Container(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          border: Border(top: BorderSide(color: Colors.grey.shade200)),
-        ),
-        child: BottomNavigationBar(
-          currentIndex: _currentIndex,
-          onTap: _onSelectTab,
-          type: BottomNavigationBarType.fixed,
-          backgroundColor: Colors.white,
-          selectedItemColor: const Color(0xFF5B9EE1),
-          unselectedItemColor: Colors.grey.shade400,
-          showSelectedLabels: false,
-          showUnselectedLabels: false,
-          elevation: 0,
-          items: const [
-            BottomNavigationBarItem(
-              icon: Icon(Icons.map_outlined, size: 28),
-              activeIcon: Icon(Icons.map_rounded, size: 28),
-              label: 'Map',
+    return ValueListenableBuilder<bool>(
+      valueListenable: ThemeSettingsService.isNightMode,
+      builder: (context, isDark, _) {
+        return Scaffold(
+          backgroundColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+          body: IndexedStack(
+            index: _currentIndex,
+            children: _pages,
+          ),
+          bottomNavigationBar: Container(
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF0F172A) : Colors.white,
+              border: Border(
+                top: BorderSide(
+                  color: isDark ? const Color(0xFF1E293B) : Colors.grey.shade200,
+                ),
+              ),
             ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.airport_shuttle_outlined, size: 28),
-              activeIcon: Icon(Icons.airport_shuttle_rounded, size: 28),
-              label: 'Incident',
+            child: BottomNavigationBar(
+              currentIndex: _currentIndex,
+              onTap: _onSelectTab,
+              type: BottomNavigationBarType.fixed,
+              backgroundColor: isDark ? const Color(0xFF0F172A) : Colors.white,
+              selectedItemColor: isDark ? const Color(0xFF60A5FA) : const Color(0xFF5B9EE1),
+              unselectedItemColor: isDark ? const Color(0xFF64748B) : Colors.grey.shade400,
+              showSelectedLabels: false,
+              showUnselectedLabels: false,
+              elevation: 0,
+              items: const [
+                BottomNavigationBarItem(
+                  icon: Icon(Icons.map_outlined, size: 28),
+                  activeIcon: Icon(Icons.map_rounded, size: 28),
+                  label: 'Map',
+                ),
+                BottomNavigationBarItem(
+                  icon: Icon(Icons.airport_shuttle_outlined, size: 28),
+                  activeIcon: Icon(Icons.airport_shuttle_rounded, size: 28),
+                  label: 'Incident',
+                ),
+                BottomNavigationBarItem(
+                  icon: Icon(Icons.settings_outlined, size: 28),
+                  activeIcon: Icon(Icons.settings_rounded, size: 28),
+                  label: 'Settings',
+                ),
+                BottomNavigationBarItem(
+                  icon: Icon(Icons.person_outline_rounded, size: 28),
+                  activeIcon: Icon(Icons.person_rounded, size: 28),
+                  label: 'Profile',
+                ),
+              ],
             ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.settings_outlined, size: 28),
-              activeIcon: Icon(Icons.settings_rounded, size: 28),
-              label: 'Settings',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.person_outline_rounded, size: 28),
-              activeIcon: Icon(Icons.person_rounded, size: 28),
-              label: 'Profile',
-            ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 }

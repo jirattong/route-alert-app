@@ -18,6 +18,7 @@ class _AgencySettingsScreenState extends State<AgencySettingsScreen> {
   bool _voiceAnnouncement = true; // เตือนด้วยเสียงพูด (TTS)
   bool _screenFlashAlert = true; // กะพริบหน้าจอ
 
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -123,7 +124,6 @@ class _AgencySettingsScreenState extends State<AgencySettingsScreen> {
                       value: _screenFlashAlert,
                       onChanged: (val) => setState(() => _screenFlashAlert = val),
                     ),
-                    
                     const SizedBox(height: 30),
                   ],
                 ),

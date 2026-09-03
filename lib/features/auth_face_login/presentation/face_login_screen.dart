@@ -6,6 +6,8 @@ import '../../../core/services/google_auth_service.dart';
 import '../../../core/widgets/google_logo.dart';
 import '../data/models/user_face_profile.dart';
 import '../data/services/face_auth_repository.dart';
+import '../../../core/ml/anti_spoofing_service.dart';
+import '../../../core/ml/face_recognition_service.dart';
 import 'face_scan_screen.dart';
 import '../../driver_radar/presentation/driver_main_screen.dart';
 import '../../ambulance/presentation/ambulance_main_screen.dart';
@@ -46,6 +48,11 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
   @override
   void initState() {
     super.initState();
+    // Ensure no pre-existing session is logged in by default on startup
+    FaceAuthRepository.logout();
+    // Pre-warm AI biometric models asynchronously so Face Scan launches with 0ms delay
+    unawaited(AntiSpoofingService().initialize());
+    unawaited(FaceRecognitionService().initialize());
     _passwordController.addListener(_onPasswordInputChanged);
     _emailController.addListener(_onEmailInputChanged);
   }

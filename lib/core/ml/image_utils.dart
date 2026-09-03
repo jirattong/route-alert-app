@@ -108,6 +108,36 @@ class ImageUtils {
     return img.copyCrop(srcImage, x: left, y: top, width: width, height: height);
   }
 
+  /// Directly crops and converts ONLY the face bounding box region from CameraImage.
+  /// Ensures the image is rotated to upright orientation matching ML Kit coordinates!
+  static img.Image cropFaceDirectFromCameraImage(
+    CameraImage image,
+    ui.Rect boundingBox, {
+    double margin = 0.15,
+  }) {
+    // 1. Convert raw camera frame to img.Image
+    final img.Image rawImage = convertCameraImage(image);
+
+    // 2. Rotate based on landscape-to-portrait sensor orientation (90 deg on iOS, 270 on Android)
+    final img.Image uprightImage = (image.width > image.height)
+        ? img.copyRotate(rawImage, angle: 90)
+        : rawImage;
+
+    // 3. Crop face using ML Kit's upright bounding box
+    final double marginW = boundingBox.width * margin;
+    final double marginH = boundingBox.height * margin;
+
+    final int left = (boundingBox.left - marginW).toInt().clamp(0, uprightImage.width - 1);
+    final int top = (boundingBox.top - marginH).toInt().clamp(0, uprightImage.height - 1);
+    final int right = (boundingBox.right + marginW).toInt().clamp(1, uprightImage.width);
+    final int bottom = (boundingBox.bottom + marginH).toInt().clamp(1, uprightImage.height);
+
+    final int cropWidth = (right - left).clamp(1, uprightImage.width - left);
+    final int cropHeight = (bottom - top).clamp(1, uprightImage.height - top);
+
+    return img.copyCrop(uprightImage, x: left, y: top, width: cropWidth, height: cropHeight);
+  }
+
   /// Converts img.Image to normalized Float32List Tensor [1, height, width, 3]
   /// Normalization: (pixel - mean) / std (MobileFaceNet uses mean=127.5, std=128.0)
   static Float32List imageToTensor(img.Image image, {double mean = 127.5, double std = 128.0}) {

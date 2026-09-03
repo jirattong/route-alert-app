@@ -177,9 +177,14 @@ class _IncidentListScreenState extends State<IncidentListScreen> {
                         if (item.status == 'cancelled') return false;
 
                         if (_selectedTab == 1) {
-                          // My SOS reports (เฉพาะที่กำลังดำเนินการ)
+                          // My SOS reports
                           return true;
                         } else {
+                          // เคสที่ผู้ใช้แจ้งเอง จะแสดงเสมอไม่ถูกซ่อนตามรัศมี
+                          final isMyReport = item.id.startsWith('Case #AVCB') ||
+                              item.reporterPhone == '081-234-5678';
+                          if (isMyReport) return true;
+
                           // Area incidents by radius
                           if (_selectedRadiusKm <= 0) return true;
                           final meters = LocationService.calculateDistanceInMeters(
@@ -189,6 +194,15 @@ class _IncidentListScreenState extends State<IncidentListScreen> {
                           return (meters / 1000.0) <= _selectedRadiusKm;
                         }
                       }).toList();
+
+                      // เรียงลำดับ: เคสของผู้ใช้ขึ้นบนสุดเสมอ จากนั้นเรียงตามเวลาล่าสุด
+                      filtered.sort((a, b) {
+                        final aIsMine = a.id.startsWith('Case #AVCB') || a.reporterPhone == '081-234-5678';
+                        final bIsMine = b.id.startsWith('Case #AVCB') || b.reporterPhone == '081-234-5678';
+                        if (aIsMine && !bIsMine) return -1;
+                        if (!aIsMine && bIsMine) return 1;
+                        return b.createdAt.compareTo(a.createdAt);
+                      });
 
                       if (filtered.isEmpty) {
                         return Center(
@@ -340,9 +354,28 @@ class _IncidentListScreenState extends State<IncidentListScreen> {
                     ],
                   ),
                   const SizedBox(height: 2),
-                  Text(
-                    item.id,
-                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600, fontWeight: FontWeight.w600),
+                  Row(
+                    children: [
+                      Text(
+                        item.id,
+                        style: TextStyle(fontSize: 12, color: Colors.grey.shade600, fontWeight: FontWeight.w600),
+                      ),
+                      if (item.id.startsWith('Case #AVCB') || item.reporterPhone == '081-234-5678') ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFEE2E2),
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: const Color(0xFFEF4444), width: 0.8),
+                          ),
+                          child: const Text(
+                            '📌 รายงานของคุณ',
+                            style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: Color(0xFFDC2626)),
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                   const SizedBox(height: 4),
                   Text(

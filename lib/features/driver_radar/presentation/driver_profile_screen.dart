@@ -443,13 +443,12 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                         child: ElevatedButton.icon(
                           onPressed: () async {
                             await FaceAuthRepository.logout();
-                            await _loadData();
                             if (!context.mounted) return;
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                backgroundColor: Color(0xFF00A896),
-                                content: Text('ออกจากระบบแล้ว (สลับเป็นโหมดผู้ใช้ทั่วไป)'),
-                              ),
+                            Navigator.pushAndRemoveUntil(
+                              context,
+                              MaterialPageRoute(
+                                  builder: (context) => const FaceLoginScreen()),
+                              (route) => false,
                             );
                           },
                           icon: const Icon(Icons.logout_rounded, color: Colors.white, size: 20),

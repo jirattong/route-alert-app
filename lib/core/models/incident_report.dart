@@ -11,6 +11,7 @@ class IncidentReport {
   final String province;
   final String address;
   final String? photoBase64;
+  final List<String> photosBase64;
   final String reporterName;
   final String reporterEmail;
   final String reporterPhone;
@@ -42,6 +43,7 @@ class IncidentReport {
     required this.province,
     required this.address,
     this.photoBase64,
+    this.photosBase64 = const [],
     required this.reporterName,
     required this.reporterEmail,
     this.reporterPhone = '',
@@ -118,7 +120,8 @@ class IncidentReport {
       'longitude': longitude,
       'province': province,
       'address': address,
-      'photoBase64': photoBase64,
+      'photoBase64': photoBase64 ?? (photosBase64.isNotEmpty ? photosBase64.first : null),
+      'photosBase64': photosBase64,
       'reporterName': reporterName,
       'reporterEmail': reporterEmail,
       'reporterPhone': reporterPhone,
@@ -143,6 +146,11 @@ class IncidentReport {
   }
 
   factory IncidentReport.fromMap(Map<String, dynamic> map) {
+    final rawPhotos = map['photosBase64'] as List<dynamic>?;
+    final List<String> parsedPhotos = rawPhotos != null
+        ? rawPhotos.map((e) => e.toString()).toList()
+        : (map['photoBase64'] != null ? [map['photoBase64'].toString()] : const []);
+
     return IncidentReport(
       id: map['id'] ?? '',
       type: map['type'] ?? 'อุบัติเหตุทางรถยนต์',
@@ -152,7 +160,8 @@ class IncidentReport {
       longitude: (map['longitude'] as num?)?.toDouble() ?? 99.8962,
       province: map['province'] ?? 'เชียงใหม่',
       address: map['address'] ?? '',
-      photoBase64: map['photoBase64'],
+      photoBase64: map['photoBase64'] ?? (parsedPhotos.isNotEmpty ? parsedPhotos.first : null),
+      photosBase64: parsedPhotos,
       reporterName: map['reporterName'] ?? 'ผู้ใช้งาน RouteAlert',
       reporterEmail: map['reporterEmail'] ?? '',
       reporterPhone: map['reporterPhone'] ?? '',
@@ -192,6 +201,7 @@ class IncidentReport {
     String? province,
     String? address,
     String? photoBase64,
+    List<String>? photosBase64,
     String? reporterName,
     String? reporterEmail,
     String? reporterPhone,
@@ -223,6 +233,7 @@ class IncidentReport {
       province: province ?? this.province,
       address: address ?? this.address,
       photoBase64: photoBase64 ?? this.photoBase64,
+      photosBase64: photosBase64 ?? this.photosBase64,
       reporterName: reporterName ?? this.reporterName,
       reporterEmail: reporterEmail ?? this.reporterEmail,
       reporterPhone: reporterPhone ?? this.reporterPhone,

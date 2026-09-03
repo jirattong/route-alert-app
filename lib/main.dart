@@ -2,34 +2,40 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'firebase_options.dart';
-import 'features/auth_face_login/data/services/face_auth_repository.dart';
-import 'features/driver_radar/presentation/driver_main_screen.dart';
-import 'features/ambulance/presentation/ambulance_main_screen.dart';
-import 'features/agency/presentation/agency_main_screen.dart';
+import 'features/auth_face_login/presentation/face_login_screen.dart';
 
-void main() async {
+import 'dart:async';
+
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 1. Load .env config
+  // 1. Launch Flutter UI IMMEDIATELY!
+  // Eliminates white-screen freeze completely by rendering on frame 1 (~50ms)
+  runApp(const RouteAlertApp());
+
+  // 2. Initialize background services asynchronously (non-blocking)
+  unawaited(_initBackgroundServices());
+}
+
+Future<void> _initBackgroundServices() async {
+  // Load .env with fast local disk read
   try {
-    await dotenv.load(fileName: ".env");
+    await dotenv.load(fileName: ".env").timeout(const Duration(seconds: 1));
   } catch (e) {
     debugPrint('DotEnv load notice: $e');
   }
 
-  // 2. Initialize Firebase synchronously before runApp to guarantee services are ready
+  // Initialize Firebase asynchronously with a strict 3-second timeout
+  // to avoid network socket stalls on iOS
   try {
     if (Firebase.apps.isEmpty) {
       await Firebase.initializeApp(
         options: DefaultFirebaseOptions.currentPlatform,
-      );
+      ).timeout(const Duration(seconds: 3));
     }
   } catch (e) {
     debugPrint('Firebase init notice: $e');
   }
-
-  // 3. Launch the App UI (Enters directly to Driver / Map screen)
-  runApp(const RouteAlertApp());
 }
 
 class RouteAlertApp extends StatelessWidget {
@@ -44,44 +50,7 @@ class RouteAlertApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF00A896)),
         useMaterial3: true,
       ),
-      home: const AppRootScreen(),
+      home: const FaceLoginScreen(),
     );
-  }
-}
-
-/// Root widget that immediately starts on the Map / Radar screen,
-/// while restoring official roles (Ambulance / Agency) if previously logged in.
-class AppRootScreen extends StatefulWidget {
-  const AppRootScreen({super.key});
-
-  @override
-  State<AppRootScreen> createState() => _AppRootScreenState();
-}
-
-class _AppRootScreenState extends State<AppRootScreen> {
-  Widget _currentScreen = const DriverMainScreen();
-
-  @override
-  void initState() {
-    super.initState();
-    _checkActiveUserSession();
-  }
-
-  Future<void> _checkActiveUserSession() async {
-    try {
-      final user = await FaceAuthRepository.getCurrentUser();
-      if (user != null && mounted) {
-        if (user.role == 'ambulance') {
-          setState(() => _currentScreen = const AmbulanceMainScreen());
-        } else if (user.role == 'agency') {
-          setState(() => _currentScreen = const AgencyMainScreen());
-        }
-      }
-    } catch (_) {}
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return _currentScreen;
   }
 }

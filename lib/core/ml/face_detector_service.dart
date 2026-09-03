@@ -9,9 +9,11 @@ class FaceDetectorService {
   FaceDetectorService() {
     final options = FaceDetectorOptions(
       performanceMode: FaceDetectorMode.fast,
-      enableLandmarks: true,
-      enableClassification: true,
-      minFaceSize: 0.15,
+      enableContours: false, // Disabled to save CPU and battery and eliminate green mesh
+      enableLandmarks: false,
+      enableClassification: false,
+      enableTracking: true,
+      minFaceSize: 0.12,
     );
     _detector = FaceDetector(options: options);
   }

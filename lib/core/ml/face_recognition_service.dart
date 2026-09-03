@@ -4,27 +4,33 @@ import 'package:tflite_flutter/tflite_flutter.dart';
 import 'image_utils.dart';
 
 class FaceRecognitionService {
-  Interpreter? _interpreter;
-  bool _isModelLoaded = false;
-  int _outputDim = 192;
+  static Interpreter? _cachedInterpreter;
+  static bool _cachedModelLoaded = false;
+  static int _cachedOutputDim = 192;
+
+  Interpreter? get _interpreter => _cachedInterpreter;
+  bool get isModelLoaded => _cachedModelLoaded && _cachedInterpreter != null;
+  bool get _isModelLoaded => isModelLoaded;
+  int get _outputDim => _cachedOutputDim;
 
   static const String modelPath = 'assets/models/mobilefacenet.tflite';
   static const int inputSize = 112; // MobileFaceNet standard input dimensions (112x112)
   static const double recognitionThreshold = 0.80; // Strict similarity threshold for accurate match
 
   Future<void> initialize() async {
+    if (_cachedModelLoaded && _cachedInterpreter != null) return;
     try {
       final options = InterpreterOptions()..threads = 4;
-      _interpreter = await Interpreter.fromAsset(modelPath, options: options);
+      _cachedInterpreter = await Interpreter.fromAsset(modelPath, options: options);
       
       // Dynamically detect output dimension (192 or 128)
-      final outputShape = _interpreter!.getOutputTensor(0).shape;
+      final outputShape = _cachedInterpreter!.getOutputTensor(0).shape;
       if (outputShape.isNotEmpty) {
-        _outputDim = outputShape.last;
+        _cachedOutputDim = outputShape.last;
       }
-      _isModelLoaded = true;
+      _cachedModelLoaded = true;
     } catch (e) {
-      _isModelLoaded = false;
+      _cachedModelLoaded = false;
     }
   }
 
@@ -42,7 +48,7 @@ class FaceRecognitionService {
         _interpreter!.run(input, output);
 
         final List<double> rawEmbedding = List<double>.from(output[0]);
-        return _l2Normalize(rawEmbedding);
+        return l2Normalize(rawEmbedding);
       } catch (_) {
         // Fallback if execution fails
       }
@@ -99,11 +105,11 @@ class FaceRecognitionService {
       combined[i] /= count;
     }
 
-    return _l2Normalize(combined);
+    return l2Normalize(combined);
   }
 
   /// L2 Unit Normalization: vector / ||vector||
-  static List<double> _l2Normalize(List<double> vector) {
+  static List<double> l2Normalize(List<double> vector) {
     double sumSq = 0.0;
     for (final val in vector) {
       sumSq += val * val;
@@ -141,10 +147,16 @@ class FaceRecognitionService {
       idx++;
     }
 
-    return _l2Normalize(vector);
+    return l2Normalize(vector);
   }
 
   void dispose() {
-    _interpreter?.close();
+    // Keep shared static interpreter cached for zero-latency screen transitions
+  }
+
+  static void closeSharedInterpreter() {
+    _cachedInterpreter?.close();
+    _cachedInterpreter = null;
+    _cachedModelLoaded = false;
   }
 }

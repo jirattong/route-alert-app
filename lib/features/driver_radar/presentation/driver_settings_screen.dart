@@ -13,7 +13,6 @@ class _DriverSettingsScreenState extends State<DriverSettingsScreen> {
   double _volume = 80.0;
   double _outerMeters = 1500.0; // 500 - 3000 เมตร
   double _innerMeters = 400.0;  // 100 - 800 เมตร
-
   @override
   void initState() {
     super.initState();
@@ -240,6 +239,7 @@ class _DriverSettingsScreenState extends State<DriverSettingsScreen> {
                       ],
                     ),
                   ),
+
                 ],
               ),
             ),

@@ -19,8 +19,12 @@ class LivenessResult {
 }
 
 class AntiSpoofingService {
-  Interpreter? _interpreter;
-  bool _isModelLoaded = false;
+  static Interpreter? _cachedInterpreter;
+  static bool _cachedModelLoaded = false;
+
+  Interpreter? get _interpreter => _cachedInterpreter;
+  bool get isModelLoaded => _cachedModelLoaded && _cachedInterpreter != null;
+  bool get _isModelLoaded => isModelLoaded;
 
   static const String modelPath = 'assets/models/anti_spoofing.tflite';
   static const int inputSize = 80;
@@ -29,12 +33,13 @@ class AntiSpoofingService {
   bool _blinkClosedStateSeen = false;
 
   Future<void> initialize() async {
+    if (_cachedModelLoaded && _cachedInterpreter != null) return;
     try {
       final options = InterpreterOptions()..threads = 2;
-      _interpreter = await Interpreter.fromAsset(modelPath, options: options);
-      _isModelLoaded = true;
+      _cachedInterpreter = await Interpreter.fromAsset(modelPath, options: options);
+      _cachedModelLoaded = true;
     } catch (e) {
-      _isModelLoaded = false;
+      _cachedModelLoaded = false;
     }
   }
 
@@ -50,12 +55,12 @@ class AntiSpoofingService {
     final double pitch = (face.headEulerAngleX ?? 0.0).abs();
     final double roll = (face.headEulerAngleZ ?? 0.0).abs();
 
-    // Eyes must be naturally open and head facing directly toward camera
-    return leftOpen >= 0.25 &&
-        rightOpen >= 0.25 &&
-        yaw <= 20.0 &&
-        pitch <= 20.0 &&
-        roll <= 18.0;
+    // Eyes must be open and head oriented toward camera (allowing natural phone holding pitch)
+    return leftOpen >= 0.18 &&
+        rightOpen >= 0.18 &&
+        yaw <= 25.0 &&
+        pitch <= 28.0 &&
+        roll <= 22.0;
   }
 
   /// Evaluates an interactive liveness challenge
@@ -191,6 +196,12 @@ class AntiSpoofingService {
   }
 
   void dispose() {
-    _interpreter?.close();
+    // Keep shared static interpreter cached for zero-latency screen transitions
+  }
+
+  static void closeSharedInterpreter() {
+    _cachedInterpreter?.close();
+    _cachedInterpreter = null;
+    _cachedModelLoaded = false;
   }
 }
