@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import '../../../core/models/incident_report.dart';
+import '../../../core/services/emergency_mqtt_service.dart';
 import '../../../core/services/hospital_location_service.dart';
 import '../../../core/services/incident_service.dart';
 
@@ -57,11 +58,49 @@ class _AgencyIncidentDetailScreenState
     setState(() => _isDispatching = true);
     final hospital = HospitalLocationService().currentProfile;
 
+    // เลือกรถพยาบาลที่ "ใกล้จุดเกิดเหตุที่สุดจริง" จากกองเรือที่ออนไลน์อยู่ตอนนี้
+    // (ก่อนหน้านี้เป็นการยิง ID ตายตัวเดียวเสมอ ไม่มีการคำนวณระยะเลย)
+    final incidentLocation =
+        LatLng(_currentIncident.latitude, _currentIncident.longitude);
+    final fleet = EmergencyMqttService().activeFleet;
+
+    if (fleet.isEmpty) {
+      if (mounted) {
+        setState(() => _isDispatching = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+                '⚠️ ไม่พบรถพยาบาลที่ออนไลน์อยู่ในขณะนี้ กรุณารอให้หน่วยกู้ชีพเปิดสถานะปฏิบัติงานก่อน'),
+            backgroundColor: Color(0xFFEF4444),
+          ),
+        );
+      }
+      return;
+    }
+
+    EmergencyVehicleData nearest = fleet.first;
+    double nearestDistMeters = EmergencyMqttService.calculateDistanceInMeters(
+      incidentLocation,
+      LatLng(nearest.latitude, nearest.longitude),
+    );
+    for (final amb in fleet.skip(1)) {
+      final dist = EmergencyMqttService.calculateDistanceInMeters(
+        incidentLocation,
+        LatLng(amb.latitude, amb.longitude),
+      );
+      if (dist < nearestDistMeters) {
+        nearest = amb;
+        nearestDistMeters = dist;
+      }
+    }
+
     final success = await IncidentService().dispatchIncidentByHospital(
       id: _currentIncident.id,
-      ambulanceId: 'AMB-1669-01',
-      ambulancePlate: 'กขค123 (เชียงใหม่)',
-      ambulanceCallSign: 'หน่วยกู้ชีพนครพิงค์ 01',
+      ambulanceId: nearest.id,
+      ambulancePlate: nearest.plateNumber.isNotEmpty
+          ? nearest.plateNumber
+          : nearest.callSign,
+      ambulanceCallSign: nearest.callSign,
       hospitalName: hospital.hospitalName,
       hospitalLatitude: hospital.latitude,
       hospitalLongitude: hospital.longitude,
@@ -70,10 +109,12 @@ class _AgencyIncidentDetailScreenState
     if (mounted) {
       setState(() => _isDispatching = false);
       if (success) {
+        final distKm = (nearestDistMeters / 1000).toStringAsFixed(1);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('✅ ยืนยันรับเคสและส่งต่อให้รถพยาบาล AMB-1669-01 เรียบร้อยแล้ว'),
-            backgroundColor: Color(0xFF00A896),
+          SnackBar(
+            content: Text(
+                '✅ ยืนยันรับเคสและส่งต่อให้ ${nearest.callSign} (ใกล้ที่สุด $distKm กม.) เรียบร้อยแล้ว'),
+            backgroundColor: const Color(0xFF00A896),
           ),
         );
       }

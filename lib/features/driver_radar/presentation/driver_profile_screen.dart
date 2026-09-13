@@ -284,7 +284,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
               width: double.infinity,
               height: 48,
               child: ElevatedButton(
-                onPressed: () {
+                onPressed: () async {
                   if (newPassCtrl.text.length < 6) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(content: Text('รหัสผ่านใหม่ต้องมีความยาวอย่างน้อย 6 ตัวอักษร')),
@@ -297,6 +297,27 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                     );
                     return;
                   }
+
+                  // ตรวจรหัสผ่านเดิมจริงก่อนอนุญาตให้เปลี่ยน (เดิมไม่เช็คเลย)
+                  final authResult = await FaceAuthRepository.authenticateWithPassword(
+                    email: _currentUser!.email,
+                    password: oldPassCtrl.text,
+                  );
+                  if (!authResult.isSuccess) {
+                    if (ctx.mounted) {
+                      ScaffoldMessenger.of(ctx).showSnackBar(
+                        const SnackBar(content: Text('รหัสผ่านเดิมไม่ถูกต้อง')),
+                      );
+                    }
+                    return;
+                  }
+
+                  await FaceAuthRepository.updateUserPassword(
+                    _currentUser!.email,
+                    newPassCtrl.text,
+                  );
+
+                  if (!ctx.mounted) return;
                   Navigator.pop(ctx);
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
@@ -314,6 +335,70 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  // ลบบัญชี + ข้อมูลใบหน้าถาวร (รองรับสิทธิ "ขอให้ลบข้อมูล" ตาม PDPA)
+  void _showDeleteAccountDialog() {
+    if (_currentUser == null || _currentUser?.id == 'guest') return;
+    final passCtrl = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('ลบบัญชีและข้อมูลของฉัน'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'การลบบัญชีจะลบข้อมูลใบหน้า รหัสผ่าน และโปรไฟล์ทั้งหมดอย่างถาวร กู้คืนไม่ได้',
+              style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: passCtrl,
+              obscureText: true,
+              decoration: const InputDecoration(labelText: 'ยืนยันด้วยรหัสผ่านปัจจุบัน'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('ยกเลิก'),
+          ),
+          TextButton(
+            onPressed: () async {
+              final authResult = await FaceAuthRepository.authenticateWithPassword(
+                email: _currentUser!.email,
+                password: passCtrl.text,
+              );
+              if (!authResult.isSuccess) {
+                if (ctx.mounted) {
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                    const SnackBar(content: Text('รหัสผ่านไม่ถูกต้อง')),
+                  );
+                }
+                return;
+              }
+
+              await FaceAuthRepository.deleteAccount(_currentUser!.email);
+
+              if (!ctx.mounted) return;
+              Navigator.pop(ctx);
+              if (!mounted) return;
+              Navigator.pushAndRemoveUntil(
+                context,
+                MaterialPageRoute(builder: (context) => const FaceLoginScreen()),
+                (route) => false,
+              );
+            },
+            child: const Text('ลบถาวร',
+                style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+          ),
+        ],
       ),
     );
   }
@@ -465,6 +550,17 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                               borderRadius: BorderRadius.circular(24),
                             ),
                             elevation: 0,
+                          ),
+                        ),
+                      ),
+                    if (_currentUser != null && _currentUser?.id != 'guest')
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: TextButton(
+                          onPressed: _showDeleteAccountDialog,
+                          child: const Text(
+                            'ลบบัญชีและข้อมูลของฉันถาวร (Delete Account)',
+                            style: TextStyle(color: Colors.redAccent, fontSize: 13),
                           ),
                         ),
                       ),

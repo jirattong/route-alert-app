@@ -12,6 +12,7 @@ class IncidentReport {
   final String address;
   final String? photoBase64;
   final List<String> photosBase64;
+  final List<String> scenePhotosBase64; // รูปที่ทีมรถพยาบาลถ่ายหน้างานจริง
   final String reporterName;
   final String reporterEmail;
   final String reporterPhone;
@@ -44,6 +45,7 @@ class IncidentReport {
     required this.address,
     this.photoBase64,
     this.photosBase64 = const [],
+    this.scenePhotosBase64 = const [],
     required this.reporterName,
     required this.reporterEmail,
     this.reporterPhone = '',
@@ -122,6 +124,7 @@ class IncidentReport {
       'address': address,
       'photoBase64': photoBase64 ?? (photosBase64.isNotEmpty ? photosBase64.first : null),
       'photosBase64': photosBase64,
+      'scenePhotosBase64': scenePhotosBase64,
       'reporterName': reporterName,
       'reporterEmail': reporterEmail,
       'reporterPhone': reporterPhone,
@@ -162,6 +165,10 @@ class IncidentReport {
       address: map['address'] ?? '',
       photoBase64: map['photoBase64'] ?? (parsedPhotos.isNotEmpty ? parsedPhotos.first : null),
       photosBase64: parsedPhotos,
+      scenePhotosBase64: (map['scenePhotosBase64'] as List<dynamic>?)
+              ?.map((e) => e.toString())
+              .toList() ??
+          const [],
       reporterName: map['reporterName'] ?? 'ผู้ใช้งาน RouteAlert',
       reporterEmail: map['reporterEmail'] ?? '',
       reporterPhone: map['reporterPhone'] ?? '',
@@ -202,6 +209,7 @@ class IncidentReport {
     String? address,
     String? photoBase64,
     List<String>? photosBase64,
+    List<String>? scenePhotosBase64,
     String? reporterName,
     String? reporterEmail,
     String? reporterPhone,
@@ -234,6 +242,7 @@ class IncidentReport {
       address: address ?? this.address,
       photoBase64: photoBase64 ?? this.photoBase64,
       photosBase64: photosBase64 ?? this.photosBase64,
+      scenePhotosBase64: scenePhotosBase64 ?? this.scenePhotosBase64,
       reporterName: reporterName ?? this.reporterName,
       reporterEmail: reporterEmail ?? this.reporterEmail,
       reporterPhone: reporterPhone ?? this.reporterPhone,

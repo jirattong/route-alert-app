@@ -196,4 +196,90 @@ class ImageUtils {
 
     return enhanced;
   }
+
+  /// ตรวจสอบคุณภาพภาพใบหน้าก่อนบันทึกลงทะเบียน (กันภาพเบลอ/มืด/สว่างจ้าเกินไป
+  /// ปนเข้าไปในฐานข้อมูล embedding ซึ่งจะทำให้การจดจำใบหน้าแม่นยำน้อยลงในระยะยาว)
+  static FaceImageQualityResult assessFaceImageQuality(img.Image face) {
+    if (face.width < 20 || face.height < 20) {
+      return FaceImageQualityResult(
+        isGoodQuality: false,
+        sharpness: 0,
+        brightness: 0,
+        reason: 'ภาพใบหน้าเล็กเกินไป',
+      );
+    }
+
+    final grayscale = img.grayscale(face);
+    final int w = grayscale.width;
+    final int h = grayscale.height;
+
+    double sumLum = 0;
+    double sum = 0;
+    double sumSq = 0;
+    int count = 0;
+
+    for (int y = 1; y < h - 1; y += 2) {
+      for (int x = 1; x < w - 1; x += 2) {
+        final double center = grayscale.getPixel(x, y).r.toDouble();
+        sumLum += center;
+
+        final double top = grayscale.getPixel(x, y - 1).r.toDouble();
+        final double bottom = grayscale.getPixel(x, y + 1).r.toDouble();
+        final double left = grayscale.getPixel(x - 1, y).r.toDouble();
+        final double right = grayscale.getPixel(x + 1, y).r.toDouble();
+        final double laplacian = 4 * center - top - bottom - left - right;
+
+        sum += laplacian;
+        sumSq += laplacian * laplacian;
+        count++;
+      }
+    }
+
+    if (count == 0) {
+      return FaceImageQualityResult(
+        isGoodQuality: false,
+        sharpness: 0,
+        brightness: 0,
+        reason: 'ไม่สามารถประมวลผลภาพได้',
+      );
+    }
+
+    final double avgBrightness = sumLum / count;
+    final double meanLap = sum / count;
+    final double sharpness = ((sumSq / count) - (meanLap * meanLap)).abs();
+
+    const double minSharpness = 25.0; // ต่ำกว่านี้ถือว่าภาพเบลอ
+    const double minBrightness = 40.0; // ต่ำกว่านี้ถือว่ามืดเกินไป
+    const double maxBrightness = 235.0; // สูงกว่านี้ถือว่าสว่างจ้าเกินไป
+
+    String? reason;
+    if (sharpness < minSharpness) {
+      reason = 'ภาพเบลอเกินไป กรุณาถือกล้องให้นิ่ง';
+    } else if (avgBrightness < minBrightness) {
+      reason = 'แสงน้อยเกินไป กรุณาหาที่ที่มีแสงสว่างขึ้น';
+    } else if (avgBrightness > maxBrightness) {
+      reason = 'แสงจ้าเกินไป กรุณาหลบแสงจ้าด้านหลัง';
+    }
+
+    return FaceImageQualityResult(
+      isGoodQuality: reason == null,
+      sharpness: sharpness,
+      brightness: avgBrightness,
+      reason: reason,
+    );
+  }
+}
+
+class FaceImageQualityResult {
+  final bool isGoodQuality;
+  final double sharpness;
+  final double brightness;
+  final String? reason;
+
+  FaceImageQualityResult({
+    required this.isGoodQuality,
+    required this.sharpness,
+    required this.brightness,
+    this.reason,
+  });
 }

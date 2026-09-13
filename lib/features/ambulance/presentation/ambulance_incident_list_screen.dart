@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../core/models/incident_report.dart';
+import '../../../core/services/ambulance_storage_service.dart';
 import '../../../core/services/incident_service.dart';
 import 'ambulance_incident_detail_screen.dart';
 
@@ -255,10 +256,12 @@ class _AmbulanceIncidentListScreenState
                     onPressed: isAccepted
                         ? null
                         : () async {
+                            final profile =
+                                await AmbulanceStorageService.loadProfile();
                             await IncidentService().acceptIncidentByAmbulance(
                               id: item.id,
-                              ambulancePlate: 'กขค123 (รถของเรา)',
-                              ambulanceId: 'AMB-1669-01',
+                              ambulancePlate: profile['plateNumber']!,
+                              ambulanceId: profile['ambulanceId']!,
                             );
                             if (mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(

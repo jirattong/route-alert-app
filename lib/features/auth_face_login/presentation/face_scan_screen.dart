@@ -503,6 +503,20 @@ class _FaceScanScreenState extends State<FaceScanScreen>
         }
 
         if (inTargetAngle) {
+          // ตรวจคุณภาพภาพก่อนบันทึกลงทะเบียนจริง กันภาพเบลอ/แสงไม่พอปนเข้า
+          // ฐานข้อมูล embedding ซึ่งจะทำให้จำใบหน้าแม่นยำน้อยลงในระยะยาว
+          final quality = ImageUtils.assessFaceImageQuality(croppedFace);
+          if (!quality.isGoodQuality) {
+            if (mounted) {
+              setState(() {
+                _statusDetail = quality.reason ?? 'คุณภาพภาพไม่เพียงพอ กรุณาลองใหม่';
+                _statusColor = const Color(0xFFD97706);
+              });
+            }
+            _isEvaluatingBiometrics = false;
+            return;
+          }
+
           final embedding = await _recognitionService.extractFaceEmbedding(croppedFace);
           _currentStepEmbeddings.add(embedding);
 

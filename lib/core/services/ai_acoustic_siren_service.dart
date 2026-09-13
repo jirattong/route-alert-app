@@ -13,12 +13,14 @@ class SirenAudioDetectionResult {
     required this.sirenPattern,
     required this.confidence,
     required this.decibelLevel,
-    this.modelName = 'Mel-Spectrogram 2D-CNN Siren Classifier',
+    this.modelName = 'Simulated Placeholder (Random-based, no real microphone input)',
   });
 }
 
-/// AI Acoustic Siren Detection Service
-/// Emulates Microphone Audio Spectrogram & 2D-CNN Frequency Classifier
+/// ⚠️ PLACEHOLDER / NOT WIRED TO ANY SCREEN — ไม่มีหน้าจอไหนในแอปเรียกใช้คลาสนี้จริง
+/// ค่า dB และผลตรวจจับทั้งหมดสุ่มขึ้นด้วย math.Random() ไม่มีการเข้าถึงไมโครโฟน,
+/// ไม่มีการประมวลผลสัญญาณเสียง, ไม่มี Spectrogram/CNN จริงตามที่ชื่อคลาส/field แนะนำไว้
+/// ถ้าจะใช้งานจริงต้องเพิ่ม mic capture + dB/feature extraction จริงและเชื่อมเข้า UI ก่อน
 class AiAcousticSirenService {
   static final AiAcousticSirenService _instance =
       AiAcousticSirenService._internal();

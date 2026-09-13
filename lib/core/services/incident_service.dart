@@ -157,6 +157,35 @@ class IncidentService {
     }
   }
 
+  /// Ambulance role: Appends a real scene photo (base64) taken by the crew on-site
+  Future<bool> addScenePhoto(String id, String photoBase64) async {
+    try {
+      final local = await getLocalIncidents();
+      final idx = local.indexWhere((i) => i.id == id);
+      List<String> updatedPhotos = [photoBase64];
+      if (idx != -1) {
+        updatedPhotos = [...local[idx].scenePhotosBase64, photoBase64];
+        local[idx] = local[idx].copyWith(scenePhotosBase64: updatedPhotos);
+        await _saveToLocalCache(local);
+        if (!_incidentsController.isClosed) {
+          _incidentsController.add(local);
+        }
+      }
+
+      try {
+        await FirebaseFirestore.instance
+            .collection(_collectionName)
+            .doc(id)
+            .update({'scenePhotosBase64': updatedPhotos});
+      } catch (_) {}
+
+      return true;
+    } catch (e) {
+      debugPrint('addScenePhoto error: $e');
+      return false;
+    }
+  }
+
   /// Hospital role: Confirm incident and dispatch ambulance with pinned hospital location
   Future<bool> dispatchIncidentByHospital({
     required String id,

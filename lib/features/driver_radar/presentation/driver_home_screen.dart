@@ -40,7 +40,9 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
   final MapController _mapController = MapController();
 
   LatLng _currentLocation = const LatLng(19.0284, 99.8962);
-  final double _driverHeading = 45.0; // Heading degree (NE)
+  // ทิศทางการเคลื่อนที่จริงของ Driver คำนวณจากพิกัด GPS 2 จุดล่าสุด (0-360 องศา)
+  double _driverHeading = 45.0;
+  LatLng? _lastDriverHeadingRefPos;
   final double _driverSpeed = 50.0; // km/h
 
   LatLng? _ambulanceLocation;
@@ -142,6 +144,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
         setState(() {
           _ambulanceLocation = LatLng(data.latitude, data.longitude);
           _ambulanceSpeed = data.speed;
+          _ambulanceHeading = data.heading;
           _ambulanceRoutePoints = data.routePoints;
           _ambulanceTurnIntent = data.turnIntent;
           _hasLiveAmbulance = true;
@@ -228,11 +231,28 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
     _locationSubscription =
         LocationService.getLiveLocationStream().listen((newPos) {
       if (!mounted) return;
+      _updateDriverHeadingFromMovement(newPos);
       setState(() => _currentLocation = newPos);
       if (_isSimulating || _hasLiveAmbulance) {
         _runAiTrajectoryEvaluation();
       }
     });
+  }
+
+  // อัปเดตทิศทางการเคลื่อนที่จริงของ Driver จากพิกัด GPS 2 จุดล่าสุด
+  // (ข้ามการอัปเดตถ้าขยับน้อยกว่า 2 เมตร เพื่อกันทิศทางกระตุกตอนสัญญาณ GPS นิ่ง)
+  void _updateDriverHeadingFromMovement(LatLng newPos) {
+    if (_lastDriverHeadingRefPos != null) {
+      final movedMeters = LocationService.calculateDistanceInMeters(
+          _lastDriverHeadingRefPos!, newPos);
+      if (movedMeters >= 2.0) {
+        _driverHeading = LocationService.calculateBearingDeg(
+            _lastDriverHeadingRefPos!, newPos);
+        _lastDriverHeadingRefPos = newPos;
+      }
+    } else {
+      _lastDriverHeadingRefPos = newPos;
+    }
   }
 
   void _cycleSimulationMode() {

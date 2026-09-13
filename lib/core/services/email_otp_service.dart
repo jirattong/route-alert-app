@@ -123,11 +123,11 @@ class EmailOtpService {
 
   /// Dispatches email via Gmail SMTP (Allows sending to ANY recipient)
   static Future<bool> _sendViaGmailSmtp(String toEmail, String otpCode) async {
-    final gmailUser = dotenv.env['GMAIL_USER'] ?? 'yuttapatandy@gmail.com';
-    final gmailPassword =
-        dotenv.env['GMAIL_APP_PASSWORD'] ?? 'xolczbxknghltkqx';
+    final gmailUser = dotenv.env['GMAIL_USER'] ?? '';
+    final gmailPassword = dotenv.env['GMAIL_APP_PASSWORD'] ?? '';
 
     if (gmailUser.isEmpty || gmailPassword.isEmpty) {
+      debugPrint('[Gmail SMTP] Skipped: GMAIL_USER/GMAIL_APP_PASSWORD not set in .env');
       return false;
     }
 

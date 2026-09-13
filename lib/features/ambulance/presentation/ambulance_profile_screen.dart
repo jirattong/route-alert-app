@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../../../core/services/ambulance_storage_service.dart';
+import '../../../core/services/incident_service.dart';
 import '../../auth_face_login/data/models/user_face_profile.dart';
 import '../../auth_face_login/data/services/face_auth_repository.dart';
 import '../../auth_face_login/presentation/face_login_screen.dart';
@@ -16,15 +18,18 @@ class _AmbulanceProfileScreenState extends State<AmbulanceProfileScreen> {
   String _userEmail = 'ambulance@routealert.com';
   String _username = 'นายสมชาย กู้ชีพ';
   String _vehiclePlate = 'กขค123 (เชียงใหม่)';
+  String _ambulanceUnitId = 'AMB-0000';
+  String _ambulanceCallSign = 'หน่วยกู้ชีพ';
   final String _hospitalUnit = 'รพ.มหาราชนครเชียงใหม่';
   String _phone = '099XXXXXXX';
-  final int _completedCases = 128;
+  int _completedCases = 0;
   bool _isOnDuty = true;
 
   @override
   void initState() {
     super.initState();
     _loadUserData();
+    _loadAmbulanceProfile();
   }
 
   Future<void> _loadUserData() async {
@@ -35,6 +40,33 @@ class _AmbulanceProfileScreenState extends State<AmbulanceProfileScreen> {
         _username = user.name;
         _userEmail = user.email;
       });
+    }
+  }
+
+  // โหลดรหัสหน่วย/ทะเบียนจริงของเครื่องนี้ (ใช้ค่าเดียวกับที่ broadcast จริงผ่าน MQTT)
+  Future<void> _loadAmbulanceProfile() async {
+    final profile = await AmbulanceStorageService.loadProfile();
+    final onDuty = await AmbulanceStorageService.loadOnDuty();
+    if (!mounted) return;
+    setState(() {
+      _ambulanceUnitId = profile['ambulanceId']!;
+      _ambulanceCallSign = profile['callSign']!;
+      _vehiclePlate = profile['plateNumber']!;
+      _isOnDuty = onDuty;
+    });
+    _loadCompletedCases();
+  }
+
+  // นับจำนวนเคสที่ "หน่วยนี้" ปิดงานสำเร็จจริง (เดิม hardcode 128 คงที่)
+  Future<void> _loadCompletedCases() async {
+    await IncidentService().initialize();
+    final incidents = await IncidentService().getLocalIncidents();
+    final count = incidents
+        .where((i) =>
+            i.assignedAmbulanceId == _ambulanceUnitId && i.status == 'resolved')
+        .length;
+    if (mounted) {
+      setState(() => _completedCases = count);
     }
   }
 
@@ -115,6 +147,17 @@ class _AmbulanceProfileScreenState extends State<AmbulanceProfileScreen> {
 
                     // --- ปุ่ม ออกจากระบบ (Logout) สไตล์สีแดงตาม Figma ---
                     _buildLogoutButton(context),
+
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: TextButton(
+                        onPressed: () => _showDeleteAccountDialog(context),
+                        child: const Text(
+                          'ลบบัญชีและข้อมูลของฉันถาวร (Delete Account)',
+                          style: TextStyle(color: Colors.redAccent, fontSize: 13),
+                        ),
+                      ),
+                    ),
 
                     const SizedBox(height: 20),
                   ],
@@ -229,6 +272,15 @@ class _AmbulanceProfileScreenState extends State<AmbulanceProfileScreen> {
           ),
           const SizedBox(height: 4),
           Text(
+            'รหัสหน่วย: $_ambulanceUnitId • $_ambulanceCallSign',
+            style: const TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: Colors.black45,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
             'Email : $_userEmail',
             style: TextStyle(
               fontSize: 14,
@@ -256,14 +308,14 @@ class _AmbulanceProfileScreenState extends State<AmbulanceProfileScreen> {
                   child: Stack(
                     alignment: Alignment.center,
                     children: [
-                      const SizedBox(
+                      SizedBox(
                         width: 120,
                         height: 120,
                         child: CircularProgressIndicator(
-                          value: 0.85,
+                          value: (_completedCases / 50.0).clamp(0.0, 1.0),
                           strokeWidth: 12,
-                          backgroundColor: Color(0xFFFFEAEA),
-                          valueColor: AlwaysStoppedAnimation<Color>(
+                          backgroundColor: const Color(0xFFFFEAEA),
+                          valueColor: const AlwaysStoppedAnimation<Color>(
                               Color(0xFFEB5757)), // วงกลมสีแดงสด
                         ),
                       ),
@@ -361,6 +413,7 @@ class _AmbulanceProfileScreenState extends State<AmbulanceProfileScreen> {
               inactiveTrackColor: Colors.grey.shade400,
               onChanged: (val) {
                 setState(() => _isOnDuty = val);
+                AmbulanceStorageService.setOnDuty(val);
               },
             ),
           ),
@@ -397,6 +450,70 @@ class _AmbulanceProfileScreenState extends State<AmbulanceProfileScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  // ลบบัญชี + ข้อมูลใบหน้าถาวร (รองรับสิทธิ "ขอให้ลบข้อมูล" ตาม PDPA)
+  void _showDeleteAccountDialog(BuildContext context) {
+    if (_currentUser == null) return;
+    final passCtrl = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('ลบบัญชีและข้อมูลของฉัน'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'การลบบัญชีจะลบข้อมูลใบหน้า รหัสผ่าน และโปรไฟล์ทั้งหมดอย่างถาวร กู้คืนไม่ได้',
+              style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: passCtrl,
+              obscureText: true,
+              decoration: const InputDecoration(labelText: 'ยืนยันด้วยรหัสผ่านปัจจุบัน'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('ยกเลิก'),
+          ),
+          TextButton(
+            onPressed: () async {
+              final authResult = await FaceAuthRepository.authenticateWithPassword(
+                email: _currentUser!.email,
+                password: passCtrl.text,
+              );
+              if (!authResult.isSuccess) {
+                if (ctx.mounted) {
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                    const SnackBar(content: Text('รหัสผ่านไม่ถูกต้อง')),
+                  );
+                }
+                return;
+              }
+
+              await FaceAuthRepository.deleteAccount(_currentUser!.email);
+
+              if (!ctx.mounted) return;
+              Navigator.pop(ctx);
+              if (!context.mounted) return;
+              Navigator.pushAndRemoveUntil(
+                context,
+                MaterialPageRoute(builder: (context) => const FaceLoginScreen()),
+                (route) => false,
+              );
+            },
+            child: const Text('ลบถาวร',
+                style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+          ),
+        ],
       ),
     );
   }
@@ -484,18 +601,25 @@ class _AmbulanceProfileScreenState extends State<AmbulanceProfileScreen> {
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
-                  onPressed: () {
+                  onPressed: () async {
+                    await AmbulanceStorageService.saveProfile(
+                      ambulanceId: _ambulanceUnitId,
+                      plateNumber: carCtrl.text,
+                      callSign: _ambulanceCallSign,
+                    );
                     setState(() {
                       _username = nameCtrl.text;
                       _userEmail = emailCtrl.text;
                       _vehiclePlate = carCtrl.text;
                       _phone = phoneCtrl.text;
                     });
-                    Navigator.pop(ctx);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                          content: Text('บันทึกข้อมูลเรียบร้อยแล้ว')),
-                    );
+                    if (ctx.mounted) Navigator.pop(ctx);
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                            content: Text('บันทึกข้อมูลเรียบร้อยแล้ว')),
+                      );
+                    }
                   },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFFEB5757),
@@ -565,7 +689,37 @@ class _AmbulanceProfileScreenState extends State<AmbulanceProfileScreen> {
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
-                  onPressed: () {
+                  onPressed: () async {
+                    if (newPassCtrl.text.length < 6) {
+                      ScaffoldMessenger.of(ctx).showSnackBar(
+                        const SnackBar(content: Text('รหัสผ่านใหม่ต้องมีความยาวอย่างน้อย 6 ตัวอักษร')),
+                      );
+                      return;
+                    }
+                    if (newPassCtrl.text != confirmPassCtrl.text) {
+                      ScaffoldMessenger.of(ctx).showSnackBar(
+                        const SnackBar(content: Text('รหัสผ่านใหม่ไม่ตรงกัน กรุณาตรวจสอบอีกครั้ง')),
+                      );
+                      return;
+                    }
+
+                    // ตรวจรหัสผ่านเดิมจริงก่อนอนุญาตให้เปลี่ยน (เดิมไม่เช็คเลย)
+                    final authResult = await FaceAuthRepository.authenticateWithPassword(
+                      email: _userEmail,
+                      password: oldPassCtrl.text,
+                    );
+                    if (!authResult.isSuccess) {
+                      if (ctx.mounted) {
+                        ScaffoldMessenger.of(ctx).showSnackBar(
+                          const SnackBar(content: Text('รหัสผ่านเดิมไม่ถูกต้อง')),
+                        );
+                      }
+                      return;
+                    }
+
+                    await FaceAuthRepository.updateUserPassword(_userEmail, newPassCtrl.text);
+
+                    if (!ctx.mounted) return;
                     Navigator.pop(ctx);
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(

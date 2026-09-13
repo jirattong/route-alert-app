@@ -32,8 +32,6 @@ class _AgencyHomeScreenState extends State<AgencyHomeScreen> {
   StreamSubscription<EmergencyVehicleData>? _mqttSub;
   StreamSubscription<List<IncidentReport>>? _incidentSub;
 
-  bool _isErAvailable = true;
-
   @override
   void initState() {
     super.initState();
@@ -484,16 +482,15 @@ class _AgencyHomeScreenState extends State<AgencyHomeScreen> {
               ),
               GestureDetector(
                 onTap: () {
-                  setState(() {
-                    _isErAvailable = !_isErAvailable;
-                  });
+                  HospitalLocationService()
+                      .updateErAvailability(!_hospitalProfile.isErAvailable);
                   HapticFeedback.mediumImpact();
                 },
                 child: Container(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: _isErAvailable
+                    color: _hospitalProfile.isErAvailable
                         ? const Color(0xFF00A896).withValues(alpha: 0.15)
                         : Colors.redAccent.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(12),
@@ -502,21 +499,21 @@ class _AgencyHomeScreenState extends State<AgencyHomeScreen> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Icon(
-                        _isErAvailable
+                        _hospitalProfile.isErAvailable
                             ? Icons.check_circle
                             : Icons.warning_rounded,
                         size: 13,
-                        color: _isErAvailable
+                        color: _hospitalProfile.isErAvailable
                             ? const Color(0xFF00A896)
                             : Colors.redAccent,
                       ),
                       const SizedBox(width: 4),
                       Text(
-                        _isErAvailable ? 'ER ว่าง' : 'ER เต็ม',
+                        _hospitalProfile.isErAvailable ? 'ER ว่าง' : 'ER เต็ม',
                         style: TextStyle(
                           fontSize: 10.5,
                           fontWeight: FontWeight.bold,
-                          color: _isErAvailable
+                          color: _hospitalProfile.isErAvailable
                               ? const Color(0xFF00A896)
                               : Colors.redAccent,
                         ),
@@ -971,21 +968,48 @@ class _AgencyHomeScreenState extends State<AgencyHomeScreen> {
             children: [
               Expanded(
                 child: ElevatedButton.icon(
-                  onPressed: () {
-                    setState(() {
-                      amb['isPrepared'] = !isPrepared;
-                    });
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        backgroundColor: isPrepared
-                            ? Colors.grey.shade800
-                            : const Color(0xFF00A896),
-                        content: Text(isPrepared
-                            ? 'ยกเลิกการเตรียมเตียงห้องฉุกเฉิน'
-                            : 'ยืนยันความพร้อมเตียงและทีมแพทย์ฉุกเฉินเรียบร้อย'),
-                        duration: const Duration(seconds: 2),
-                      ),
+                  onPressed: () async {
+                    // หาเคสที่มอบหมายให้รถพยาบาลคันนี้จริง เพื่อบันทึกสถานะ ER
+                    // ลงเคสนั้นจริง (ก่อนหน้านี้เป็นแค่ local state ไม่ persist)
+                    final matchedIncident =
+                        _incidents.cast<IncidentReport?>().firstWhere(
+                      (i) =>
+                          i?.assignedAmbulanceId == amb['id'] &&
+                          i?.status != 'resolved' &&
+                          i?.status != 'cancelled',
+                      orElse: () => null,
                     );
+
+                    if (matchedIncident == null) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                              'ยังไม่พบเคสที่มอบหมายให้รถพยาบาลคันนี้ในขณะนี้'),
+                          backgroundColor: Colors.grey,
+                        ),
+                      );
+                      return;
+                    }
+
+                    final success = await IncidentService()
+                        .setErPrepared(matchedIncident.id, !isPrepared);
+
+                    if (success && mounted) {
+                      setState(() {
+                        amb['isPrepared'] = !isPrepared;
+                      });
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          backgroundColor: isPrepared
+                              ? Colors.grey.shade800
+                              : const Color(0xFF00A896),
+                          content: Text(isPrepared
+                              ? 'ยกเลิกการเตรียมเตียงห้องฉุกเฉิน'
+                              : 'ยืนยันความพร้อมเตียงและทีมแพทย์ฉุกเฉินเรียบร้อย'),
+                          duration: const Duration(seconds: 2),
+                        ),
+                      );
+                    }
                   },
                   icon: Icon(
                     isPrepared

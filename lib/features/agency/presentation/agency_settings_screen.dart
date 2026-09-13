@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../core/services/agency_storage_service.dart';
 
 class AgencySettingsScreen extends StatefulWidget {
   const AgencySettingsScreen({super.key});
@@ -18,6 +19,36 @@ class _AgencySettingsScreenState extends State<AgencySettingsScreen> {
   bool _voiceAnnouncement = true; // เตือนด้วยเสียงพูด (TTS)
   bool _screenFlashAlert = true; // กะพริบหน้าจอ
 
+  @override
+  void initState() {
+    super.initState();
+    _loadSettings();
+  }
+
+  Future<void> _loadSettings() async {
+    final settings = await AgencyStorageService.loadSettings();
+    if (mounted) {
+      setState(() {
+        _isBackgroundMode = settings['background'];
+        _volume = settings['volume'];
+        _alertDistance = settings['alertDistanceKm'];
+        _criticalOnly = settings['criticalOnly'];
+        _voiceAnnouncement = settings['voiceAnnouncement'];
+        _screenFlashAlert = settings['screenFlashAlert'];
+      });
+    }
+  }
+
+  void _persistSettings() {
+    AgencyStorageService.saveSettings(
+      background: _isBackgroundMode,
+      volume: _volume,
+      alertDistanceKm: _alertDistance,
+      criticalOnly: _criticalOnly,
+      voiceAnnouncement: _voiceAnnouncement,
+      screenFlashAlert: _screenFlashAlert,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -40,7 +71,10 @@ class _AgencySettingsScreenState extends State<AgencySettingsScreen> {
                       title: 'ทำงานเบื้องหลัง',
                       subtitle: '(Background)',
                       value: _isBackgroundMode,
-                      onChanged: (val) => setState(() => _isBackgroundMode = val),
+                      onChanged: (val) {
+                        setState(() => _isBackgroundMode = val);
+                        _persistSettings();
+                      },
                     ),
                     const SizedBox(height: 16),
 
@@ -59,6 +93,7 @@ class _AgencySettingsScreenState extends State<AgencySettingsScreen> {
                         onChanged: (val) {
                           setState(() => _volume = val);
                         },
+                        onChangeEnd: (_) => _persistSettings(),
                       ),
                     ),
                     const SizedBox(height: 16),
@@ -79,6 +114,7 @@ class _AgencySettingsScreenState extends State<AgencySettingsScreen> {
                         onChanged: (val) {
                           setState(() => _alertDistance = val);
                         },
+                        onChangeEnd: (_) => _persistSettings(),
                       ),
                     ),
                     
@@ -104,7 +140,10 @@ class _AgencySettingsScreenState extends State<AgencySettingsScreen> {
                       title: 'แจ้งเตือนเฉพาะเคสวิกฤต',
                       subtitle: '(Critical / Code Red Only)',
                       value: _criticalOnly,
-                      onChanged: (val) => setState(() => _criticalOnly = val),
+                      onChanged: (val) {
+                        setState(() => _criticalOnly = val);
+                        _persistSettings();
+                      },
                     ),
                     const SizedBox(height: 16),
 
@@ -113,7 +152,10 @@ class _AgencySettingsScreenState extends State<AgencySettingsScreen> {
                       title: 'อ่านรายละเอียดเคสด้วยเสียงพูด',
                       subtitle: '(Voice Announcement)',
                       value: _voiceAnnouncement,
-                      onChanged: (val) => setState(() => _voiceAnnouncement = val),
+                      onChanged: (val) {
+                        setState(() => _voiceAnnouncement = val);
+                        _persistSettings();
+                      },
                     ),
                     const SizedBox(height: 16),
 
@@ -122,7 +164,10 @@ class _AgencySettingsScreenState extends State<AgencySettingsScreen> {
                       title: 'กะพริบหน้าจอเมื่อรถเข้าใกล้',
                       subtitle: '(Screen Flash Alert)',
                       value: _screenFlashAlert,
-                      onChanged: (val) => setState(() => _screenFlashAlert = val),
+                      onChanged: (val) {
+                        setState(() => _screenFlashAlert = val);
+                        _persistSettings();
+                      },
                     ),
                     const SizedBox(height: 30),
                   ],

@@ -12,6 +12,7 @@ class HospitalProfile {
   final double longitude;
   final String address;
   final String erPhone;
+  final bool isErAvailable;
   final DateTime lastUpdated;
 
   const HospitalProfile({
@@ -21,6 +22,7 @@ class HospitalProfile {
     required this.longitude,
     required this.address,
     required this.erPhone,
+    this.isErAvailable = true,
     required this.lastUpdated,
   });
 
@@ -34,6 +36,7 @@ class HospitalProfile {
       'longitude': longitude,
       'address': address,
       'erPhone': erPhone,
+      'isErAvailable': isErAvailable,
       'lastUpdated': lastUpdated.toIso8601String(),
     };
   }
@@ -46,6 +49,7 @@ class HospitalProfile {
       longitude: (map['longitude'] as num?)?.toDouble() ?? 99.8962,
       address: map['address'] ?? 'อำเภอเมือง จังหวัดเชียงใหม่',
       erPhone: map['erPhone'] ?? '053-936150 (สายด่วน ER)',
+      isErAvailable: map['isErAvailable'] ?? true,
       lastUpdated: map['lastUpdated'] != null
           ? DateTime.tryParse(map['lastUpdated'].toString()) ?? DateTime.now()
           : DateTime.now(),
@@ -63,6 +67,7 @@ class HospitalProfile {
     double? longitude,
     String? address,
     String? erPhone,
+    bool? isErAvailable,
     DateTime? lastUpdated,
   }) {
     return HospitalProfile(
@@ -72,6 +77,7 @@ class HospitalProfile {
       longitude: longitude ?? this.longitude,
       address: address ?? this.address,
       erPhone: erPhone ?? this.erPhone,
+      isErAvailable: isErAvailable ?? this.isErAvailable,
       lastUpdated: lastUpdated ?? this.lastUpdated,
     );
   }
@@ -284,6 +290,39 @@ class HospitalLocationService {
       return true;
     } catch (e) {
       debugPrint('updatePinnedLocation error: $e');
+      return false;
+    }
+  }
+
+  /// อัปเดตสถานะ ER ว่าง/เต็ม จริง sync ข้าม device (เดิมเป็นแค่ local state)
+  Future<bool> updateErAvailability(bool isErAvailable) async {
+    try {
+      final updated = _currentProfile.copyWith(
+        isErAvailable: isErAvailable,
+        lastUpdated: DateTime.now(),
+      );
+
+      _currentProfile = updated;
+      await _saveToLocal(updated);
+      _profileStreamController.add(updated);
+
+      final idx = _registeredHospitals.indexWhere((h) => h.hospitalId == updated.hospitalId);
+      if (idx != -1) {
+        _registeredHospitals[idx] = updated;
+      }
+
+      try {
+        await FirebaseFirestore.instance
+            .collection(_collectionName)
+            .doc(updated.hospitalId)
+            .set(updated.toMap(), SetOptions(merge: true));
+      } catch (e) {
+        debugPrint('Firestore sync ER availability error: $e');
+      }
+
+      return true;
+    } catch (e) {
+      debugPrint('updateErAvailability error: $e');
       return false;
     }
   }

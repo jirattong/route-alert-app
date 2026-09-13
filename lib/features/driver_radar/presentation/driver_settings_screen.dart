@@ -159,16 +159,16 @@ class _DriverSettingsScreenState extends State<DriverSettingsScreen> {
                             Expanded(
                               child: Slider(
                                 value: _outerMeters,
-                                min: 300,
+                                min: 20,
                                 max: 3000,
-                                divisions: 27,
+                                divisions: 41,
                                 activeColor: const Color(0xFF5B9EE1),
                                 inactiveColor: const Color(0xFFD6E9FF),
                                 onChanged: (val) {
                                   setState(() {
                                     _outerMeters = val;
                                     if (_innerMeters >= _outerMeters) {
-                                      _innerMeters = _outerMeters - 100;
+                                      _innerMeters = (_outerMeters - 10).clamp(5.0, _outerMeters);
                                     }
                                   });
                                 },
@@ -214,16 +214,16 @@ class _DriverSettingsScreenState extends State<DriverSettingsScreen> {
                             Expanded(
                               child: Slider(
                                 value: _innerMeters,
-                                min: 100,
+                                min: 5,
                                 max: 1200,
-                                divisions: 11,
+                                divisions: 239,
                                 activeColor: const Color(0xFFEB5757),
                                 inactiveColor: const Color(0xFFFFD6D6),
                                 onChanged: (val) {
                                   setState(() {
                                     _innerMeters = val;
                                     if (_innerMeters >= _outerMeters) {
-                                      _outerMeters = _innerMeters + 100;
+                                      _outerMeters = _innerMeters + 10;
                                     }
                                   });
                                 },

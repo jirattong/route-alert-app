@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import '../../../core/models/incident_report.dart';
+import '../../../core/services/ambulance_storage_service.dart';
 import '../../../core/services/emergency_mqtt_service.dart';
 import '../../../core/services/hospital_location_service.dart';
 import '../../../core/services/incident_service.dart';
@@ -21,10 +22,23 @@ class _AmbulanceHomeScreenState extends State<AmbulanceHomeScreen> {
   // สถานะเปิด/ปิดส่งสัญญาณเตือนฉุกเฉิน
   bool _isNotificationAlert = true;
 
+  // โหมดทดสอบในห้อง: ข้ามการจับคู่เส้นทางถนนจริง (Route-Aware Corridor)
+  // ใช้ตอนสาธิตในห้อง/ระยะใกล้ที่ไม่ได้เดินตามถนนจริงไปโรงพยาบาล/จุดเกิดเหตุ
+  bool _isIndoorTestMode = false;
+
   // ข้อมูลพิกัดรถพยาบาล
   LatLng _ambulanceLocation = const LatLng(19.0350, 99.8962);
   LatLng _incidentLocation = const LatLng(19.0284, 99.8962);
   late LatLng _hospitalLocation;
+
+  // ทิศทางการเคลื่อนที่จริง คำนวณจากพิกัด GPS 2 จุดล่าสุด (0-360 องศา)
+  double _ambulanceHeading = 0.0;
+  LatLng? _lastHeadingRefPos;
+
+  // ข้อมูลประจำหน่วยจริง (โหลดจาก AmbulanceStorageService แทนค่า hardcode)
+  String _ambulanceUnitId = 'AMB-0000';
+  String _ambulancePlateNumber = 'ยังไม่ระบุทะเบียน';
+  String _ambulanceCallSign = 'หน่วยกู้ชีพ';
 
   // Active Assigned Incident
   IncidentReport? _activeIncident;
@@ -44,9 +58,22 @@ class _AmbulanceHomeScreenState extends State<AmbulanceHomeScreen> {
     super.initState();
     _hospitalLocation = HospitalLocationService().hospitalLocation;
 
+    _loadAmbulanceProfile();
     _initAmbulanceTracking();
     _initHospitalListener();
     _initIncidentListener();
+  }
+
+  // โหลดรหัสหน่วย/ทะเบียน/ชื่อเรียกขานจริงของเครื่องนี้ แทนค่า hardcode เดิม
+  Future<void> _loadAmbulanceProfile() async {
+    final profile = await AmbulanceStorageService.loadProfile();
+    await AmbulanceStorageService.loadOnDuty();
+    if (!mounted) return;
+    setState(() {
+      _ambulanceUnitId = profile['ambulanceId']!;
+      _ambulancePlateNumber = profile['plateNumber']!;
+      _ambulanceCallSign = profile['callSign']!;
+    });
   }
 
   void _initHospitalListener() {
@@ -68,7 +95,7 @@ class _AmbulanceHomeScreenState extends State<AmbulanceHomeScreen> {
         (i) =>
             i.status != 'resolved' &&
             i.status != 'cancelled' &&
-            (i.assignedAmbulanceId == 'AMB-1669-01' ||
+            (i.assignedAmbulanceId == _ambulanceUnitId ||
                 i.status == 'assigned' ||
                 i.status == 'at_scene' ||
                 i.status == 'transporting' ||
@@ -113,6 +140,7 @@ class _AmbulanceHomeScreenState extends State<AmbulanceHomeScreen> {
     _locationSub =
         LocationService.getLiveLocationStream().listen((newPos) async {
       if (!mounted) return;
+      _updateHeadingFromMovement(newPos);
       setState(() => _ambulanceLocation = newPos);
       await _updateRoute();
       if (_isNotificationAlert) {
@@ -126,6 +154,22 @@ class _AmbulanceHomeScreenState extends State<AmbulanceHomeScreen> {
         _broadcastCurrentLocation();
       }
     });
+  }
+
+  // อัปเดตทิศทางการเคลื่อนที่จริงจากพิกัด GPS 2 จุดล่าสุด
+  // (ข้ามการอัปเดตถ้าขยับน้อยกว่า 2 เมตร เพื่อกันทิศทางกระตุกตอนสัญญาณ GPS นิ่ง)
+  void _updateHeadingFromMovement(LatLng newPos) {
+    if (_lastHeadingRefPos != null) {
+      final movedMeters =
+          LocationService.calculateDistanceInMeters(_lastHeadingRefPos!, newPos);
+      if (movedMeters >= 2.0) {
+        _ambulanceHeading =
+            LocationService.calculateBearingDeg(_lastHeadingRefPos!, newPos);
+        _lastHeadingRefPos = newPos;
+      }
+    } else {
+      _lastHeadingRefPos = newPos;
+    }
   }
 
   Future<void> _updateRoute() async {
@@ -154,6 +198,10 @@ class _AmbulanceHomeScreenState extends State<AmbulanceHomeScreen> {
   }
 
   void _broadcastCurrentLocation() {
+    // พักเวร (Off Duty) จริง = ไม่ broadcast พิกัด/ไซเรน เลย เพื่อไม่ให้ฝั่ง Agency
+    // เลือกรถคันนี้เป็น "รถพยาบาลที่ใกล้ที่สุด" ระหว่างพักเวรอยู่
+    if (!AmbulanceStorageService.onDutyNotifier.value) return;
+
     final int step = _activeIncident?.statusStep ?? 1;
     final destName = step >= 3
         ? 'โรงพยาบาลมหาราชนคร (ER)'
@@ -161,22 +209,29 @@ class _AmbulanceHomeScreenState extends State<AmbulanceHomeScreen> {
 
     EmergencyMqttService().broadcastAmbulanceLocation(
       EmergencyVehicleData(
-        id: 'AMB-1669-01',
-        callSign: 'กู้ชีพนครพิงค์ 01',
+        id: _ambulanceUnitId,
+        callSign: _ambulanceCallSign,
         latitude: _ambulanceLocation.latitude,
         longitude: _ambulanceLocation.longitude,
         speed: 65.0,
+        heading: _ambulanceHeading,
+        plateNumber: _ambulancePlateNumber,
         emergencyType:
             _activeIncident?.type ?? 'ผู้ป่วยวิกฤตฉุกเฉิน (Red Code)',
         sirenActive: _isNotificationAlert,
         timestamp: DateTime.now(),
-        routePoints: _routePoints.isNotEmpty
-            ? _routePoints
-            : [
-                _ambulanceLocation,
-                step >= 3 ? _hospitalLocation : _incidentLocation
-              ],
-        turnIntent: _turnInstruction,
+        // โหมดทดสอบในห้อง: ไม่ส่งเส้นทางถนนจริง เพื่อให้ Driver ฝั่งรับ
+        // ใช้การประเมินระยะ+ทิศทางแบบง่าย แทนการจับคู่กับถนนจริง (ซึ่งจะไม่ตรง
+        // กับตำแหน่งที่จำลองในห้องเรียน)
+        routePoints: _isIndoorTestMode
+            ? null
+            : (_routePoints.isNotEmpty
+                ? _routePoints
+                : [
+                    _ambulanceLocation,
+                    step >= 3 ? _hospitalLocation : _incidentLocation
+                  ]),
+        turnIntent: _isIndoorTestMode ? null : _turnInstruction,
         destinationName: destName,
       ),
     );
@@ -805,6 +860,50 @@ class _AmbulanceHomeScreenState extends State<AmbulanceHomeScreen> {
                   inactiveTrackColor: Colors.grey.shade400,
                   onChanged: (value) {
                     setState(() => _isNotificationAlert = value);
+                    _broadcastCurrentLocation();
+                  },
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 8),
+
+          // Toggle Indoor Test Mode Switch
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'โหมดทดสอบในห้อง',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black87,
+                    ),
+                  ),
+                  Text(
+                    '(ข้ามการจับคู่เส้นทางถนนจริง)',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF5B9EE1),
+                    ),
+                  ),
+                ],
+              ),
+              Transform.scale(
+                scale: 0.9,
+                child: Switch(
+                  value: _isIndoorTestMode,
+                  activeThumbColor: Colors.white,
+                  activeTrackColor: const Color(0xFF5B9EE1),
+                  inactiveThumbColor: Colors.white,
+                  inactiveTrackColor: Colors.grey.shade400,
+                  onChanged: (value) {
+                    setState(() => _isIndoorTestMode = value);
                     _broadcastCurrentLocation();
                   },
                 ),

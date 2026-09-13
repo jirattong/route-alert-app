@@ -2,64 +2,62 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Helper functions for Role-Based Access Control (RBAC)
-    function isAuthenticated() {
-      return request.auth != null;
-    }
+    // ⚠️ หมายเหตุสำคัญ: แอปนี้ไม่ได้ใช้ Firebase Authentication จริง (ระบบ login
+    // จริงคือ Face ID + Firestore users collection เอง) ดังนั้น request.auth
+    // จะเป็น null เสมอ — rules ชุดนี้จึงเป็น "ด่านขั้นต่ำ" ที่ปิดช่องโหว่ร้ายแรง
+    // ที่สุด (การลบ/แก้ไขข้อมูลทั้งฐานโดยพลการ) โดยไม่พึ่งพา request.auth
+    // ไม่ใช่การแบ่งสิทธิ์ตาม role แบบสมบูรณ์ — ต้องเพิ่ม Firebase Auth จริง
+    // (เช่น Anonymous Auth + Cloud Function ตรวจสอบ role) ในอนาคตถึงจะปิดสนิท
 
-    function getUserRole() {
-      return request.auth.token.role;
-    }
-
-    function isDriver() {
-      return isAuthenticated() && (getUserRole() == 'driver' || request.auth.token.email != null);
-    }
-
-    function isAmbulance() {
-      return isAuthenticated() && (getUserRole() == 'ambulance' || request.auth.token.email.matches('.*ambulance.*'));
-    }
-
-    function isAgency() {
-      return isAuthenticated() && (getUserRole() == 'agency' || request.auth.token.email.matches('.*agency.*'));
-    }
-
-    // 1. Incident Reports Security Rules
+    // 1. Incident Reports — เปิดอ่านสาธารณะ (ทุก role ต้องเห็นเคสร่วมกัน),
+    // สร้างได้เฉพาะที่มี field ครบตามที่ต้องการ, แก้ไขได้แต่ห้ามสลับ id ของเคส,
+    // ห้ามลบเด็ดขาด (กันข้อมูลเคสฉุกเฉินถูกทำลาย)
     match /incident_reports/{incidentId} {
-      // Anyone authenticated can read incidents within regional bounds
       allow read: if true;
 
-      // Only citizens/drivers can create reports with required emergency fields
       allow create: if request.resource.data.type is string
                     && request.resource.data.latitude is number
                     && request.resource.data.longitude is number
                     && request.resource.data.severity is string;
 
-      // Strict Field-Level Update Control based on Roles:
-      allow update: if 
-        // A) Agency (Hospital ER) can update ER readiness and assign ambulances
-        (isAgency() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isErPrepared', 'assignedAmbulanceId', 'assignedAmbulancePlate', 'agencyNotes']))
-        ||
-        // B) Ambulance can update rescue progress steps (1 to 4) and ETA
-        (isAmbulance() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'statusStep', 'eta', 'ambulanceLocation']))
-        ||
-        // C) Citizen who reported can CANCEL only if status is still 'pending'
-        (resource.data.status == 'pending' && resource.data.statusStep == 0 
-         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'cancelReason', 'cancelledAt']));
+      allow update: if request.resource.data.id == resource.data.id;
 
-      // Never allow arbitrary deletion of emergency audit records
       allow delete: if false;
     }
 
-    // 2. User Profiles & Face Biometrics Security Rules
+    // 2. User Profiles & Face Biometrics — จุดอ่อนไหวที่สุด (เก็บรหัสผ่าน
+    // แบบ hash + face embeddings) อ่านสาธารณะยังจำเป็นเพราะระบบ Face Login
+    // เทียบใบหน้ากับผู้ใช้ "ทุกคน" ฝั่ง client เอง (ไม่มี Cloud Function เทียบ
+    // ฝั่ง server) — ความเสี่ยงนี้จะเหลืออยู่จนกว่าจะย้าย face matching ไปทำ
+    // ฝั่ง server จริง อย่างน้อยตอนนี้ห้ามสลับอีเมลของเอกสารและห้ามลบบัญชี
     match /users/{userId} {
-      // Users can only read and edit their own profile & face embeddings
-      allow read, write: if isAuthenticated() && request.auth.uid == userId;
+      allow read: if true;
+
+      allow create: if request.resource.data.email is string;
+
+      allow update: if request.resource.data.email == resource.data.email;
+
+      // เปิดให้ลบได้ (ต่างจาก incident_reports) เพื่อรองรับสิทธิ "ขอให้ลบข้อมูล"
+      // ของเจ้าของบัญชีเอง (PDPA) — เนื่องจากไม่มี Firebase Auth จริง จึงยังกัน
+      // ไม่ได้ 100% ว่าเป็นเจ้าของบัญชีจริงที่ลบ (เหมือนความเสี่ยงเดิมของ read/write
+      // ทั้ง collection นี้) ฝั่งแอปจะขอยืนยันรหัสผ่านก่อนเรียก delete เสมอ
+      allow delete: if true;
     }
 
-    // 3. Emergency Fleet Live Telemetry Rules
-    match /emergency_fleet/{vehicleId} {
+    // 3. Hospital Profiles — Agency ปักหมุดตำแหน่ง รพ., ทุกฝ่ายต้องอ่านได้
+    match /hospital_profiles/{hospitalId} {
       allow read: if true;
-      allow write: if isAmbulance();
+      allow create, update: if request.resource.data.hospitalName is string;
+      allow delete: if false;
     }
+
+    // 4. Emergency Fleet — ประกาศไว้แต่ไม่ได้ใช้จริงในแอป (ตำแหน่งรถพยาบาลส่ง
+    // ผ่าน MQTT ไม่ใช่ Firestore) ปิดไว้ทั้งหมดกันสับสน/กันเป็นช่องโหว่เปล่าประโยชน์
+    match /emergency_fleet/{vehicleId} {
+      allow read, write: if false;
+    }
+
+    // ปิดกั้น collection อื่นๆ ที่ไม่รู้จักทั้งหมดโดย default (Firestore rules
+    // เป็น default-deny อยู่แล้วถ้าไม่มี match ใดตรง แต่เขียนไว้ให้ชัดเจน)
   }
 }

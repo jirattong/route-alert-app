@@ -5,6 +5,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
 import 'package:image/image.dart' as img;
 import 'package:shared_preferences/shared_preferences.dart';
+import '../ml/accident_image_classifier_service.dart';
 
 class AiTriageResult {
   final bool isIncidentDetected; // มีร่องรอยอุบัติเหตุจริงหรือไม่ (คัดกรองภาพไม่เกี่ยวข้อง)
@@ -24,7 +25,7 @@ class AiTriageResult {
     required this.confidenceScore,
     required this.detectedFeatures,
     required this.clinicalRecommendation,
-    this.modelName = 'ResNet-50 / Emergency Triage Vision',
+    this.modelName = 'Local Computer Vision Engine (Heuristic, not ML)',
     this.photoCount = 1,
     this.isUsingGemini = false,
   });
@@ -100,7 +101,19 @@ class AiVisionTriageService {
     }
 
     // 2. Fallback to Local Computer Vision Engine (Strict & Honest)
-    return _analyzeWithLocalEngine(photosBytes);
+    return await _analyzeWithLocalEngine(photosBytes);
+  }
+
+  /// เช็คว่าโมเดลที่เทรนเอง (Teachable Machine → TFLite) ถือว่าภาพนี้เป็น
+  /// อุบัติเหตุหรือไม่ คืนค่า null ถ้ายังไม่มีโมเดล (assets/models/accident_classifier.tflite)
+  Future<AccidentClassificationResult?> _classifyWithTrainedModel(
+      Uint8List bytes) async {
+    final classifier = AccidentImageClassifierService();
+    if (!classifier.isModelLoaded) {
+      await classifier.initialize();
+    }
+    if (!classifier.isModelLoaded) return null;
+    return classifier.classify(bytes);
   }
 
   /// Calls Google Gemini Multimodal Vision API
@@ -205,10 +218,24 @@ class AiVisionTriageService {
   }
 
   /// Local Computer Vision Engine (Strict & Honest fallback)
-  AiTriageResult _analyzeWithLocalEngine(List<Uint8List> photosBytes) {
+  /// ถ้ามีโมเดลที่เทรนเองผ่าน Teachable Machine (assets/models/accident_classifier.tflite)
+  /// จะใช้ผลจากโมเดลนั้นช่วยตัดสิน isIncidentScene ร่วมกับ heuristic เดิม
+  /// ถ้าไม่มีโมเดล จะ fallback ไปใช้ heuristic ล้วนเหมือนเดิมทุกประการ
+  Future<AiTriageResult> _analyzeWithLocalEngine(
+      List<Uint8List> photosBytes) async {
     final List<_ImageStats> statsList = [];
     for (final bytes in photosBytes) {
-      statsList.add(_computeImageStats(bytes));
+      final heuristicStats = _computeImageStats(bytes);
+      final trainedResult = await _classifyWithTrainedModel(bytes);
+
+      if (trainedResult != null && trainedResult.confidence >= 0.6) {
+        // เชื่อผลจากโมเดลที่เทรนเองเป็นหลักเมื่อมั่นใจเพียงพอ (OR กับ heuristic
+        // เดิมเพื่อความ lenient เนื่องจากโมเดลที่เทรนเองอาจยังมีข้อมูลน้อย)
+        statsList.add(heuristicStats.copyWithIncidentOverride(
+            heuristicStats.isIncidentScene || trainedResult.isAccident));
+      } else {
+        statsList.add(heuristicStats);
+      }
     }
 
     final List<_ImageStats> incidentPhotos =
@@ -423,6 +450,15 @@ class _ImageStats {
     required this.hasDebrisSignature,
     required this.hasLaneDisruption,
   });
+
+  _ImageStats copyWithIncidentOverride(bool isIncidentScene) => _ImageStats(
+        isIncidentScene: isIncidentScene,
+        edgeGradient: edgeGradient,
+        contrast: contrast,
+        isSevereImpact: isSevereImpact,
+        hasDebrisSignature: hasDebrisSignature,
+        hasLaneDisruption: hasLaneDisruption,
+      );
 
   factory _ImageStats.empty() => _ImageStats(
         isIncidentScene: false,

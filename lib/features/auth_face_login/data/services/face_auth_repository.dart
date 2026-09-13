@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:math' as math;
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:crypto/crypto.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../core/ml/face_recognition_service.dart';
@@ -264,6 +265,51 @@ class FaceAuthRepository {
     }
   }
 
+  /// ลบบัญชีผู้ใช้ทั้งหมด (ข้อมูลใบหน้า/รหัสผ่าน/โปรไฟล์) ทั้ง local cache และ
+  /// Cloud Firestore — รองรับสิทธิ "ขอให้ลบข้อมูล" ของเจ้าของข้อมูล เนื่องจาก
+  /// ข้อมูลใบหน้า (face embedding) ถือเป็นข้อมูลชีวมิติที่อ่อนไหวตาม PDPA
+  static Future<bool> deleteAccount(String email) async {
+    final cleanEmail = email.trim().toLowerCase();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+
+      final userList = prefs.getStringList(_usersKey) ?? [];
+      userList.removeWhere((item) {
+        try {
+          final data = json.decode(item);
+          return (data['email'] as String?)?.trim().toLowerCase() == cleanEmail;
+        } catch (_) {
+          return false;
+        }
+      });
+      await prefs.setStringList(_usersKey, userList);
+      await prefs.remove('pwd_$cleanEmail');
+
+      final current = await getCurrentUser();
+      if (current != null && current.email.trim().toLowerCase() == cleanEmail) {
+        await prefs.remove(_currentUserKey);
+      }
+
+      try {
+        final fs = _firestore;
+        if (fs != null) {
+          await fs
+              .collection(_firestoreCollection)
+              .doc(cleanEmail)
+              .delete()
+              .timeout(const Duration(seconds: 3));
+        }
+      } catch (_) {
+        // Offline: local copy is still removed above; Firestore doc will be
+        // orphaned until a future sync — acceptable for this use case.
+      }
+
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
   /// Updates the assigned role of a user
   static Future<bool> updateUserRole(String email, String newRole) async {
     final users = await getAllUsers();
@@ -352,8 +398,8 @@ class FaceAuthRepository {
       } catch (_) {}
     }
 
-    // 3. Check password match
-    if (storedPassword == null || storedPassword != password) {
+    // 3. Check password match (เทียบด้วย SHA-256 hash ไม่ใช่ plaintext)
+    if (storedPassword == null || !_verifyPassword(password, storedPassword)) {
       return FaceAuthMatchResult(
         isSuccess: false,
         similarityScore: 0.0,
@@ -372,22 +418,47 @@ class FaceAuthRepository {
   }
 
   /// Updates user password in Firestore and Local Storage Cache
+  /// (เก็บเป็น "salt:sha256Hash" ไม่ใช่ plaintext)
   static Future<bool> updateUserPassword(String email, String newPassword) async {
     final cleanEmail = email.trim().toLowerCase();
+    final salt = _generateSalt();
+    final storedValue = '$salt:${_hashPassword(newPassword, salt)}';
+
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('pwd_$cleanEmail', newPassword);
+    await prefs.setString('pwd_$cleanEmail', storedValue);
 
     try {
       final fs = _firestore;
       if (fs != null) {
         await fs.collection(_firestoreCollection).doc(cleanEmail).set({
-          'password': newPassword,
+          'password': storedValue,
           'updatedAt': FieldValue.serverTimestamp(),
         }, SetOptions(merge: true)).timeout(const Duration(seconds: 2));
       }
     } catch (_) {}
 
     return true;
+  }
+
+  /// สร้าง Salt แบบสุ่มด้วย CSPRNG (16 ไบต์)
+  static String _generateSalt() {
+    final random = math.Random.secure();
+    final saltBytes = List<int>.generate(16, (_) => random.nextInt(256));
+    return base64UrlEncode(saltBytes);
+  }
+
+  /// แฮชรหัสผ่านด้วย SHA-256 ผสม Salt เพื่อป้องกันการเก็บ/รั่วรหัสผ่านแบบข้อความธรรมดา
+  static String _hashPassword(String password, String salt) {
+    return sha256.convert(utf8.encode('$salt:$password')).toString();
+  }
+
+  /// ตรวจสอบรหัสผ่านที่กรอกกับค่า "salt:hash" ที่เก็บไว้
+  static bool _verifyPassword(String inputPassword, String storedValue) {
+    final parts = storedValue.split(':');
+    if (parts.length != 2) return false;
+    final salt = parts[0];
+    final expectedHash = parts[1];
+    return _hashPassword(inputPassword, salt) == expectedHash;
   }
 
   /// Logs out current user

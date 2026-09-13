@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:latlong2/latlong.dart';
 import '../../../core/models/incident_report.dart';
 import '../../../core/services/incident_service.dart';
@@ -24,7 +26,7 @@ class AmbulanceIncidentDetailScreen extends StatefulWidget {
 class _AmbulanceIncidentDetailScreenState
     extends State<AmbulanceIncidentDetailScreen> {
   late int _currentStep;
-  final List<String> _photoList = [];
+  late List<String> _photoList;
 
   // ลำดับขั้นตอนการปฏิบัติงาน (Forward-Only State)
   final List<Map<String, String>> _statusSteps = [
@@ -41,15 +43,44 @@ class _AmbulanceIncidentDetailScreenState
     _currentStep = widget.incident?.statusStep ?? widget.incidentData?['statusStep'] ?? 1;
     if (_currentStep < 0) _currentStep = 0;
     if (_currentStep >= _statusSteps.length) _currentStep = _statusSteps.length - 1;
+    _photoList = List<String>.from(widget.incident?.scenePhotosBase64 ?? const []);
   }
 
-  void _takePhoto() {
-    setState(() {
-      _photoList.add('https://picsum.photos/300/200?random=${_photoList.length + 1}');
-    });
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('📸 บันทึกรูปภาพหน้างานส่งไปยังห้อง ER เรียบร้อยแล้ว')),
-    );
+  // ถ่ายรูปจริงจากกล้อง บีบอัดขนาด แล้วบันทึกเข้าเคสจริงผ่าน IncidentService
+  Future<void> _takePhoto() async {
+    final caseId = widget.incident?.id ?? widget.incidentData?['id'] as String?;
+    if (caseId == null) return;
+
+    final picker = ImagePicker();
+    try {
+      final picked = await picker.pickImage(
+        source: ImageSource.camera,
+        maxWidth: 640,
+        maxHeight: 640,
+        imageQuality: 60,
+      );
+      if (picked == null) return;
+
+      final bytes = await File(picked.path).readAsBytes();
+      final base64Photo = base64Encode(bytes);
+
+      final success = await IncidentService().addScenePhoto(caseId, base64Photo);
+      if (!mounted) return;
+
+      if (success) {
+        setState(() {
+          _photoList.add(base64Photo);
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('📸 บันทึกรูปภาพหน้างานส่งไปยังห้อง ER เรียบร้อยแล้ว')),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('ไม่สามารถถ่ายรูปได้: $e')),
+      );
+    }
   }
 
   // ⏳ หน้าต่างยืนยันเปลี่ยนสถานะ พร้อมคูลดาวน์นับถอยหลัง 3 วินาที
@@ -458,7 +489,7 @@ class _AmbulanceIncidentDetailScreenState
                                             decoration: BoxDecoration(
                                               borderRadius: BorderRadius.circular(14),
                                               image: DecorationImage(
-                                                image: NetworkImage(_photoList[i]),
+                                                image: MemoryImage(base64Decode(_photoList[i])),
                                                 fit: BoxFit.cover,
                                               ),
                                             ),

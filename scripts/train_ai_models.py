@@ -1,35 +1,52 @@
 """
 =============================================================================
-RouteAlert: Deep Learning Models Training & Quantization Pipeline
+RouteAlert: AI Model Architecture Notes & Design-Validation Prototype
 =============================================================================
-This script defines the PyTorch neural network architectures, synthetic
-training data generator, training loops, loss functions, and weight
-quantization export for the 3 AI models used in the RouteAlert system:
+⚠️ อ่านก่อนใช้: ไฟล์นี้ไม่ใช่ production training pipeline ที่ export โมเดล
+ไปใช้ในแอปจริง มันคือ prototype สำหรับ "ทดลอง/ยืนยันแนวคิด" ตอนออกแบบเท่านั้น
 
-1. TrajectoryConflictMLP: Spatial-temporal conflict prediction (Yield Risk).
-2. VisionIncidentTriageCNN: Emergency crash damage and severity triage.
-3. AcousticSirenCNN: Mel-Spectrogram audio frequency siren classification.
+สถานะจริงของแต่ละส่วน:
+
+1. TrajectoryConflictMLP — เทรนจริงในไฟล์นี้ แต่ใช้ "ข้อมูลสังเคราะห์" ที่สร้างจาก
+   กฎ if-else ที่เขียนเอง (generate_trajectory_dataset) ไม่ใช่ข้อมูลจริง และ
+   ไม่มีโค้ด export ไป TFLite/ไม่ถูกใช้ในแอป Flutter เลย — โมเดลที่ใช้งานจริงใน
+   แอปคือสูตรคณิตศาสตร์ถ่วงน้ำหนักคงที่ (hand-tuned weighted formula) ใน
+   lib/core/services/ai_trajectory_service.dart ซึ่งใช้ feature set เดียวกัน
+   ไฟล์นี้จึงมีประโยชน์แค่เป็น "หลักฐานว่า feature set ที่เลือกใช้สมเหตุสมผล"
+   ไม่ใช่หลักฐานว่ามีการเทรน-deploy โมเดลจริง
+
+2. VisionIncidentTriageCNN — นิยามสถาปัตยกรรมไว้เฉยๆ **ไม่เคยถูกเทรน**
+   การเทรนจริงสำหรับ vision triage ทำที่ scripts/train_accident_classifier_colab.ipynb
+   แทน (เทรนด้วยรูปจริงผ่าน Google Colab + MobileNetV2 transfer learning
+   แล้ว export TFLite ไปใช้ใน lib/core/ml/accident_image_classifier_service.dart จริง)
+
+3. AcousticSirenCNN — นิยามสถาปัตยกรรมไว้เฉยๆ **ไม่เคยถูกเทรน** และฟีเจอร์ตรวจจับ
+   เสียงไซเรนในแอป (ai_acoustic_siren_service.dart) ปัจจุบันเป็นแค่ placeholder
+   จำลองด้วย Random() ไม่ได้เชื่อมกับโมเดลนี้หรือไมโครโฟนจริงแต่อย่างใด — ถ้าจะทำ
+   ให้ใช้งานได้จริงต้องเก็บชุดข้อมูลเสียงจริงแล้วเทรนใหม่ (ยังไม่ได้ทำ)
 =============================================================================
 """
 
-import math
 import random
 import torch
 import torch.nn as nn
 import torch.optim as optim
 
+
 # =============================================================================
-# 1. MODEL 1: Trajectory Conflict Risk Prediction (MLP Neural Network)
+# 1. Trajectory Conflict Risk — Design-Validation Prototype (Synthetic Data)
 # =============================================================================
 class TrajectoryConflictMLP(nn.Module):
     """
-    Multi-Layer Perceptron (MLP) for Real-Time Trajectory Conflict Prediction.
+    Multi-Layer Perceptron (MLP) ใช้ยืนยันแนวคิดตอนออกแบบ ai_trajectory_service.dart
     Input Features (dim=5):
       - x[0]: Normalized Distance (d / d_max)
       - x[1]: cos(Delta Heading) (1.0 = same direction, -1.0 = opposing lane)
       - x[2]: cos(Delta Bearing) (1.0 = driver is in front of ambulance)
       - x[3]: Normalized Ambulance Speed (v / v_max)
       - x[4]: Closing Velocity (rate of distance reduction)
+
+    หมายเหตุ: นี่คือ prototype เท่านั้น ไม่ใช่โมเดลที่ใช้งานจริงในแอป
     """
     def __init__(self):
         super(TrajectoryConflictMLP, self).__init__()
@@ -45,18 +62,18 @@ class TrajectoryConflictMLP(nn.Module):
         x = self.sigmoid(self.out(x))
         return x
 
+
 def generate_trajectory_dataset(num_samples=10000):
-    """Generates synthetic physics-grounded trajectory samples."""
+    """สร้างข้อมูลสังเคราะห์จากกฎที่เขียนเอง (ไม่ใช่ข้อมูลสถานการณ์จริง)"""
     X = []
     y = []
     for _ in range(num_samples):
-        dist = random.uniform(0.05, 1.2) # normalized distance
-        cos_h = random.uniform(-1.0, 1.0) # heading alignment
-        cos_b = random.uniform(-1.0, 1.0) # bearing alignment
+        dist = random.uniform(0.05, 1.2)
+        cos_h = random.uniform(-1.0, 1.0)
+        cos_b = random.uniform(-1.0, 1.0)
         speed = random.uniform(0.3, 1.2)
         closing = random.uniform(-0.5, 1.2)
 
-        # Ground truth rule: high risk when close, same direction, and in front
         is_conflict = (dist < 0.5 and cos_h > 0.3 and cos_b > 0.2 and closing > 0.0)
         label = 1.0 if is_conflict else 0.0
 
@@ -67,12 +84,12 @@ def generate_trajectory_dataset(num_samples=10000):
 
 
 # =============================================================================
-# 2. MODEL 2: Vision Incident Triage (Deep CNN for Crash Severity)
+# 2. Vision Incident Triage — Architecture reference only, NEVER TRAINED here
+#    ดู scripts/train_accident_classifier_colab.ipynb สำหรับ pipeline ที่ใช้งานจริง
 # =============================================================================
 class VisionIncidentTriageCNN(nn.Module):
     """
-    Deep Convolutional Neural Network for Crash Scene Image Classification.
-    Output: 3 Classes [Code Red (Severe), Code Yellow (Medium), Code Green (Minor)]
+    สถาปัตยกรรมอ้างอิงเท่านั้น — ไม่เคยถูกเทรนในไฟล์นี้ และไม่ได้ใช้งานจริงในแอป
     """
     def __init__(self):
         super(VisionIncidentTriageCNN, self).__init__()
@@ -96,7 +113,7 @@ class VisionIncidentTriageCNN(nn.Module):
             nn.Linear(128 * 4 * 4, 64),
             nn.ReLU(),
             nn.Dropout(0.3),
-            nn.Linear(64, 3), # 3 severity classes
+            nn.Linear(64, 3),
         )
 
     def forward(self, x):
@@ -107,13 +124,12 @@ class VisionIncidentTriageCNN(nn.Module):
 
 
 # =============================================================================
-# 3. MODEL 3: Acoustic Siren Detection (Mel-Spectrogram 2D-CNN)
+# 3. Acoustic Siren Detection — Architecture reference only, NEVER TRAINED here
+#    ai_acoustic_siren_service.dart ในแอปยังเป็น Random() placeholder ไม่ต่อกับโมเดลนี้
 # =============================================================================
 class AcousticSirenCNN(nn.Module):
     """
-    Mel-Spectrogram 2D-CNN for Emergency Siren Audio Detection (Yelp/Wail patterns).
-    Input: Audio Mel-Spectrogram (Batch, 1, 64 Mel-bands, 128 Time-frames)
-    Output: Binary Probability (Siren Detected vs Ambient Road Noise)
+    สถาปัตยกรรมอ้างอิงเท่านั้น — ไม่เคยถูกเทรนในไฟล์นี้ และไม่ได้ใช้งานจริงในแอป
     """
     def __init__(self):
         super(AcousticSirenCNN, self).__init__()
@@ -141,10 +157,11 @@ class AcousticSirenCNN(nn.Module):
 
 
 # =============================================================================
-# TRAINING EXECUTION PIPELINE
+# TRAINING EXECUTION (Design-Validation Prototype Only)
 # =============================================================================
 def train_trajectory_model():
-    print("[1/3] Training Trajectory Conflict Risk MLP Model...")
+    print("Training TrajectoryConflictMLP on SYNTHETIC rule-based data...")
+    print("(design-validation prototype only — not exported, not used by the app)")
     X, y = generate_trajectory_dataset(num_samples=5000)
     model = TrajectoryConflictMLP()
     criterion = nn.BCELoss()
@@ -161,12 +178,17 @@ def train_trajectory_model():
             acc = (preds == y).float().mean() * 100.0
             print(f"  Epoch [{epoch+1}/15] - Loss: {loss.item():.4f} - Accuracy: {acc.item():.2f}%")
 
-    print("  -> Trajectory Model Training Complete! Exported weights to Edge Runtime.\n")
+    print("  -> Prototype training complete. No file exported, no app integration.\n")
     return model
+
 
 if __name__ == '__main__':
     print("==========================================================")
-    print(" RouteAlert Deep Learning Training & Evaluation Pipeline  ")
+    print(" RouteAlert AI Design-Validation Prototype (NOT production) ")
     print("==========================================================")
     train_trajectory_model()
-    print("All 3 Deep Learning models verified and ready for thesis defense.")
+    print("Only TrajectoryConflictMLP was actually trained here, on synthetic")
+    print("data, and it is NOT connected to the Flutter app. For the real,")
+    print("data-trained model that IS used by the app, see:")
+    print("  scripts/train_accident_classifier_colab.ipynb")
+    print("  scripts/train_anti_spoofing_colab.ipynb")

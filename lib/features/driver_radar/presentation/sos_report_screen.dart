@@ -1302,7 +1302,7 @@ class _SosReportScreenState extends State<SosReportScreen> {
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Text(
-                    res.isUsingGemini ? 'Gemini 1.5' : 'Vision Engine',
+                    res.isUsingGemini ? 'Gemini 1.5' : 'วิเคราะห์เบื้องต้น (ไม่ใช้ AI)',
                     style: const TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: Color(0xFF78350F)),
                   ),
                 ),
@@ -1374,7 +1374,7 @@ class _SosReportScreenState extends State<SosReportScreen> {
                     ),
                     const SizedBox(width: 4),
                     Text(
-                      res.isUsingGemini ? 'Google Gemini 1.5 Flash Vision' : 'AI Multi-Angle Vision Triage',
+                      res.isUsingGemini ? 'Google Gemini 1.5 Flash Vision' : 'วิเคราะห์ภาพเบื้องต้น (Local, ไม่ใช่ AI)',
                       style: const TextStyle(
                           color: Colors.white,
                           fontSize: 11,

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io' show Platform;
+import 'dart:math' as math;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
@@ -91,5 +92,19 @@ class LocationService {
   static double calculateDistanceInMeters(LatLng start, LatLng end) {
     const Distance distance = Distance();
     return distance.as(LengthUnit.Meter, start, end);
+  }
+
+  // คำนวณทิศทางการเคลื่อนที่จริง (Bearing) จากจุดก่อนหน้าไปจุดปัจจุบัน (0-360 องศา)
+  static double calculateBearingDeg(LatLng start, LatLng end) {
+    final double lat1 = start.latitude * math.pi / 180;
+    final double lat2 = end.latitude * math.pi / 180;
+    final double dLon = (end.longitude - start.longitude) * math.pi / 180;
+
+    final double y = math.sin(dLon) * math.cos(lat2);
+    final double x = math.cos(lat1) * math.sin(lat2) -
+        math.sin(lat1) * math.cos(lat2) * math.cos(dLon);
+
+    final double bearing = math.atan2(y, x) * 180 / math.pi;
+    return (bearing + 360) % 360;
   }
 }

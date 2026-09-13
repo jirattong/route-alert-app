@@ -1,4 +1,7 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import '../../../core/models/incident_report.dart';
+import '../../../core/services/incident_service.dart';
 import '../../auth_face_login/data/models/user_face_profile.dart';
 import '../../auth_face_login/data/services/face_auth_repository.dart';
 import '../../auth_face_login/presentation/face_login_screen.dart';
@@ -17,10 +20,56 @@ class _AgencyProfileScreenState extends State<AgencyProfileScreen> {
   String _contactNumber = '053-999-999 (เบอร์สายตรง ER)';
   bool _isErAvailable = true;
 
+  int _monthlyCaseCount = 0;
+  double _erOnTimeRate = 0.0;
+  int _criticalCaseCount = 0;
+  StreamSubscription<List<IncidentReport>>? _incidentSub;
+
   @override
   void initState() {
     super.initState();
     _loadUserData();
+    _loadIncidentStats();
+  }
+
+  @override
+  void dispose() {
+    _incidentSub?.cancel();
+    super.dispose();
+  }
+
+  // คำนวณสถิติจริงจากเคสในระบบ (เดิมเป็นเลข 154/92%/34 hardcode คงที่)
+  Future<void> _loadIncidentStats() async {
+    await IncidentService().initialize();
+    final initial = await IncidentService().getLocalIncidents();
+    if (mounted) _computeStats(initial);
+
+    _incidentSub = IncidentService().incidentsStream.listen((list) {
+      if (mounted) _computeStats(list);
+    });
+  }
+
+  void _computeStats(List<IncidentReport> incidents) {
+    final now = DateTime.now();
+    final thisMonth = incidents
+        .where((i) =>
+            i.status != 'cancelled' &&
+            i.createdAt.year == now.year &&
+            i.createdAt.month == now.month)
+        .toList();
+
+    final total = thisMonth.length;
+    final erPreparedCount = thisMonth.where((i) => i.isErPrepared).length;
+    final criticalCount = thisMonth
+        .where((i) =>
+            i.severity.contains('Code Red') || i.severity.contains('วิกฤต'))
+        .length;
+
+    setState(() {
+      _monthlyCaseCount = total;
+      _erOnTimeRate = total > 0 ? erPreparedCount / total : 0.0;
+      _criticalCaseCount = criticalCount;
+    });
   }
 
   Future<void> _loadUserData() async {
@@ -110,6 +159,17 @@ class _AgencyProfileScreenState extends State<AgencyProfileScreen> {
                     // --- ปุ่ม ออกจากระบบ (Logout) สีเขียวเข้มตาม Figma ---
                     _buildLogoutButton(context),
 
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: TextButton(
+                        onPressed: () => _showDeleteAccountDialog(context),
+                        child: const Text(
+                          'ลบบัญชีและข้อมูลของฉันถาวร (Delete Account)',
+                          style: TextStyle(color: Colors.redAccent, fontSize: 13),
+                        ),
+                      ),
+                    ),
+
                     const SizedBox(height: 20),
                   ],
                 ),
@@ -193,34 +253,34 @@ class _AgencyProfileScreenState extends State<AgencyProfileScreen> {
           ),
           const SizedBox(height: 24),
 
-          // วงกลมใหญ่ (จำนวนเคสรับเข้าต่อเดือน)
+          // วงกลมใหญ่ (จำนวนเคสรับเข้าต่อเดือน) — คำนวณจากเคสจริงในระบบ
           _buildGauge(
-            valueText: '154',
+            valueText: '$_monthlyCaseCount',
             labelText: 'จำนวนเคสรับเข้าต่อเดือน',
             size: 130,
             strokeWidth: 14,
-            progress: 0.75,
+            progress: (_monthlyCaseCount / 50.0).clamp(0.0, 1.0),
           ),
 
           const SizedBox(height: 28),
 
-          // วงกลมเล็ก 2 วงคู่กัน (ประสิทธิภาพ ER และ เคสวิกฤต)
+          // วงกลมเล็ก 2 วงคู่กัน (ประสิทธิภาพ ER และ เคสวิกฤต) — คำนวณจากเคสจริง
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
               _buildGauge(
-                valueText: '92%',
+                valueText: '${(_erOnTimeRate * 100).round()}%',
                 labelText: 'เตรียม ER ทันเวลา',
                 size: 90,
                 strokeWidth: 10,
-                progress: 0.92,
+                progress: _erOnTimeRate,
               ),
               _buildGauge(
-                valueText: '34',
+                valueText: '$_criticalCaseCount',
                 labelText: 'เคสวิกฤต (Code Red)',
                 size: 90,
                 strokeWidth: 10,
-                progress: 0.35,
+                progress: (_criticalCaseCount / 30.0).clamp(0.0, 1.0),
               ),
             ],
           ),
@@ -366,6 +426,70 @@ class _AgencyProfileScreenState extends State<AgencyProfileScreen> {
     );
   }
 
+  // ลบบัญชี + ข้อมูลใบหน้าถาวร (รองรับสิทธิ "ขอให้ลบข้อมูล" ตาม PDPA)
+  void _showDeleteAccountDialog(BuildContext context) {
+    if (_currentUser == null) return;
+    final passCtrl = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('ลบบัญชีและข้อมูลของฉัน'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'การลบบัญชีจะลบข้อมูลใบหน้า รหัสผ่าน และโปรไฟล์ทั้งหมดอย่างถาวร กู้คืนไม่ได้',
+              style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: passCtrl,
+              obscureText: true,
+              decoration: const InputDecoration(labelText: 'ยืนยันด้วยรหัสผ่านปัจจุบัน'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('ยกเลิก'),
+          ),
+          TextButton(
+            onPressed: () async {
+              final authResult = await FaceAuthRepository.authenticateWithPassword(
+                email: _currentUser!.email,
+                password: passCtrl.text,
+              );
+              if (!authResult.isSuccess) {
+                if (ctx.mounted) {
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                    const SnackBar(content: Text('รหัสผ่านไม่ถูกต้อง')),
+                  );
+                }
+                return;
+              }
+
+              await FaceAuthRepository.deleteAccount(_currentUser!.email);
+
+              if (!ctx.mounted) return;
+              Navigator.pop(ctx);
+              if (!context.mounted) return;
+              Navigator.pushAndRemoveUntil(
+                context,
+                MaterialPageRoute(builder: (context) => const FaceLoginScreen()),
+                (route) => false,
+              );
+            },
+            child: const Text('ลบถาวร',
+                style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
   // --- ปุ่ม ออกจากระบบ (Logout) สไตล์สีเขียวเข้มตาม Figma ---
   Widget _buildLogoutButton(BuildContext context) {
     return Container(
@@ -377,8 +501,10 @@ class _AgencyProfileScreenState extends State<AgencyProfileScreen> {
         ],
       ),
       child: ElevatedButton(
-        onPressed: () {
-          // ออกจากระบบกลับไปหน้าล็อกอิน
+        onPressed: () async {
+          // ออกจากระบบกลับไปหน้าล็อกอิน (เดิมไม่ได้เคลียร์ session จริงเลย)
+          await FaceAuthRepository.logout();
+          if (!context.mounted) return;
           Navigator.pushAndRemoveUntil(
             context,
             MaterialPageRoute(builder: (context) => const FaceLoginScreen()),
@@ -521,7 +647,7 @@ class _AgencyProfileScreenState extends State<AgencyProfileScreen> {
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
-                  onPressed: () {
+                  onPressed: () async {
                     if (newPassCtrl.text.length < 6) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(content: Text('รหัสผ่านใหม่ต้องมีความยาวอย่างน้อย 6 ตัวอักษร')),
@@ -534,6 +660,28 @@ class _AgencyProfileScreenState extends State<AgencyProfileScreen> {
                       );
                       return;
                     }
+                    if (_currentUser == null) return;
+
+                    // ตรวจรหัสผ่านเดิมจริงก่อนอนุญาตให้เปลี่ยน (เดิมไม่เช็คเลย)
+                    final authResult = await FaceAuthRepository.authenticateWithPassword(
+                      email: _currentUser!.email,
+                      password: oldPassCtrl.text,
+                    );
+                    if (!authResult.isSuccess) {
+                      if (ctx.mounted) {
+                        ScaffoldMessenger.of(ctx).showSnackBar(
+                          const SnackBar(content: Text('รหัสผ่านเดิมไม่ถูกต้อง')),
+                        );
+                      }
+                      return;
+                    }
+
+                    await FaceAuthRepository.updateUserPassword(
+                      _currentUser!.email,
+                      newPassCtrl.text,
+                    );
+
+                    if (!ctx.mounted) return;
                     Navigator.pop(ctx);
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(

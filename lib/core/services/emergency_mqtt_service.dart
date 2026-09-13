@@ -11,6 +11,8 @@ class EmergencyVehicleData {
   final double latitude;
   final double longitude;
   final double speed;
+  final double heading; // ทิศทางการเคลื่อนที่จริง (0-360 องศา, คำนวณจาก GPS)
+  final String plateNumber;
   final String emergencyType;
   final bool sirenActive;
   final DateTime timestamp;
@@ -24,6 +26,8 @@ class EmergencyVehicleData {
     required this.latitude,
     required this.longitude,
     required this.speed,
+    this.heading = 0.0,
+    this.plateNumber = '',
     required this.emergencyType,
     required this.sirenActive,
     required this.timestamp,
@@ -39,6 +43,8 @@ class EmergencyVehicleData {
       'latitude': latitude,
       'longitude': longitude,
       'speed': speed,
+      'heading': heading,
+      'plateNumber': plateNumber,
       'emergencyType': emergencyType,
       'sirenActive': sirenActive,
       'timestamp': timestamp.toIso8601String(),
@@ -71,6 +77,8 @@ class EmergencyVehicleData {
       latitude: (map['latitude'] as num?)?.toDouble() ?? 13.7563,
       longitude: (map['longitude'] as num?)?.toDouble() ?? 100.5018,
       speed: (map['speed'] as num?)?.toDouble() ?? 60.0,
+      heading: (map['heading'] as num?)?.toDouble() ?? 0.0,
+      plateNumber: map['plateNumber'] ?? '',
       emergencyType: map['emergencyType'] ?? 'ผู้ป่วยวิกฤตฉุกเฉิน (Red Code)',
       sirenActive: map['sirenActive'] ?? true,
       timestamp: map['timestamp'] != null
@@ -96,7 +104,10 @@ class EmergencyMqttService {
   bool _isConnected = false;
   static const String _broker = 'broker.emqx.io';
   static const int _port = 1883;
-  static const String topicAmbulanceBroadcast = 'routealert/emergency/ambulance';
+  // ใส่ namespace เฉพาะโปรเจกต์ (Firebase project id) กัน topic ชนกับคนอื่นที่
+  // clone repo นี้ไปทดสอบบน broker.emqx.io สาธารณะตัวเดียวกัน
+  static const String topicAmbulanceBroadcast =
+      'routealert-ccf91/emergency/ambulance';
 
   final StreamController<EmergencyVehicleData> _emergencyStreamController =
       StreamController<EmergencyVehicleData>.broadcast();
