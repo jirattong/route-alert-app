@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'package:flutter/foundation.dart';
 import 'package:image/image.dart' as img;
 import 'package:tflite_flutter/tflite_flutter.dart';
 import 'image_utils.dart';
@@ -15,7 +16,9 @@ class FaceRecognitionService {
 
   static const String modelPath = 'assets/models/mobilefacenet.tflite';
   static const int inputSize = 112; // MobileFaceNet standard input dimensions (112x112)
-  static const double recognitionThreshold = 0.80; // Strict similarity threshold for accurate match
+  // NOTE: The actual match threshold used in production lives in
+  // FaceAuthRepository._matchThreshold (0.70) — that is the single source of
+  // truth for how similar a live scan must be to count as a match.
 
   Future<void> initialize() async {
     if (_cachedModelLoaded && _cachedInterpreter != null) return;
@@ -31,6 +34,7 @@ class FaceRecognitionService {
       _cachedModelLoaded = true;
     } catch (e) {
       _cachedModelLoaded = false;
+      debugPrint('[FaceRecognitionService] model load failed: $e');
     }
   }
 

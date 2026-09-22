@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'firebase_options.dart';
-import 'features/auth_face_login/presentation/face_login_screen.dart';
+import 'features/auth_face_login/presentation/app_loading_screen.dart';
 
 import 'dart:async';
 
@@ -50,7 +50,12 @@ class RouteAlertApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF00A896)),
         useMaterial3: true,
       ),
-      home: const FaceLoginScreen(),
+      // AppLoadingScreen เช็ค session ที่ค้างอยู่ (ดูหัวข้อ 17 ใน CHANGES_SUMMARY.md)
+      // แล้วพาไปหน้าล็อกอินหรือหน้าหลักของ role ที่ถูกต้องเอง พร้อมอนิเมชันมือ
+      // การ์ตูนที่วาดเอง (นิ้วกาง/งอ) แทนหน้าขาวเปล่าๆ — โหลดเร็วมาก ไม่กระทบ
+      // "เปิดแอปทันที" ตามที่ตั้งใจไว้ด้านบน (Onboarding เช็คแยกอีกทีหลังล็อกอินแล้ว
+      // ดูหัวข้อ 16)
+      home: const AppLoadingScreen(),
     );
   }
 }

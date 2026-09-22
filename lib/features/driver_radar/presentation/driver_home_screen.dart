@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:tutorial_coach_mark/tutorial_coach_mark.dart';
+import '../../../core/ml/siren_detection_service.dart';
 import '../../../core/services/location_service.dart';
 import '../../../core/services/driver_storage_service.dart';
 import '../../../core/services/emergency_mqtt_service.dart';
@@ -11,17 +13,29 @@ import '../../../core/services/voice_alert_service.dart';
 import '../../../core/models/incident_report.dart';
 import '../../../core/services/critical_notification_service.dart';
 import '../../../core/services/incident_service.dart';
+import '../../../core/services/hospital_location_service.dart';
 import '../../../core/services/ai_trajectory_service.dart';
 import '../../../core/services/theme_settings_service.dart';
 import '../../../core/models/emergency_proximity_tier.dart';
 import 'incident_detail_screen.dart';
 
+/// แถบ debug สถานะ MQTT ชั่วคราว — เปิดไว้ตอนไล่บั๊กเชื่อมต่อ 2 เครื่อง ตอนนี้บั๊กที่
+/// ใช้วินิจฉัยแก้แล้ว (ดู CHANGES_SUMMARY.md หัวข้อ 11.1/11.2) ปิดไว้เป็น false โดย
+/// default แต่เปิดกลับมาได้ง่ายๆ ถ้าต้อง debug การเชื่อมต่อ MQTT อีกในอนาคต
+const bool kShowMqttDebugBar = false;
+
 class DriverHomeScreen extends StatefulWidget {
   final VoidCallback? onOpenSos;
+
+  /// เรียกครั้งเดียวตอน initState เพื่อส่งฟังก์ชันเปิด Coach Mark ขึ้นไปให้
+  /// DriverMainScreen เก็บไว้ — ใช้ตอนผู้ใช้กด "สอนการใช้งานปุ่มต่างๆ" จากหน้า
+  /// ตั้งค่า (คนละหน้ากับหน้านี้ แต่ยังอยู่ใน IndexedStack เดียวกัน)
+  final ValueChanged<VoidCallback>? onCoachMarkReady;
 
   const DriverHomeScreen({
     super.key,
     this.onOpenSos,
+    this.onCoachMarkReady,
   });
 
   @override
@@ -43,7 +57,13 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
   // ทิศทางการเคลื่อนที่จริงของ Driver คำนวณจากพิกัด GPS 2 จุดล่าสุด (0-360 องศา)
   double _driverHeading = 45.0;
   LatLng? _lastDriverHeadingRefPos;
-  final double _driverSpeed = 50.0; // km/h
+  // ความเร็วจริงของผู้ขับ คำนวณจากระยะทาง GPS 2 จุดล่าสุด/เวลาที่ผ่านไป (หน่วย
+  // กม./ชม.) เดิมเป็นค่าคงที่ 50.0 ตายตัวเสมอไม่ว่าจะขับจริงหรือยืนนิ่งอยู่กับที่
+  // (บั๊กคลาสเดียวกับความเร็วรถพยาบาลที่แก้ไปแล้วก่อนหน้านี้) ค่านี้ยังถูกส่งเข้า
+  // AI trajectory evaluation จริงด้วย ไม่ใช่แค่โชว์บนจอเฉยๆ
+  double _driverSpeed = 0.0; // km/h
+  LatLng? _lastDriverSpeedRefPos;
+  DateTime? _lastDriverSpeedRefTime;
 
   LatLng? _ambulanceLocation;
   double _ambulanceHeading = 45.0;
@@ -89,10 +109,34 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
   Timer? _headsUpDismissTimer;
   StreamSubscription<HeadsUpAlertEvent>? _headsUpSubscription;
 
+  // 🔊 ตรวจจับเสียงไซเรนจากไมโครโฟน (สัญญาณเสริม แยกจาก GPS/MQTT)
+  // ปิดอยู่โดย default เสมอ เปิด/ปิดได้ในหน้าตั้งค่า — จับเสียงจริงเฉพาะตอนหน้านี้
+  // เปิดอยู่ + toggle เปิดเท่านั้น (หยุดจับเสียงทันทีที่ dispose())
+  bool _sirenDetectionEnabled = false;
+  SirenDetectionResult? _sirenResult;
+
+  // ตำแหน่งโรงพยาบาลปลายทาง — เดิมฝั่ง Driver ไม่เคยแสดงหมุดนี้เลยทั้งที่ฝั่ง
+  // Ambulance/Agency ใช้ข้อมูลชุดเดียวกันนี้อยู่แล้ว ทำให้ผู้ใช้งงว่าทำไมเห็นแค่
+  // รถพยาบาลแต่ไม่เห็นโรงพยาบาลปลายทางบนแผนที่ของตัวเอง
+  late LatLng _hospitalLocation;
+  StreamSubscription<HospitalProfile>? _hospitalSub;
+
+  // รีเฟรชแถบ debug เป็นระยะ (ตัวนับข้อความ MQTT ที่ได้รับ อัปเดตอยู่ในตัว service
+  // เอง ไม่ได้ผูกกับ setState ของหน้าจอนี้โดยตรง ถ้าเครื่องอยู่นิ่งไม่ขยับเกิน 3m
+  // ตัวเลขบนจอจะไม่ขยับตามให้เห็นทันที) — เอาออกได้เมื่อเลิกใช้เป็นเครื่องมือ debug
+  Timer? _debugRefreshTimer;
+
+  // Coach Mark: ชี้ตำแหน่งปุ่มจริงบนหน้าจอพร้อมคำอธิบาย — เรียกแบบ manual เท่านั้น
+  // จากปุ่ม "สอนการใช้งานปุ่มต่างๆ" ในหน้าตั้งค่า (ผ่าน widget.onCoachMarkReady)
+  final GlobalKey _keyGpsButton = GlobalKey();
+  final GlobalKey _keySosButton = GlobalKey();
+
   @override
   void initState() {
     super.initState();
     _ambulanceLocation = null;
+    _hospitalLocation = HospitalLocationService().hospitalLocation;
+    _initHospitalSync();
 
     _pulseController = AnimationController(
       vsync: this,
@@ -113,7 +157,134 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
     _initLiveLocation();
     _initMqttRadar();
     _initHeadsUpListener();
+    _initSirenDetection();
     IncidentService().initialize();
+    if (kShowMqttDebugBar) {
+      _debugRefreshTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+        if (mounted) setState(() {});
+      });
+    }
+    // ส่งฟังก์ชันเปิด Coach Mark ขึ้นไปให้ DriverMainScreen เก็บไว้ — ไม่โชว์เองอัตโนมัติ
+    // อีกต่อไป (ย้ายไปเป็นปุ่ม "สอนการใช้งานปุ่มต่างๆ" ในหน้าตั้งค่าแทน ตามที่ผู้ใช้ขอ)
+    widget.onCoachMarkReady?.call(_showCoachMark);
+  }
+
+  // แสดงคำแนะนำปุ่มแบบชี้ตำแหน่งจริง (Coach Mark) — เรียกได้ตลอดเวลาจากปุ่ม
+  // "สอนการใช้งานปุ่มต่างๆ" ในหน้าตั้งค่า (ไม่ผูกกับ "เคยดูแล้วหรือยัง" อีกต่อไป
+  // เพราะเป็นการเปิดดูตามใจผู้ใช้เอง ไม่ใช่การโชว์อัตโนมัติครั้งแรก)
+  void _showCoachMark() {
+    if (!mounted) return;
+    final targets = [
+      TargetFocus(
+        identify: 'gps_button',
+        keyTarget: _keyGpsButton,
+        shape: ShapeLightFocus.Circle,
+        contents: [
+          TargetContent(
+            align: ContentAlign.top,
+            child: _buildCoachMarkText(
+              'ปุ่มจัดกึ่งกลาง GPS',
+              'กดเพื่อเลื่อนแผนที่กลับมาที่ตำแหน่งปัจจุบันของคุณทันที',
+            ),
+          ),
+        ],
+      ),
+      TargetFocus(
+        identify: 'sos_button',
+        keyTarget: _keySosButton,
+        shape: ShapeLightFocus.Circle,
+        contents: [
+          TargetContent(
+            align: ContentAlign.top,
+            child: _buildCoachMarkText(
+              'ปุ่ม SOS',
+              'กดเมื่อพบเหตุฉุกเฉิน เพื่อแจ้งเหตุพร้อมถ่ายรูปสถานที่เกิดเหตุส่งให้ศูนย์สั่งการ',
+            ),
+          ),
+        ],
+      ),
+    ];
+
+    TutorialCoachMark(
+      targets: targets,
+      colorShadow: Colors.black,
+      opacityShadow: 0.85,
+    ).show(context: context);
+  }
+
+  Widget _buildCoachMarkText(String title, String description) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+            fontSize: 18,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          description,
+          style: const TextStyle(color: Colors.white, fontSize: 14),
+        ),
+      ],
+    );
+  }
+
+  // เดิมไม่เคยเรียก initialize() ของ HospitalLocationService เลย ทำให้ไม่มีการ
+  // ต่อ Firestore listener จริง — ปักหมุดโรงพยาบาลใหม่จาก Agency (เครื่องอื่น)
+  // จึงไม่มีวันไหลมาถึงฝั่ง Driver ได้เลย เห็นแค่พิกัด default ที่ hardcode ไว้
+  // ในเครื่องตัวเองตลอดไป แม้จะ subscribe profileStream ไว้แล้วก็ตาม (ไม่มีใครยิง
+  // event เข้ามาให้ฟัง)
+  void _initHospitalSync() async {
+    await HospitalLocationService().initialize();
+    if (!mounted) return;
+    setState(() {
+      _hospitalLocation = HospitalLocationService().hospitalLocation;
+    });
+    _hospitalSub = HospitalLocationService().profileStream.listen((profile) {
+      if (!mounted) return;
+      setState(() => _hospitalLocation = profile.location);
+    });
+  }
+
+  void _initSirenDetection() {
+    SirenDetectionService().resultNotifier.addListener(_onSirenResultChanged);
+    DriverStorageService.sirenDetectionEnabledNotifier
+        .addListener(_onSirenToggleChanged);
+
+    DriverStorageService.getSirenDetectionEnabled().then((enabled) {
+      if (!mounted) return;
+      setState(() => _sirenDetectionEnabled = enabled);
+      _applySirenDetectionState();
+    });
+  }
+
+  void _onSirenToggleChanged() {
+    if (!mounted) return;
+    setState(() {
+      _sirenDetectionEnabled = DriverStorageService.sirenDetectionEnabledNotifier.value;
+    });
+    _applySirenDetectionState();
+  }
+
+  void _applySirenDetectionState() {
+    if (_sirenDetectionEnabled) {
+      SirenDetectionService().start();
+    } else {
+      SirenDetectionService().stop();
+      if (mounted) setState(() => _sirenResult = null);
+    }
+  }
+
+  void _onSirenResultChanged() {
+    if (!mounted) return;
+    setState(() {
+      _sirenResult = SirenDetectionService().resultNotifier.value;
+    });
   }
 
   void _initHeadsUpListener() {
@@ -203,9 +374,36 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
     _locationSubscription?.cancel();
     _mqttSubscription?.cancel();
     _fleetSubscription?.cancel();
+    _hospitalSub?.cancel();
+    _debugRefreshTimer?.cancel();
     _simulationTimer?.cancel();
     _pulseController.dispose();
+    // หยุดจับเสียงไมโครโฟนทันทีที่ออกจากหน้าแผนที่ (ไม่จับเสียงเบื้องหลัง)
+    DriverStorageService.sirenDetectionEnabledNotifier.removeListener(_onSirenToggleChanged);
+    SirenDetectionService().resultNotifier.removeListener(_onSirenResultChanged);
+    SirenDetectionService().stop();
+    DriverStorageService.backgroundAlertEnabledNotifier
+        .removeListener(_onBackgroundAlertSettingChanged);
     super.dispose();
+  }
+
+  // ผู้ใช้เพิ่งเปิด/ปิดสวิตช์ "แจ้งเตือนพื้นหลัง" จากหน้าตั้งค่า — สมัคร location
+  // stream ใหม่ด้วยค่า backgroundMode ล่าสุดทันที (ยกเลิกของเดิมก่อนเสมอกัน
+  // subscription ซ้อนกันสอง stream พร้อมกัน)
+  void _onBackgroundAlertSettingChanged() {
+    if (!mounted) return;
+    _locationSubscription?.cancel();
+    _locationSubscription = LocationService.getLiveLocationStream(
+      backgroundMode: DriverStorageService.backgroundAlertEnabledNotifier.value,
+    ).listen((newPos) {
+      if (!mounted) return;
+      _updateDriverHeadingFromMovement(newPos);
+      _updateDriverSpeedFromMovement(newPos);
+      setState(() => _currentLocation = newPos);
+      if (_isSimulating || _hasLiveAmbulance) {
+        _runAiTrajectoryEvaluation();
+      }
+    });
   }
 
   void _onNightModeChanged() {
@@ -228,15 +426,28 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
       }
     }
 
+    // โหลดค่าที่บันทึกไว้ของสวิตช์ "แจ้งเตือนพื้นหลัง" ก่อนสมัคร stream ครั้งแรก
+    // (ถ้าไม่โหลดก่อน ทุกครั้งที่เปิดแอปใหม่จะกลับไปใช้ backgroundMode: false เสมอ
+    // แม้ผู้ใช้จะเปิดสวิตช์ไว้ก่อนหน้านี้แล้วก็ตาม)
+    final backgroundEnabled = await DriverStorageService.getBackgroundAlertEnabled();
+    if (!mounted) return;
     _locationSubscription =
-        LocationService.getLiveLocationStream().listen((newPos) {
+        LocationService.getLiveLocationStream(backgroundMode: backgroundEnabled)
+            .listen((newPos) {
       if (!mounted) return;
       _updateDriverHeadingFromMovement(newPos);
+      _updateDriverSpeedFromMovement(newPos);
       setState(() => _currentLocation = newPos);
       if (_isSimulating || _hasLiveAmbulance) {
         _runAiTrajectoryEvaluation();
       }
     });
+
+    // ฟังการเปลี่ยนสวิตช์นี้จากหน้าตั้งค่าระหว่างแอปเปิดอยู่ — ต้องสมัครหลังจาก
+    // สมัคร stream ครั้งแรกเสร็จแล้วเท่านั้น ไม่งั้นการโหลดค่าเริ่มต้นด้านบน (ถ้า
+    // ค่าที่บันทึกไว้เป็น true) จะยิง listener ซ้ำซ้อนโดยไม่จำเป็น
+    DriverStorageService.backgroundAlertEnabledNotifier
+        .addListener(_onBackgroundAlertSettingChanged);
   }
 
   // อัปเดตทิศทางการเคลื่อนที่จริงของ Driver จากพิกัด GPS 2 จุดล่าสุด
@@ -252,6 +463,29 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
       }
     } else {
       _lastDriverHeadingRefPos = newPos;
+    }
+  }
+
+  // คำนวณความเร็วจริงของผู้ขับจากระยะทาง (เมตร) / เวลาที่ผ่านไป (วินาที) ระหว่าง
+  // พิกัด GPS 2 จุดล่าสุด แปลงเป็น กม./ชม. — มี threshold เวลาขั้นต่ำกันหารด้วยค่า
+  // เวลาที่สั้นเกินไปจนทำให้ค่าความเร็วกระโดดผิดปกติจาก GPS jitter (เหมือนฝั่ง
+  // Ambulance ทุกประการ)
+  void _updateDriverSpeedFromMovement(LatLng newPos) {
+    final now = DateTime.now();
+    if (_lastDriverSpeedRefPos != null && _lastDriverSpeedRefTime != null) {
+      final elapsedSeconds =
+          now.difference(_lastDriverSpeedRefTime!).inMilliseconds / 1000.0;
+      if (elapsedSeconds >= 1.0) {
+        final movedMeters = LocationService.calculateDistanceInMeters(
+            _lastDriverSpeedRefPos!, newPos);
+        final metersPerSecond = movedMeters / elapsedSeconds;
+        _driverSpeed = metersPerSecond * 3.6;
+        _lastDriverSpeedRefPos = newPos;
+        _lastDriverSpeedRefTime = now;
+      }
+    } else {
+      _lastDriverSpeedRefPos = newPos;
+      _lastDriverSpeedRefTime = now;
     }
   }
 
@@ -281,6 +515,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
       _isSimulating = false;
       _hasVibrated = false;
       _hasPassedAnnouncement = false;
+      _ambulanceSpeed = 80.0;
 
       switch (_simulationMode) {
         case SimulationMode.inPathOvertake:
@@ -564,6 +799,13 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
 
   void _onYieldAcknowledge() async {
     await DriverStorageService.incrementYieldCount();
+    // บันทึกรายการประวัติจริง (เดิมมีแค่ตัวนับ ไม่มีประวัติเก็บไว้เลย ทำให้หน้า
+    // ประวัติต้องโชว์ข้อมูลตัวอย่าง hardcode แทนของจริง)
+    await DriverStorageService.addYieldHistoryEntry(
+      _activeFleet.isNotEmpty
+          ? 'เปิดทางให้รถฉุกเฉิน (${_activeFleet.first.callSign})'
+          : 'เปิดทางให้รถฉุกเฉิน',
+    );
     VoiceAlertService().speakYieldSuccess();
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -607,6 +849,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
         child: Column(
           children: [
             _buildHeader(),
+            if (kShowMqttDebugBar) _buildDebugStatusBar(),
             Expanded(
               child: Stack(
                 children: [
@@ -661,28 +904,40 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                   ),
 
                   // 2.3 🚨 Active SOS Tracking Banner (เคสฉุกเฉินที่กำลังดำเนินการ)
+                  // + 2.3.1 🔊 แบนเนอร์ตรวจพบเสียงไซเรนล้วนๆ (ไม่มีรถพยาบาลที่ระบุตำแหน่งด้วย GPS)
                   Positioned(
                     top: _isInRedZone ? 114 : 76,
                     left: 14,
                     right: 14,
-                    child: StreamBuilder<List<IncidentReport>>(
-                      stream: IncidentService().incidentsStream,
-                      builder: (context, snapshot) {
-                        final list = snapshot.data ?? [];
-                        final activeReports = list.where(
-                          (i) => i.status != 'resolved' && i.status != 'cancelled',
-                        ).toList();
-                        if (activeReports.isEmpty) return const SizedBox.shrink();
-                        final top = activeReports.first;
-                        return _buildActiveSosTrackingBanner(top);
-                      },
+                    child: Column(
+                      children: [
+                        StreamBuilder<List<IncidentReport>>(
+                          stream: IncidentService().incidentsStream,
+                          builder: (context, snapshot) {
+                            final list = snapshot.data ?? [];
+                            final activeReports = list.where(
+                              (i) => i.status != 'resolved' && i.status != 'cancelled',
+                            ).toList();
+                            if (activeReports.isEmpty) return const SizedBox.shrink();
+                            final top = activeReports.first;
+                            return _buildActiveSosTrackingBanner(top);
+                          },
+                        ),
+                        _buildSirenOnlyAlertBanner(),
+                      ],
                     ),
                   ),
 
                   // 2.2 🟢 Live Presence Indicator Pill (แสดงจำนวนผู้ใช้งานออนไลน์รอบตัวสดๆ)
-                  if (!_isInRedZone && _activeHeadsUp == null)
+                  // เดิม top:130 ลอยอยู่กลางจอห่างจากแถบ debug ด้านบนมาก ดูขัดตา ย้ายขึ้น
+                  // มาชิดขอบบนแทน แต่ HUD ฉุกเฉินที่ top:12 (_buildDramaticEmergencyHud) ก็
+                  // แสดงผลเต็มความกว้างจอทันทีที่ _aiPrediction != null แม้จะยังไม่ใช่โซนแดง
+                  // (เช่น turnBypass/movingAway/opposingLane/blue-zone approachingCorridor ที่
+                  // shouldAlert: false) ทำให้ป้ายนี้ซ้อนทับ HUD ได้ ต้องซ่อนป้ายนี้ไปด้วยเมื่อ
+                  // HUD กำลังแสดงเนื้อหาอยู่ ไม่ใช่แค่ตอนอยู่โซนแดงเท่านั้น
+                  if (!_isInRedZone && _activeHeadsUp == null && _aiPrediction == null)
                     Positioned(
-                      top: 130,
+                      top: 14,
                       left: 14,
                       child: InkWell(
                         onTap: () => _showLivePresenceModal(context),
@@ -733,9 +988,11 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                     ),
 
                   // 2.4 ⚖️ ปุ่มกฎหมายระยะ 50 ม. (พ.ร.บ. จราจร ม.76)
-                  if (!_isInRedZone && _activeHeadsUp == null)
+                  // ย้ายขึ้นมาชิดขอบบนคู่กับป้ายออนไลน์ ด้วยเหตุผลเดียวกัน — และซ่อนเมื่อ HUD
+                  // ฉุกเฉินกำลังแสดงผลด้วยเหตุผลเดียวกับป้ายออนไลน์ด้านบน (ดูคอมเมนต์ 2.2)
+                  if (!_isInRedZone && _activeHeadsUp == null && _aiPrediction == null)
                     Positioned(
-                      top: 130,
+                      top: 14,
                       right: 14,
                       child: InkWell(
                         onTap: () => _showLegalDistanceModal(context),
@@ -788,6 +1045,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                       },
                       borderRadius: BorderRadius.circular(25),
                       child: Container(
+                        key: _keyGpsButton,
                         width: 44,
                         height: 44,
                         decoration: BoxDecoration(
@@ -822,6 +1080,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                       onTap: widget.onOpenSos,
                       borderRadius: BorderRadius.circular(35),
                       child: Container(
+                        key: _keySosButton,
                         width: 58,
                         height: 58,
                         decoration: BoxDecoration(
@@ -1142,6 +1401,59 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
     }
   }
 
+  // แถบ debug ชั่วคราวสำหรับตรวจสอบตอนทดสอบ 2 เครื่องแล้วไม่เจอกัน — โชว์สถานะ
+  // เชื่อมต่อ MQTT จริง/จำนวนรถพยาบาลที่เห็นในระบบ/พิกัด GPS จริงตรงๆ แทนการเดา
+  Widget _buildDebugStatusBar() {
+    final mqtt = EmergencyMqttService();
+    final connected = mqtt.isConnected;
+    final statusColor =
+        connected ? const Color(0xFF047857) : const Color(0xFFB91C1C);
+    return Container(
+      width: double.infinity,
+      color: connected ? const Color(0xFFECFDF5) : const Color(0xFFFEF2F2),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            'MQTT: ${connected ? "เชื่อมต่อแล้ว ✅" : "ยังไม่เชื่อมต่อ ❌"}  •  '
+            'ข้อความที่ได้รับ: ${mqtt.messagesReceivedCount}  •  '
+            'รถพยาบาลในระบบ: ${_activeFleet.length} คัน',
+            style: TextStyle(
+                fontSize: 10, fontWeight: FontWeight.w600, color: statusColor),
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          Text(
+            'พิกัดฉัน: ${_currentLocation.latitude.toStringAsFixed(5)}, ${_currentLocation.longitude.toStringAsFixed(5)}',
+            style: TextStyle(
+                fontSize: 9, fontWeight: FontWeight.w600, color: statusColor),
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          if (!connected && mqtt.lastError != null)
+            Text(
+              mqtt.lastError!,
+              style: const TextStyle(fontSize: 9, color: Color(0xFFB91C1C)),
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          if (connected && mqtt.lastParseError != null)
+            Text(
+              mqtt.lastParseError!,
+              style: const TextStyle(fontSize: 9, color: Color(0xFFB91C1C)),
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildHeader() {
     final isDark = _isNightMode;
     return Container(
@@ -1372,6 +1684,25 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
     );
   }
 
+  /// ข้อความสถานะการตรวจจับเสียงไซเรน (สัญญาณเสริม แยกจาก GPS) — แสดงเฉพาะค่าที่
+  /// มาจากโมเดล AI จริงเท่านั้น ห้ามมีตัวเลขปลอมเด็ดขาด (ดู CHANGES_SUMMARY.md ข้อ 3)
+  /// จุดนี้แสดงในบริบทที่ระบบ GPS ตรวจพบรถพยาบาลใกล้ตัวอยู่แล้ว (_isInRedZone) —
+  /// ถ้าไมค์ตรวจพบเสียงไซเรนพร้อมกันด้วย ถือเป็นการ "ยืนยัน 2 สัญญาณ" ที่หนักแน่นขึ้น
+  String _sirenBadgeText() {
+    if (!_sirenDetectionEnabled) {
+      return '🔊 ตรวจจับเสียงไซเรน: ปิดอยู่ (เปิดได้ในหน้าตั้งค่า)';
+    }
+    if (!SirenDetectionService().isModelLoaded) {
+      return '🔊 ตรวจจับเสียงไซเรน: ยังไม่มีโมเดล AI (รอฝึกโมเดล)';
+    }
+    final result = _sirenResult;
+    if (result != null && result.isDetected && result.confidence != null) {
+      final pct = (result.confidence! * 100).toStringAsFixed(0);
+      return '🔊 ยืนยัน 2 สัญญาณ: เสียงไซเรน + GPS ตรงกัน ($pct%)';
+    }
+    return '🔊 ตรวจจับเสียงไซเรน: ยังไม่พบเสียงไซเรนในขณะนี้';
+  }
+
   /// Dramatic & Unmistakable Emergency HUD Banner
   Widget _buildDramaticEmergencyHud(int meters) {
     final pred = _aiPrediction;
@@ -1554,7 +1885,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                 ),
                 const SizedBox(height: 6),
 
-                // 🔊 AI Audio Spectrogram CNN Verification Badge
+                // 🛰️ Route-Aware AI Badge / 🔊 สถานะการตรวจจับเสียงไซเรนจริง (ไม่ปลอมตัวเลข)
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
@@ -1564,13 +1895,19 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.alt_route_rounded, size: 14, color: Colors.cyanAccent),
+                      Icon(
+                        pred.isRouteAwareActive ? Icons.alt_route_rounded : Icons.mic_rounded,
+                        size: 14,
+                        color: Colors.cyanAccent,
+                      ),
                       const SizedBox(width: 5),
-                      Text(
-                        pred.isRouteAwareActive
-                            ? '🛰️ Route-Aware AI: ล็อกเส้นทางถนนจริง (${pred.turnIntent ?? "ตรงตามเลน"})'
-                            : '🔊 AI Spectrogram CNN: ตรวจพบคลื่นเสียงไซเรน Yelp (98.5%)',
-                        style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Colors.cyanAccent),
+                      Flexible(
+                        child: Text(
+                          pred.isRouteAwareActive
+                              ? '🛰️ Route-Aware AI: ล็อกเส้นทางถนนจริง (${pred.turnIntent ?? "ตรงตามเลน"})'
+                              : _sirenBadgeText(),
+                          style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Colors.cyanAccent),
+                        ),
                       ),
                     ],
                   ),
@@ -2027,7 +2364,8 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
             ),
           ),
           Text(
-            '3.0 KM',
+            // เดิม hardcode '3.0 KM' ตายตัว ไม่ตรงกับรัศมีเตือนภัยที่ผู้ใช้ตั้งค่าไว้จริง
+            '${(_outerRadarMeters / 1000.0).toStringAsFixed(1)} KM',
             style: TextStyle(
               fontSize: 11.5,
               fontWeight: FontWeight.bold,
@@ -2139,6 +2477,30 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
               : null,
         ),
 
+        // วงรัศมีแจ้งเตือน: วงนอกสีฟ้า (เรดาร์) + วงในสีแดง (แจ้งเตือนวิกฤต)
+        // อ้างอิงจากค่าที่ตั้งไว้ในหน้า Settings แสดงรอบตำแหน่งปัจจุบันของผู้ใช้
+        // ให้เห็นชัดเจนว่าปรับแล้วระยะจริงบนแผนที่ใหญ่แค่ไหน
+        CircleLayer(
+          circles: [
+            CircleMarker(
+              point: _currentLocation,
+              radius: _outerRadarMeters,
+              useRadiusInMeter: true,
+              color: const Color(0xFF5B9EE1).withValues(alpha: 0.08),
+              borderColor: const Color(0xFF5B9EE1).withValues(alpha: 0.6),
+              borderStrokeWidth: 2,
+            ),
+            CircleMarker(
+              point: _currentLocation,
+              radius: _innerAlertMeters,
+              useRadiusInMeter: true,
+              color: const Color(0xFFEB5757).withValues(alpha: 0.12),
+              borderColor: const Color(0xFFEB5757).withValues(alpha: 0.75),
+              borderStrokeWidth: 2,
+            ),
+          ],
+        ),
+
         // เส้นทางรถกู้ภัยจำแนกสีตามขอบเขตระยะห่างกฎหมายจราจร (Proximity Route Polylines)
         if (_isSimulating || _hasLiveAmbulance)
           PolylineLayer(
@@ -2191,6 +2553,32 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
 
             // 2. Ambulance Markers (รถพยาบาลฉุกเฉินเฉพาะเมื่อมีรถออนไลน์หรือเปิดจำลอง)
             ...ambulanceMarkers,
+
+            // 3. หมุดโรงพยาบาลปลายทาง (ข้อมูลชุดเดียวกับที่ฝั่ง Ambulance/Agency ใช้)
+            Marker(
+              point: _hospitalLocation,
+              width: 44,
+              height: 44,
+              child: Container(
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                      color: const Color(0xFF00A896), width: 2),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFF00A896).withValues(alpha: 0.4),
+                      blurRadius: 8,
+                    ),
+                  ],
+                ),
+                child: const Center(
+                  child: Icon(Icons.local_hospital_rounded,
+                      color: Color(0xFF00A896), size: 24),
+                ),
+              ),
+            ),
           ],
         ),
       ],
@@ -2350,6 +2738,84 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
               onPressed: () {
                 setState(() => _activeHeadsUp = null);
               },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 🔊 แบนเนอร์ "ตรวจพบเสียงไซเรน" แบบสัญญาณเดี่ยว (ไม่มีรถพยาบาลที่ระบุตำแหน่งผ่าน
+  /// GPS/MQTT ยืนยันร่วมด้วย) — ใช้เมื่อไมโครโฟนตรวจพบเสียงไซเรนความมั่นใจสูง แต่ระบบ
+  /// เรดาร์ GPS หลักไม่พบรถพยาบาลในระยะเลย ถือเป็น "สัญญาณอิสระ" คนละชุดกับระบบหลัก
+  /// จึง**ห้ามบอกระยะทาง/ทิศทางที่แม่นยำ** เพราะไมค์โทรศัพท์เครื่องเดียวบอกระยะ/ทิศ
+  /// ที่แน่นอนไม่ได้จริง (กฎ honesty ของโปรเจกต์นี้)
+  Widget _buildSirenOnlyAlertBanner() {
+    final result = _sirenResult;
+    final hasGpsAmbulanceNearby = _hasLiveAmbulance || _isSimulating;
+
+    if (!_sirenDetectionEnabled ||
+        result == null ||
+        !result.isDetected ||
+        hasGpsAmbulanceNearby) {
+      return const SizedBox.shrink();
+    }
+
+    final pct = result.confidence != null
+        ? '${(result.confidence! * 100).toStringAsFixed(0)}%'
+        : '';
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: const Color(0xFFB45309),
+          borderRadius: BorderRadius.circular(18),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFFB45309).withValues(alpha: 0.4),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(7),
+              decoration: const BoxDecoration(
+                color: Colors.white24,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.hearing_rounded, color: Colors.white, size: 20),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    '🔊 ตรวจพบเสียงไซเรนใกล้เคียง$pct',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  const Text(
+                    'ไม่ทราบระยะ/ทิศทางแน่ชัด (จับจากไมโครโฟนอย่างเดียว ยังไม่พบ '
+                    'รถพยาบาลผ่าน GPS) โปรดสังเกตรอบข้างด้วยตนเอง',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ],
         ),

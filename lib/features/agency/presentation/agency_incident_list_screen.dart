@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../../core/models/incident_report.dart';
 import '../../../core/services/incident_service.dart';
+import '../../../core/services/agency_storage_service.dart';
 import 'agency_incident_detail_screen.dart';
 
 class AgencyIncidentListScreen extends StatefulWidget {
@@ -12,10 +13,35 @@ class AgencyIncidentListScreen extends StatefulWidget {
 }
 
 class _AgencyIncidentListScreenState extends State<AgencyIncidentListScreen> {
+  // ค่าตั้งค่าจริงจากหน้า Settings (เดิมหน้านี้ไม่เคยอ่านค่าพวกนี้เลย ตั้งค่าแล้วไม่มีผลอะไร)
+  bool _criticalOnly = false;
+  double _alertDistanceKm = 15.0;
+
   @override
   void initState() {
     super.initState();
     IncidentService().initialize();
+    AgencyStorageService.loadSettings();
+    _applySettings(AgencyStorageService.settingsNotifier.value);
+    AgencyStorageService.settingsNotifier.addListener(_onSettingsChanged);
+  }
+
+  @override
+  void dispose() {
+    AgencyStorageService.settingsNotifier.removeListener(_onSettingsChanged);
+    super.dispose();
+  }
+
+  void _onSettingsChanged() {
+    if (!mounted) return;
+    _applySettings(AgencyStorageService.settingsNotifier.value);
+  }
+
+  void _applySettings(Map<String, dynamic> settings) {
+    setState(() {
+      _criticalOnly = settings['criticalOnly'] as bool? ?? false;
+      _alertDistanceKm = (settings['alertDistanceKm'] as num?)?.toDouble() ?? 15.0;
+    });
   }
 
   @override
@@ -50,8 +76,28 @@ class _AgencyIncidentListScreenState extends State<AgencyIncidentListScreen> {
                   }
 
                   final rawList = snapshot.data ?? [];
-                  final list = rawList.where((i) => i.status != 'cancelled').toList();
+                  final activeList =
+                      rawList.where((i) => i.status != 'cancelled').toList();
+
+                  // กรองตามการตั้งค่าจริงของหน่วยงาน (เดิมตั้งค่า criticalOnly /
+                  // alertDistanceKm ไม่มีผลกับรายการนี้เลย):
+                  // - criticalOnly: โชว์เฉพาะเคสวิกฤต (Code Red)
+                  // - alertDistanceKm: ซ่อนเคสที่ไกลจาก รพ. เกินระยะที่ตั้งไว้
+                  final list = activeList.where((i) {
+                    if (_criticalOnly &&
+                        !(i.severity.contains('Code Red') ||
+                            i.severity.contains('วิกฤต'))) {
+                      return false;
+                    }
+                    final dist = i.hospitalDistanceKm;
+                    if (dist != null && dist > _alertDistanceKm) {
+                      return false;
+                    }
+                    return true;
+                  }).toList();
+
                   if (list.isEmpty) {
+                    final hiddenByFilter = activeList.isNotEmpty;
                     return Center(
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
@@ -60,7 +106,10 @@ class _AgencyIncidentListScreenState extends State<AgencyIncidentListScreen> {
                               color: Colors.grey.shade400, size: 56),
                           const SizedBox(height: 12),
                           Text(
-                            'ไม่มีเคสฉุกเฉินที่กำลังนำส่งในขณะนี้',
+                            hiddenByFilter
+                                ? 'ไม่มีเคสที่ตรงกับตัวกรองการแจ้งเตือนปัจจุบัน\n(ปรับได้ที่หน้าตั้งค่า)'
+                                : 'ไม่มีเคสฉุกเฉินที่กำลังนำส่งในขณะนี้',
+                            textAlign: TextAlign.center,
                             style: TextStyle(color: Colors.grey.shade600, fontSize: 14),
                           ),
                         ],

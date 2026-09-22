@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:image/image.dart' as img;
@@ -44,6 +45,7 @@ class AntiSpoofingService {
       _cachedModelLoaded = true;
     } catch (e) {
       _cachedModelLoaded = false;
+      debugPrint('[AntiSpoofingService] model load failed: $e');
     }
   }
 

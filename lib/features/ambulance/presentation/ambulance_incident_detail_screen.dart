@@ -6,7 +6,9 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:latlong2/latlong.dart';
 import '../../../core/models/incident_report.dart';
+import '../../../core/services/ambulance_storage_service.dart';
 import '../../../core/services/incident_service.dart';
+import '../../../core/services/location_service.dart';
 
 class AmbulanceIncidentDetailScreen extends StatefulWidget {
   final IncidentReport? incident;
@@ -28,6 +30,28 @@ class _AmbulanceIncidentDetailScreenState
   late int _currentStep;
   late List<String> _photoList;
 
+  // รหัสหน่วยของเครื่องนี้เอง โหลดจาก AmbulanceStorageService (เดียวกับที่ใช้ใน
+  // ambulance_home_screen.dart) ใช้เช็คความเป็นเจ้าของเคสก่อนอนุญาตให้เลื่อนสถานะ
+  String? _ownAmbulanceId;
+
+  // ตำแหน่งจริงของรถพยาบาลเครื่องนี้ (ถ้าดึงได้) แทนตำแหน่งที่ fake ขึ้นมาแบบ
+  // incidentLocation + offset คงที่
+  LatLng? _realAmbulanceLocation;
+
+  // เคสนี้เป็นของหน่วยนี้จริงหรือไม่ — ต้องมี assignedAmbulanceId ตรงกับหน่วยนี้เท่านั้น
+  // ถึงจะอนุญาตให้เลื่อนสถานะภารกิจ (กันไม่ให้รถพยาบาลคันอื่นมาเลื่อนสถานะเคสที่ไม่ใช่ของตัวเอง)
+  bool get _isOwnCase {
+    final incident = widget.incident;
+    // legacy/demo path (incidentData-map เท่านั้น ไม่มี incident จริง) — เดิม return
+    // true (สมมติว่าเป็นเคสของตัวเอง) ซึ่งจะข้ามการเช็คความเป็นเจ้าของเคสไปเลยถ้า
+    // เส้นทางนี้ถูกใช้งานอีกครั้งในอนาคต ตอนนี้ปัจจุบันไม่มีจุดเรียกใช้ path นี้แล้ว
+    // (เรียกด้วย incident: เสมอ) แต่เผื่อไว้ให้ default เป็น "ไม่ใช่เคสของตัวเอง"
+    // (ปลอดภัยกว่า) แทนการสมมติเอาเองว่าเป็นเคสของตัวเอง (bypass การ์ดป้องกัน)
+    if (incident == null) return false;
+    if (_ownAmbulanceId == null) return false; // ยังโหลดรหัสหน่วยตัวเองไม่เสร็จ
+    return incident.assignedAmbulanceId == _ownAmbulanceId;
+  }
+
   // ลำดับขั้นตอนการปฏิบัติงาน (Forward-Only State)
   final List<Map<String, String>> _statusSteps = [
     {'title': 'กำลังรอยืนยัน', 'desc': 'รอรถพยาบาลกดรับเคส', 'status': 'pending'},
@@ -44,6 +68,32 @@ class _AmbulanceIncidentDetailScreenState
     if (_currentStep < 0) _currentStep = 0;
     if (_currentStep >= _statusSteps.length) _currentStep = _statusSteps.length - 1;
     _photoList = List<String>.from(widget.incident?.scenePhotosBase64 ?? const []);
+    _loadOwnAmbulanceId();
+    _loadRealLocation();
+  }
+
+  Future<void> _loadOwnAmbulanceId() async {
+    final profile = await AmbulanceStorageService.loadProfile();
+    if (!mounted) return;
+    setState(() => _ownAmbulanceId = profile['ambulanceId']);
+  }
+
+  // ดึงตำแหน่ง GPS จริงของเครื่องนี้ (ถ้าทำได้) มาใช้แสดงบนมินิแมพ แทนตำแหน่งปลอม
+  Future<void> _loadRealLocation() async {
+    final pos = await LocationService.getCurrentLocation();
+    if (!mounted || pos == null) return;
+    setState(() => _realAmbulanceLocation = pos);
+  }
+
+  // แจ้งเตือนเมื่อพยายามเลื่อนสถานะเคสที่ไม่ใช่ของหน่วยตัวเอง
+  void _showNotOwnCaseWarning() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+            '⚠️ เคสนี้ถูกมอบหมายให้หน่วยพยาบาลอื่น ไม่สามารถเลื่อนสถานะภารกิจนี้ได้'),
+        backgroundColor: Color(0xFFEB5757),
+      ),
+    );
   }
 
   // ถ่ายรูปจริงจากกล้อง บีบอัดขนาด แล้วบันทึกเข้าเคสจริงผ่าน IncidentService
@@ -86,6 +136,11 @@ class _AmbulanceIncidentDetailScreenState
   // ⏳ หน้าต่างยืนยันเปลี่ยนสถานะ พร้อมคูลดาวน์นับถอยหลัง 3 วินาที
   void _showNextStatusConfirmDialog() {
     if (_currentStep >= _statusSteps.length - 1) return;
+    // Defense-in-depth: กันเรียกฟังก์ชันนี้ตรงๆ ข้ามการเช็คที่ปุ่มด้านนอก
+    if (!_isOwnCase) {
+      _showNotOwnCaseWarning();
+      return;
+    }
 
     final nextStepInfo = _statusSteps[_currentStep + 1];
     int cooldownSec = 3;
@@ -264,10 +319,13 @@ class _AmbulanceIncidentDetailScreenState
     final LatLng incidentLocation = widget.incident != null
         ? LatLng(widget.incident!.latitude, widget.incident!.longitude)
         : const LatLng(19.0284, 99.8962);
-    final LatLng ambulanceLocation = LatLng(
-      incidentLocation.latitude + 0.008,
-      incidentLocation.longitude + 0.008,
-    );
+    // ใช้ตำแหน่ง GPS จริงของเครื่องนี้ถ้าดึงได้ แทนตำแหน่งปลอมที่ offset คงที่จาก
+    // จุดเกิดเหตุ (เดิม incidentLocation + (0.008, 0.008) ไม่ใช่ตำแหน่งจริงเลย)
+    final LatLng ambulanceLocation = _realAmbulanceLocation ??
+        LatLng(
+          incidentLocation.latitude + 0.008,
+          incidentLocation.longitude + 0.008,
+        );
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -505,7 +563,38 @@ class _AmbulanceIncidentDetailScreenState
 
                     const SizedBox(height: 24),
 
-                    // ปุ่มเปลี่ยนสถานะขั้นตอนถัดไป
+                    // แบนเนอร์เตือนเมื่อเคสนี้ถูกมอบหมายให้หน่วยอื่น ไม่ใช่ของเครื่องนี้
+                    if (!_isOwnCase && _currentStep < _statusSteps.length - 1)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 28),
+                        child: Container(
+                          margin: const EdgeInsets.only(bottom: 12),
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFFF3E0),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: const Color(0xFFE65100)),
+                          ),
+                          child: const Row(
+                            children: [
+                              Icon(Icons.warning_amber_rounded,
+                                  color: Color(0xFFE65100), size: 20),
+                              SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  'เคสนี้ถูกมอบหมายให้หน่วยพยาบาลอื่น คุณไม่สามารถเลื่อนสถานะภารกิจนี้ได้',
+                                  style: TextStyle(
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.bold,
+                                      color: Color(0xFFE65100)),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+
+                    // ปุ่มเปลี่ยนสถานะขั้นตอนถัดไป (เฉพาะหน่วยที่ได้รับมอบหมายเคสนี้จริงเท่านั้น)
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 28),
                       child: SizedBox(
@@ -513,10 +602,14 @@ class _AmbulanceIncidentDetailScreenState
                         height: 48,
                         child: ElevatedButton(
                           onPressed: _currentStep < _statusSteps.length - 1
-                              ? _showNextStatusConfirmDialog
+                              ? (_isOwnCase
+                                  ? _showNextStatusConfirmDialog
+                                  : _showNotOwnCaseWarning)
                               : null,
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFFEB5757),
+                            backgroundColor: _isOwnCase
+                                ? const Color(0xFFEB5757)
+                                : Colors.grey.shade400,
                             disabledBackgroundColor: const Color(0xFF10B981),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(24),
@@ -525,7 +618,9 @@ class _AmbulanceIncidentDetailScreenState
                           ),
                           child: Text(
                             _currentStep < _statusSteps.length - 1
-                                ? '👉 เลื่อนสถานะเป็น "${_statusSteps[_currentStep + 1]['title']}"'
+                                ? (_isOwnCase
+                                    ? '👉 เลื่อนสถานะเป็น "${_statusSteps[_currentStep + 1]['title']}"'
+                                    : '🔒 เคสของหน่วยอื่น (ไม่สามารถเลื่อนสถานะ)')
                                 : '✅ ภารกิจนำส่งเสร็จสิ้นสมบูรณ์',
                             style: const TextStyle(
                               fontSize: 15,

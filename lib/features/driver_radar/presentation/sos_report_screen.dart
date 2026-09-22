@@ -1,12 +1,15 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:latlong2/latlong.dart';
+import '../../../core/localization/app_strings.dart';
 import '../../../core/models/incident_report.dart';
 import '../../../core/services/ai_vision_triage_service.dart';
+import '../../../core/services/app_language_service.dart';
 import '../../../core/services/hospital_location_service.dart';
 import '../../../core/services/incident_service.dart';
 import '../../../core/services/location_service.dart';
@@ -67,6 +70,10 @@ class _SosReportScreenState extends State<SosReportScreen> {
   bool _isAiAnalyzingImage = false;
   AiTriageResult? _aiTriageResult;
 
+  // เป็น true ก็ต่อเมื่อเบอร์โทรที่แสดงเป็นเบอร์จริงที่บันทึกไว้ในโปรไฟล์
+  // (ไม่ใช่เบอร์ fallback '081-234-5678' ที่ใส่ไว้ตอนยังไม่มีเบอร์จริง)
+  bool _isPhoneVerifiedFromAccount = false;
+
   @override
   void initState() {
     super.initState();
@@ -77,14 +84,31 @@ class _SosReportScreenState extends State<SosReportScreen> {
     }
     _initUserProfile();
     _fetchGpsLocation();
+    AppLanguageService.isEnglish.addListener(_onLanguageChanged);
+  }
+
+  @override
+  void dispose() {
+    AppLanguageService.isEnglish.removeListener(_onLanguageChanged);
+    super.dispose();
+  }
+
+  void _onLanguageChanged() {
+    if (mounted) setState(() {});
   }
 
   Future<void> _initUserProfile() async {
     final currentUser = await FaceAuthRepository.getCurrentUser();
-    if (currentUser != null && currentUser.id != 'guest') {
+    // ใส่เบอร์โทรจริงของผู้ใช้ที่เคยบันทึกไว้ในหน้าโปรไฟล์ (เดิมใส่เบอร์ hardcode
+    // เดียวกันทับทุกครั้งไม่ว่าใครล็อกอินอยู่ ทำให้ระบบแยกไม่ออกว่าใครแจ้งเหตุจริง)
+    if (currentUser != null &&
+        currentUser.id != 'guest' &&
+        currentUser.phone != null &&
+        currentUser.phone!.isNotEmpty) {
       if (mounted) {
         setState(() {
-          _phoneController.text = '081-234-5678';
+          _phoneController.text = currentUser.phone!;
+          _isPhoneVerifiedFromAccount = true;
         });
       }
     }
@@ -170,7 +194,7 @@ class _SosReportScreenState extends State<SosReportScreen> {
       if (source == ImageSource.camera) {
         if (_pickedImages.length >= 5) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('สามารถแนบรูปถ่ายได้สูงสุด 5 รูป')),
+            SnackBar(content: Text(AppStrings.t('sos_max_photos_warning'))),
           );
           return;
         }
@@ -325,16 +349,16 @@ class _SosReportScreenState extends State<SosReportScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text(
-                'เลือกแหล่งที่มาของรูปภาพ (แนบได้สูงสุด 5 รูป)',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              Text(
+                AppStrings.t('sos_photo_picker_title'),
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 12),
               ListTile(
                 leading: const Icon(Icons.camera_alt_rounded,
                     color: Color(0xFF5B9EE1)),
-                title: const Text('ถ่ายรูปจากกล้อง (Camera)'),
-                subtitle: const Text('ถ่ายมุมมองจุดเกิดเหตุหรือรอยชน'),
+                title: Text(AppStrings.t('sos_photo_camera_title')),
+                subtitle: Text(AppStrings.t('sos_photo_camera_subtitle')),
                 onTap: () {
                   Navigator.pop(ctx);
                   _pickImages(ImageSource.camera);
@@ -343,8 +367,8 @@ class _SosReportScreenState extends State<SosReportScreen> {
               ListTile(
                 leading: const Icon(Icons.photo_library_rounded,
                     color: Color(0xFF00A896)),
-                title: const Text('เลือกจากคลังภาพ (Gallery)'),
-                subtitle: const Text('เลือกได้ครั้งละหลายรูปพร้อมกัน'),
+                title: Text(AppStrings.t('sos_photo_gallery_title')),
+                subtitle: Text(AppStrings.t('sos_photo_gallery_subtitle')),
                 onTap: () {
                   Navigator.pop(ctx);
                   _pickImages(ImageSource.gallery);
@@ -360,7 +384,7 @@ class _SosReportScreenState extends State<SosReportScreen> {
   Future<void> _submitReport() async {
     if (_selectedIncidentType == null || _selectedSeverity == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('กรุณาเลือกประเภทเหตุและระดับความรุนแรง')),
+        SnackBar(content: Text(AppStrings.t('sos_missing_fields_warning'))),
       );
       return;
     }
@@ -398,8 +422,14 @@ class _SosReportScreenState extends State<SosReportScreen> {
     final nearestHospital =
         HospitalLocationService().findNearestHospital(LatLng(lat, lng));
 
+    // สร้าง ID ที่ไม่ซ้ำกันจริงต่อรายงาน (timestamp เต็ม + เลขสุ่ม) แทนการตัด
+    // millisecondsSinceEpoch เหลือ 6 หลัก ซึ่งอาจชนกันได้เมื่อมีผู้ใช้หลายคน
+    // ส่งรายงานพร้อมกัน และเดิมใช้ prefix เดียวกันตายตัว ทำให้ทุกเคสถูกจับคู่
+    // เป็น "ของฉัน" ผิดๆ ในหน้ารายการเหตุการณ์
+    final uniqueSuffix =
+        '${DateTime.now().millisecondsSinceEpoch}${1000 + Random().nextInt(9000)}';
     final newReport = IncidentReport(
-      id: 'Case #AVCB${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}',
+      id: 'Case #AVCB$uniqueSuffix',
       type: _selectedIncidentType!,
       severity: _selectedSeverity!,
       description: descriptionText,
@@ -435,14 +465,14 @@ class _SosReportScreenState extends State<SosReportScreen> {
           builder: (ctx) => AlertDialog(
             shape:
                 RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-            title: const Row(
+            title: Row(
               children: [
-                Icon(Icons.check_circle_rounded,
+                const Icon(Icons.check_circle_rounded,
                     color: Color(0xFF10B981), size: 28),
-                SizedBox(width: 8),
-                Text('ส่งรายงานสำเร็จ',
-                    style:
-                        TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                const SizedBox(width: 8),
+                Text(AppStrings.t('sos_success_title'),
+                    style: const TextStyle(
+                        fontWeight: FontWeight.bold, fontSize: 18)),
               ],
             ),
             content: Text(
@@ -465,8 +495,8 @@ class _SosReportScreenState extends State<SosReportScreen> {
                   }
                 },
                 icon: const Icon(Icons.remove_red_eye_rounded, color: Colors.white, size: 18),
-                label: const Text('ติดตามสถานะเคสทันที',
-                    style: TextStyle(
+                label: Text(AppStrings.t('sos_track_case_button'),
+                    style: const TextStyle(
                         color: Colors.white, fontWeight: FontWeight.bold)),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF10B981),
@@ -552,9 +582,9 @@ class _SosReportScreenState extends State<SosReportScreen> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text(
-                          'สถานที่ / จุดสังเกตใกล้เคียง',
-                          style: TextStyle(
+                        Text(
+                          AppStrings.t('sos_location_note_label'),
+                          style: const TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.bold,
                               color: Colors.black87),
@@ -603,8 +633,7 @@ class _SosReportScreenState extends State<SosReportScreen> {
                     TextField(
                       controller: _locationNoteController,
                       decoration: InputDecoration(
-                        hintText:
-                            'เช่น ตรงข้ามร้าน KFC, หน้าร้านก๋วยเตี๋ยว... (ระบุได้ตามสะดวก)',
+                        hintText: AppStrings.t('sos_location_note_hint'),
                         hintStyle: TextStyle(
                             color: Colors.grey.shade400, fontSize: 13.5),
                         prefixIcon: const Icon(Icons.storefront_rounded,
@@ -629,26 +658,27 @@ class _SosReportScreenState extends State<SosReportScreen> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text(
-                          'เบอร์โทรศัพท์ติดต่อกลับ',
-                          style: TextStyle(
+                        Text(
+                          AppStrings.t('sos_phone_label'),
+                          style: const TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.bold,
                               color: Colors.black87),
                         ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFDCFCE7),
-                            borderRadius: BorderRadius.circular(8),
+                        if (_isPhoneVerifiedFromAccount)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFDCFCE7),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(AppStrings.t('sos_phone_verified'),
+                                style: const TextStyle(
+                                    fontSize: 10.5,
+                                    fontWeight: FontWeight.bold,
+                                    color: Color(0xFF16A34A))),
                           ),
-                          child: const Text('✓ ยืนยันจากบัญชีแล้ว',
-                              style: TextStyle(
-                                  fontSize: 10.5,
-                                  fontWeight: FontWeight.bold,
-                                  color: Color(0xFF16A34A))),
-                        ),
                       ],
                     ),
                     const SizedBox(height: 6),
@@ -676,16 +706,16 @@ class _SosReportScreenState extends State<SosReportScreen> {
                     const SizedBox(height: 16),
 
                     // 5. ประเภทเหตุ
-                    const Text(
-                      'ประเภทเหตุ (Type of Incident)',
-                      style: TextStyle(
+                    Text(
+                      AppStrings.t('sos_type_label'),
+                      style: const TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.bold,
                           color: Colors.black87),
                     ),
                     const SizedBox(height: 6),
                     _buildDropdown(
-                      hint: 'เลือกประเภทเหตุ',
+                      hint: AppStrings.t('sos_type_hint'),
                       value: _selectedIncidentType,
                       items: _incidentTypes,
                       onChanged: (val) =>
@@ -694,16 +724,16 @@ class _SosReportScreenState extends State<SosReportScreen> {
                     const SizedBox(height: 16),
 
                     // 6. ระดับความรุนแรง
-                    const Text(
-                      'ระดับความรุนแรง (Severity)',
-                      style: TextStyle(
+                    Text(
+                      AppStrings.t('sos_severity_label'),
+                      style: const TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.bold,
                           color: Colors.black87),
                     ),
                     const SizedBox(height: 6),
                     _buildDropdown(
-                      hint: 'เลือกระดับความรุนแรง',
+                      hint: AppStrings.t('sos_severity_hint'),
                       value: _selectedSeverity,
                       items: _severities,
                       onChanged: (val) =>
@@ -712,9 +742,9 @@ class _SosReportScreenState extends State<SosReportScreen> {
                     const SizedBox(height: 16),
 
                     // 7. รายละเอียดเหตุเพิ่มเติม
-                    const Text(
-                      'รายละเอียดเหตุเพิ่มเติม (Description)',
-                      style: TextStyle(
+                    Text(
+                      AppStrings.t('sos_description_label'),
+                      style: const TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.bold,
                           color: Colors.black87),
@@ -724,7 +754,7 @@ class _SosReportScreenState extends State<SosReportScreen> {
                       controller: _descController,
                       maxLines: 2,
                       decoration: InputDecoration(
-                        hintText: 'ระบุจำนวนผู้บาดเจ็บ หรืออาการเบื้องต้น...',
+                        hintText: AppStrings.t('sos_description_hint'),
                         hintStyle: TextStyle(
                             color: Colors.grey.shade400, fontSize: 13),
                         contentPadding: const EdgeInsets.all(12),
@@ -765,15 +795,15 @@ class _SosReportScreenState extends State<SosReportScreen> {
                                 child: CircularProgressIndicator(
                                     strokeWidth: 2.5, color: Colors.white),
                               )
-                            : const Row(
+                            : Row(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
-                                  Icon(Icons.emergency_rounded,
+                                  const Icon(Icons.emergency_rounded,
                                       color: Colors.white, size: 22),
-                                  SizedBox(width: 8),
+                                  const SizedBox(width: 8),
                                   Text(
-                                    'ยืนยันการแจ้งเหตุฉุกเฉิน SOS',
-                                    style: TextStyle(
+                                    AppStrings.t('sos_submit_button'),
+                                    style: const TextStyle(
                                       fontSize: 16.5,
                                       fontWeight: FontWeight.bold,
                                       color: Colors.white,
@@ -1451,9 +1481,9 @@ class _SosReportScreenState extends State<SosReportScreen> {
                 color: Colors.black87),
             onPressed: widget.onClose,
           ),
-          const Text(
-            'ส่งข้อมูลแจ้งเหตุฉุกเฉิน',
-            style: TextStyle(
+          Text(
+            AppStrings.t('sos_header_title'),
+            style: const TextStyle(
                 fontSize: 17,
                 fontWeight: FontWeight.bold,
                 color: Colors.black87),

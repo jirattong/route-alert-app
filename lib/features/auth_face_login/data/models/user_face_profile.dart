@@ -7,6 +7,8 @@ class UserFaceProfile {
   final String role; // 'driver', 'ambulance', 'agency'
   final List<double> faceEmbedding;
   final String? avatarPath;
+  final String? phone;
+  final String? carPlate;
   final DateTime registeredAt;
 
   UserFaceProfile({
@@ -16,6 +18,8 @@ class UserFaceProfile {
     required this.role,
     required this.faceEmbedding,
     this.avatarPath,
+    this.phone,
+    this.carPlate,
     required this.registeredAt,
   });
 
@@ -27,6 +31,8 @@ class UserFaceProfile {
       'role': role,
       'faceEmbedding': faceEmbedding,
       'avatarPath': avatarPath,
+      'phone': phone,
+      'carPlate': carPlate,
       'registeredAt': registeredAt.toIso8601String(),
     };
   }
@@ -42,6 +48,8 @@ class UserFaceProfile {
               .toList() ??
           [],
       avatarPath: map['avatarPath'],
+      phone: map['phone'],
+      carPlate: map['carPlate'],
       registeredAt: map['registeredAt'] != null
           ? DateTime.parse(map['registeredAt'])
           : DateTime.now(),
@@ -57,6 +65,8 @@ class UserFaceProfile {
     String? role,
     List<double>? faceEmbedding,
     String? avatarPath,
+    String? phone,
+    String? carPlate,
     DateTime? registeredAt,
   }) {
     return UserFaceProfile(
@@ -66,6 +76,8 @@ class UserFaceProfile {
       role: role ?? this.role,
       faceEmbedding: faceEmbedding ?? this.faceEmbedding,
       avatarPath: avatarPath ?? this.avatarPath,
+      phone: phone ?? this.phone,
+      carPlate: carPlate ?? this.carPlate,
       registeredAt: registeredAt ?? this.registeredAt,
     );
   }

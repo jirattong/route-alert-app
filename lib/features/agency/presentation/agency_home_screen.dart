@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:tutorial_coach_mark/tutorial_coach_mark.dart';
 import '../../../core/models/incident_report.dart';
 import '../../../core/services/emergency_mqtt_service.dart';
 import '../../../core/services/hospital_location_service.dart';
@@ -10,7 +11,12 @@ import '../../../core/services/incident_service.dart';
 import 'agency_incident_detail_screen.dart';
 
 class AgencyHomeScreen extends StatefulWidget {
-  const AgencyHomeScreen({super.key});
+  /// เรียกครั้งเดียวตอน initState เพื่อส่งฟังก์ชันเปิด Coach Mark ขึ้นไปให้
+  /// AgencyMainScreen เก็บไว้ — ใช้ตอนผู้ใช้กด "สอนการใช้งานปุ่มต่างๆ" จากหน้า
+  /// ตั้งค่า (คนละหน้ากับหน้านี้ แต่ยังอยู่ใน IndexedStack เดียวกัน)
+  final ValueChanged<VoidCallback>? onCoachMarkReady;
+
+  const AgencyHomeScreen({super.key, this.onCoachMarkReady});
 
   @override
   State<AgencyHomeScreen> createState() => _AgencyHomeScreenState();
@@ -27,10 +33,16 @@ class _AgencyHomeScreenState extends State<AgencyHomeScreen> {
 
   // Real-time Incidents list from Driver SOS
   List<IncidentReport> _incidents = [];
+  bool _showHotspotHeatmap = false;
 
   StreamSubscription<HospitalProfile>? _profileSub;
-  StreamSubscription<EmergencyVehicleData>? _mqttSub;
+  StreamSubscription<List<EmergencyVehicleData>>? _mqttSub;
   StreamSubscription<List<IncidentReport>>? _incidentSub;
+
+  // Coach Mark: ชี้ตำแหน่งปุ่มจริงบนหน้าจอพร้อมคำอธิบาย — เรียกแบบ manual เท่านั้น
+  // จากปุ่ม "สอนการใช้งานปุ่มต่างๆ" ในหน้าตั้งค่า (ผ่าน widget.onCoachMarkReady)
+  final GlobalKey _keyHotspotToggle = GlobalKey();
+  final GlobalKey _keyErToggle = GlobalKey();
 
   @override
   void initState() {
@@ -41,6 +53,75 @@ class _AgencyHomeScreenState extends State<AgencyHomeScreen> {
     _initHospitalProfile();
     _initLiveMqttFleet();
     _initIncidentStream();
+    // ส่งฟังก์ชันเปิด Coach Mark ขึ้นไปให้ AgencyMainScreen เก็บไว้ — ไม่โชว์เองอัตโนมัติ
+    // อีกต่อไป (ย้ายไปเป็นปุ่ม "สอนการใช้งานปุ่มต่างๆ" ในหน้าตั้งค่าแทน ตามที่ผู้ใช้ขอ)
+    widget.onCoachMarkReady?.call(_showCoachMark);
+  }
+
+  // แสดงคำแนะนำปุ่มแบบชี้ตำแหน่งจริง (Coach Mark) — เรียกได้ตลอดเวลาจากปุ่ม
+  // "สอนการใช้งานปุ่มต่างๆ" ในหน้าตั้งค่า (ไม่ผูกกับ "เคยดูแล้วหรือยัง" อีกต่อไป
+  // เพราะเป็นการเปิดดูตามใจผู้ใช้เอง ไม่ใช่การโชว์อัตโนมัติครั้งแรก)
+  void _showCoachMark() {
+    if (!mounted) return;
+    final targets = [
+      TargetFocus(
+        identify: 'hotspot_toggle',
+        keyTarget: _keyHotspotToggle,
+        shape: ShapeLightFocus.Circle,
+        contents: [
+          TargetContent(
+            align: ContentAlign.bottom,
+            child: _buildCoachMarkText(
+              'จุดเสี่ยงอุบัติเหตุ (Hotspot)',
+              'เปิด/ปิดแผนที่ความหนาแน่นจุดเกิดเหตุสะสม ช่วยดูพื้นที่เสี่ยงในภาพรวม',
+            ),
+          ),
+        ],
+      ),
+      TargetFocus(
+        identify: 'er_toggle',
+        keyTarget: _keyErToggle,
+        shape: ShapeLightFocus.RRect,
+        radius: 12,
+        contents: [
+          TargetContent(
+            align: ContentAlign.bottom,
+            child: _buildCoachMarkText(
+              'สถานะห้องฉุกเฉิน (ER)',
+              'กดเพื่ออัปเดตว่าห้อง ER พร้อมรับผู้ป่วยหรือเต็ม — มีผลต่อการเลือก รพ. ปลายทางของระบบจริง',
+            ),
+          ),
+        ],
+      ),
+    ];
+
+    TutorialCoachMark(
+      targets: targets,
+      colorShadow: Colors.black,
+      opacityShadow: 0.85,
+    ).show(context: context);
+  }
+
+  Widget _buildCoachMarkText(String title, String description) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+            fontSize: 18,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          description,
+          style: const TextStyle(color: Colors.white, fontSize: 14),
+        ),
+      ],
+    );
   }
 
   void _initHospitalProfile() async {
@@ -66,52 +147,64 @@ class _AgencyHomeScreenState extends State<AgencyHomeScreen> {
     });
   }
 
+  // ใช้ activeFleetStream (Stream<List<EmergencyVehicleData>>) จาก
+  // EmergencyMqttService แทนการฟัง emergencyStream ดิบแล้วสะสมเองทีละคัน
+  // เพราะ activeFleetStream สะท้อนรายการกองเรือ "ปัจจุบันจริง" เสมอ —
+  // เมื่อรถถูก purge ออก (ปิดสัญญาณไซเรน หรือหมดเวลา stale เกิน 12 วิ)
+  // service จะตัดออกจากลิสต์ที่ส่งมาให้เอง ทำให้หน้านี้ไม่ต้องดูแล
+  // การลบเองอีกต่อหนึ่ง (เดิมมีแต่ add/update ไม่เคย remove เลย)
   void _initLiveMqttFleet() async {
     await EmergencyMqttService().initialize();
-    _mqttSub = EmergencyMqttService().emergencyStream.listen((data) {
+    _mqttSub = EmergencyMqttService().activeFleetStream.listen((fleet) {
       if (!mounted) return;
 
-      final distanceMeters = EmergencyMqttService.calculateDistanceInMeters(
-        _hospitalLocation,
-        LatLng(data.latitude, data.longitude),
-      );
-
-      final distanceKm = (distanceMeters / 1000).toStringAsFixed(2);
-      final estimatedMinutes = (distanceMeters / 600).clamp(1, 60).round();
-
       setState(() {
-        final existingIndex =
-            _activeAmbulances.indexWhere((a) => a['id'] == data.id);
-
-        final updatedData = {
-          'id': data.id,
-          'plate': data.callSign,
-          'callSign': data.callSign,
-          'location': LatLng(data.latitude, data.longitude),
-          'status': data.sirenActive
-              ? 'เปิดสัญญาณไซเรนฉุกเฉิน (กำลังนำส่ง)'
-              : 'ปฏิบัติการปกติ',
-          'distance': '$distanceKm KM',
-          'distanceMeters': distanceMeters,
-          'eta': '$estimatedMinutes นาที',
-          'speed': '${data.speed.toStringAsFixed(0)} km/h',
-          'emergencyType': data.emergencyType,
-          'sirenActive': data.sirenActive,
-          'routePoints': data.routePoints,
-          'turnIntent': data.turnIntent,
-          'isPrepared': existingIndex != -1
-              ? (_activeAmbulances[existingIndex]['isPrepared'] ?? false)
-              : false,
+        // เก็บ isPrepared เดิมของแต่ละคันไว้ (local UI state ไม่ได้มาจาก MQTT)
+        final previousPrepared = <String, bool>{
+          for (final a in _activeAmbulances)
+            a['id'] as String: (a['isPrepared'] ?? false) as bool,
         };
 
-        if (existingIndex != -1) {
-          _activeAmbulances[existingIndex] = updatedData;
-        } else {
-          _activeAmbulances.add(updatedData);
-        }
+        _activeAmbulances
+          ..clear()
+          ..addAll(fleet.map((data) {
+            final distanceMeters =
+                EmergencyMqttService.calculateDistanceInMeters(
+              _hospitalLocation,
+              LatLng(data.latitude, data.longitude),
+            );
 
-        if (_selectedAmbulance?['id'] == data.id) {
-          _selectedAmbulance = updatedData;
+            final distanceKm = (distanceMeters / 1000).toStringAsFixed(2);
+            final estimatedMinutes =
+                (distanceMeters / 600).clamp(1, 60).round();
+
+            return {
+              'id': data.id,
+              'plate': data.callSign,
+              'callSign': data.callSign,
+              'location': LatLng(data.latitude, data.longitude),
+              'status': data.sirenActive
+                  ? 'เปิดสัญญาณไซเรนฉุกเฉิน (กำลังนำส่ง)'
+                  : 'ปฏิบัติการปกติ',
+              'distance': '$distanceKm KM',
+              'distanceMeters': distanceMeters,
+              'eta': '$estimatedMinutes นาที',
+              'speed': '${data.speed.toStringAsFixed(0)} km/h',
+              'emergencyType': data.emergencyType,
+              'sirenActive': data.sirenActive,
+              'routePoints': data.routePoints,
+              'turnIntent': data.turnIntent,
+              'isPrepared': previousPrepared[data.id] ?? false,
+            };
+          }));
+
+        if (_selectedAmbulance != null) {
+          final stillExists = _activeAmbulances.firstWhere(
+            (a) => a['id'] == _selectedAmbulance!['id'],
+            orElse: () => <String, dynamic>{},
+          );
+          _selectedAmbulance =
+              stillExists.isNotEmpty ? stillExists : null;
         }
       });
     });
@@ -480,11 +573,50 @@ class _AgencyHomeScreenState extends State<AgencyHomeScreen> {
                 tooltip: 'ปักหมุดตำแหน่งโรงพยาบาล',
                 onPressed: _showHospitalPinPickerModal,
               ),
+              // Toggle Predictive Hotspot Heatmap (จุดเสี่ยงอุบัติเหตุจากเคสสะสม)
+              IconButton(
+                key: _keyHotspotToggle,
+                icon: Icon(
+                  Icons.local_fire_department_rounded,
+                  color: _showHotspotHeatmap
+                      ? const Color(0xFFD03B3B)
+                      : Colors.grey.shade400,
+                  size: 24,
+                ),
+                tooltip: 'จุดเสี่ยงอุบัติเหตุ (Hotspot)',
+                onPressed: () =>
+                    setState(() => _showHotspotHeatmap = !_showHotspotHeatmap),
+              ),
               GestureDetector(
-                onTap: () {
-                  HospitalLocationService()
-                      .updateErAvailability(!_hospitalProfile.isErAvailable);
+                key: _keyErToggle,
+                onTap: () async {
+                  final newValue = !_hospitalProfile.isErAvailable;
                   HapticFeedback.mediumImpact();
+                  final success = await HospitalLocationService()
+                      .updateErAvailability(newValue);
+                  if (!mounted) return;
+                  if (success) {
+                    setState(() {
+                      _hospitalProfile =
+                          _hospitalProfile.copyWith(isErAvailable: newValue);
+                    });
+                  }
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        success
+                            ? (newValue
+                                ? '✅ อัปเดตสถานะ: ห้องฉุกเฉินพร้อมรับผู้ป่วย'
+                                : '🚨 อัปเดตสถานะ: ประกาศเตียงเต็ม (Divert)')
+                            : '❌ อัปเดตสถานะไม่สำเร็จ กรุณาลองใหม่',
+                      ),
+                      backgroundColor: success
+                          ? (newValue
+                              ? const Color(0xFF00A896)
+                              : Colors.redAccent)
+                          : Colors.grey,
+                    ),
+                  );
                 },
                 child: Container(
                   padding:
@@ -606,23 +738,51 @@ class _AgencyHomeScreenState extends State<AgencyHomeScreen> {
                       color: Colors.white,
                       fontSize: 13.5,
                       fontWeight: FontWeight.w900),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
                 Text(
                   '${amb['callSign']} • กรุณาเตรียมทีมแพทย์ห้องฉุกเฉิน (ER)',
                   style: const TextStyle(
                       color: Color(0xFFFFE4E6), fontSize: 11),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ],
             ),
           ),
           ElevatedButton(
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('✅ ยืนยันทีม ER พร้อมรับผู้ป่วยทันที'),
-                  backgroundColor: Color(0xFF10B981),
-                ),
+            onPressed: () async {
+              final matchedIncident =
+                  _incidents.cast<IncidentReport?>().firstWhere(
+                (i) =>
+                    i?.assignedAmbulanceId == amb['id'] &&
+                    i?.status != 'resolved' &&
+                    i?.status != 'cancelled',
+                orElse: () => null,
               );
+              if (matchedIncident == null) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('ไม่พบเคสที่กำลังดำเนินการของรถคันนี้'),
+                    backgroundColor: Color(0xFFF59E0B),
+                  ),
+                );
+                return;
+              }
+              final success = await IncidentService()
+                  .setErPrepared(matchedIncident.id, true);
+              if (success && mounted) {
+                setState(() {
+                  amb['isPrepared'] = true;
+                });
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('✅ ยืนยันทีม ER พร้อมรับผู้ป่วยทันที'),
+                    backgroundColor: Color(0xFF10B981),
+                  ),
+                );
+              }
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.white,
@@ -866,6 +1026,10 @@ class _AgencyHomeScreenState extends State<AgencyHomeScreen> {
             ],
           ),
 
+        // Predictive Hotspot: จุดที่เกิดเหตุบ่อยจากเคสสะสมในระบบ (real data, ไม่ใช่ ML
+        // จริง แค่ clustering ตามกริดพิกัด) ช่วยหน่วยงานวางตำแหน่งรถพยาบาลล่วงหน้า
+        if (_showHotspotHeatmap) CircleLayer(circles: _buildHotspotCircles()),
+
         MarkerLayer(
           markers: [
             // Pinned Hospital Location Marker
@@ -900,12 +1064,48 @@ class _AgencyHomeScreenState extends State<AgencyHomeScreen> {
     );
   }
 
+  // จับกลุ่มเคสตามช่องกริดพิกัด (~1.1 กม./ช่อง) แล้ว plot เป็นวงกลมสีแดงความเข้ม
+  // ตามจำนวนเคสสะสม (ยิ่งเยอะยิ่งเข้ม/ใหญ่) — ใช้ข้อมูลเคสจริงทั้งหมดในระบบ ไม่ใช่โมเดล ML
+  List<CircleMarker> _buildHotspotCircles() {
+    const double gridSize = 0.01; // ~1.1 กม. ที่ละติจูดของเชียงใหม่
+    final Map<String, int> gridCounts = {};
+    final Map<String, LatLng> gridCenters = {};
+
+    for (final incident in _incidents) {
+      if (incident.status == 'cancelled') continue;
+      final gx = (incident.latitude / gridSize).round();
+      final gy = (incident.longitude / gridSize).round();
+      final key = '$gx:$gy';
+      gridCounts[key] = (gridCounts[key] ?? 0) + 1;
+      gridCenters[key] = LatLng(gx * gridSize, gy * gridSize);
+    }
+
+    if (gridCounts.isEmpty) return [];
+    final maxCount = gridCounts.values.reduce((a, b) => a > b ? a : b);
+
+    return gridCounts.entries.map((entry) {
+      final count = entry.value;
+      final intensity = (count / maxCount).clamp(0.15, 1.0);
+      return CircleMarker(
+        point: gridCenters[entry.key]!,
+        radius: 400 + (intensity * 900), // เมตร: ยิ่งเคสเยอะวงยิ่งใหญ่
+        useRadiusInMeter: true,
+        color: const Color(0xFFD03B3B).withValues(alpha: intensity * 0.35),
+        borderColor: const Color(0xFFD03B3B).withValues(alpha: intensity * 0.7),
+        borderStrokeWidth: 1.5,
+      );
+    }).toList();
+  }
+
   Widget _buildSelectedAmbulanceCard() {
     final amb = _selectedAmbulance!;
     final bool isPrepared = amb['isPrepared'] ?? false;
 
     return Container(
       padding: const EdgeInsets.all(16),
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.5,
+      ),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(22),
@@ -918,27 +1118,34 @@ class _AgencyHomeScreenState extends State<AgencyHomeScreen> {
           ),
         ],
       ),
-      child: Column(
+      child: SingleChildScrollView(
+        child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Column(
+              Expanded(
+                child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
                     amb['callSign'] ?? amb['id'],
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                         fontSize: 15.5, fontWeight: FontWeight.bold),
                   ),
                   Text(
                     'สเตตัส: ${amb['status']}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                         fontSize: 11.5, color: Colors.grey.shade700),
                   ),
                 ],
+                ),
               ),
               IconButton(
                 icon: const Icon(Icons.close, size: 20),
@@ -1041,6 +1248,7 @@ class _AgencyHomeScreenState extends State<AgencyHomeScreen> {
             ],
           ),
         ],
+        ),
       ),
     );
   }

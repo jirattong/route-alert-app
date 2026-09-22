@@ -5,6 +5,12 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/incident_report.dart';
 
+/// เมื่อ true จะยัดเคสตัวอย่าง (demo) ลงใน getLocalIncidents() ตอนที่ cache ว่าง
+/// เดิมค่านี้ถูกยัดแบบไม่มีเงื่อนไขเสมอ ทำให้เคสปลอมปนกับข้อมูลจริงในหน้าสถิติ/heatmap/
+/// รายการเคส ตอนเพิ่งติดตั้งแอพใหม่หรือเน็ตหลุดชั่วคราว (ก่อน Firestore stream มาแทนที่)
+/// ปิดไว้เป็นค่าเริ่มต้นสำหรับ production เปิดเฉพาะตอนต้องการ demo/พรีเซนต์เท่านั้น
+const bool kSeedDemoIncidents = false;
+
 class IncidentService {
   static final IncidentService _instance = IncidentService._internal();
   factory IncidentService() => _instance;
@@ -425,7 +431,7 @@ class IncidentService {
       final prefs = await SharedPreferences.getInstance();
       final jsonStr = prefs.getString(_localKey);
       if (jsonStr == null || jsonStr.isEmpty) {
-        return _getDefaultInitialCases();
+        return kSeedDemoIncidents ? _getDefaultInitialCases() : [];
       }
 
       final List<dynamic> raw = json.decode(jsonStr);
@@ -433,7 +439,7 @@ class IncidentService {
       list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
       return list;
     } catch (e) {
-      return _getDefaultInitialCases();
+      return kSeedDemoIncidents ? _getDefaultInitialCases() : [];
     }
   }
 

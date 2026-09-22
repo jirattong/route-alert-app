@@ -3,6 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../core/services/email_otp_service.dart';
 import '../../../core/services/google_auth_service.dart';
+import '../../../core/services/ambulance_storage_service.dart';
+import '../../../core/services/hospital_location_service.dart';
+import '../../../core/utils/role_screen_resolver.dart';
+import '../../../core/utils/slide_from_right_route.dart';
 import '../../../core/widgets/google_logo.dart';
 import '../data/models/user_face_profile.dart';
 import '../data/services/face_auth_repository.dart';
@@ -10,8 +14,49 @@ import '../../../core/ml/anti_spoofing_service.dart';
 import '../../../core/ml/face_recognition_service.dart';
 import 'face_scan_screen.dart';
 import '../../driver_radar/presentation/driver_main_screen.dart';
-import '../../ambulance/presentation/ambulance_main_screen.dart';
-import '../../agency/presentation/agency_main_screen.dart';
+
+/// บัญชีทดสอบสำหรับสาธิตโปรเจกต์เท่านั้น (thesis demo) — ต้องปิด (false) ก่อนปล่อยจริง
+///
+/// เมื่อเปิดใช้งาน (true) หน้าล็อกอินจะยอมรับ username พิเศษ 3 ตัว (admin_1/2/3)
+/// คู่กับรหัสผ่านคงที่ [_kDemoQuickLoginPassword] แล้วพาเข้าสู่ระบบทันทีในบทบาทที่
+/// กำหนดไว้ล่วงหน้า โดยข้ามการสมัคร/สแกนใบหน้าทั้งหมด — ใช้เฉพาะตอนสาธิตให้อาจารย์
+/// ดูเท่านั้น ต้องตั้งเป็น false ก่อนปล่อยแอปให้ผู้ใช้จริงใช้งาน
+const bool kEnableDemoQuickLogin = true;
+
+/// รหัสผ่านคงที่ที่ใช้ร่วมกันสำหรับบัญชีทดสอบทั้ง 3 บัญชี (มีผลเฉพาะตอน
+/// [kEnableDemoQuickLogin] เป็น true เท่านั้น ไม่เกี่ยวข้องกับรหัสผ่านจริงของผู้ใช้)
+const String _kDemoQuickLoginPassword = '12345';
+
+/// ข้อมูลบัญชีทดสอบหนึ่งบัญชี (username -> บทบาท/ชื่อที่แสดง/อีเมลปลอมสำหรับผูกบัญชี)
+class _DemoAccount {
+  final String role;
+  final String displayName;
+  final String email;
+  const _DemoAccount({
+    required this.role,
+    required this.displayName,
+    required this.email,
+  });
+}
+
+/// บัญชีทดสอบทั้ง 3 บทบาทตามที่ต้องใช้สาธิตวิทยานิพนธ์
+const Map<String, _DemoAccount> _kDemoAccounts = {
+  'admin_1': _DemoAccount(
+    role: 'driver',
+    displayName: 'ผู้ใช้ทดสอบ (Admin 1)',
+    email: 'admin_1@routealert.test',
+  ),
+  'admin_2': _DemoAccount(
+    role: 'ambulance',
+    displayName: 'หน่วยรถพยาบาลทดสอบ (Admin 2)',
+    email: 'admin_2@routealert.test',
+  ),
+  'admin_3': _DemoAccount(
+    role: 'agency',
+    displayName: 'โรงพยาบาลทดสอบ (Admin 3)',
+    email: 'admin_3@routealert.test',
+  ),
+};
 
 class FaceLoginScreen extends StatefulWidget {
   const FaceLoginScreen({super.key});
@@ -48,8 +93,10 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
   @override
   void initState() {
     super.initState();
-    // Ensure no pre-existing session is logged in by default on startup
-    FaceAuthRepository.logout();
+    // เดิมมีการเรียก FaceAuthRepository.logout()/เช็ค session ค้างอยู่ตรงนี้ แต่ย้าย
+    // ความรับผิดชอบนั้นไปให้ AppLoadingScreen ทำก่อนแล้ว (เป็นหน้าที่เปิดมาก่อนหน้านี้
+    // เสมอ) — ถ้ามาถึงหน้านี้ได้แปลว่า AppLoadingScreen ยืนยันแล้วว่าไม่มี session
+    // ค้างอยู่จริง ไม่ต้องเช็คซ้ำอีก
     // Pre-warm AI biometric models asynchronously so Face Scan launches with 0ms delay
     unawaited(AntiSpoofingService().initialize());
     unawaited(FaceRecognitionService().initialize());
@@ -155,18 +202,11 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
 
   void _navigateToRoleScreen(UserFaceProfile user) {
     if (!mounted) return;
-    Widget targetScreen;
-    if (user.role == 'ambulance') {
-      targetScreen = const AmbulanceMainScreen();
-    } else if (user.role == 'agency') {
-      targetScreen = const AgencyMainScreen();
-    } else {
-      targetScreen = const DriverMainScreen();
-    }
-
+    // ใช้ทรานสิชันลากเข้าจากขวาแบบเดียวกับตอนออกจาก AppLoadingScreen ให้ดูต่อเนื่อง
+    // เป็นสไตล์เดียวกันทั้งแอป
     Navigator.pushAndRemoveUntil(
       context,
-      MaterialPageRoute(builder: (_) => targetScreen),
+      slideFromRightRoute(roleHomeScreenFor(user.role)),
       (route) => false,
     );
   }
@@ -207,6 +247,17 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
       return;
     }
 
+    // --- Demo Quick Login (เฉพาะตอนสาธิตวิทยานิพนธ์เท่านั้น) ---
+    // ต้องตรงกับ username สำรอง 3 ตัวและรหัสผ่านคงที่แบบเป๊ะๆ เท่านั้นถึงจะเข้าทางนี้
+    // ไม่กระทบผู้ใช้จริงรายอื่นเลย เพราะ authenticateWithPassword() ปกติด้านล่าง
+    // ยังทำงานตามเดิมทุกประการสำหรับอีเมลอื่นๆ ทั้งหมด
+    if (kEnableDemoQuickLogin &&
+        _kDemoAccounts.containsKey(email) &&
+        password == _kDemoQuickLoginPassword) {
+      await _handleDemoQuickLogin(_kDemoAccounts[email]!);
+      return;
+    }
+
     setState(() => _isLoading = true);
 
     try {
@@ -241,6 +292,88 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
           SnackBar(
             backgroundColor: Colors.redAccent,
             content: Text('เกิดข้อผิดพลาดในการเข้าสู่ระบบ: $e'),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  /// เข้าสู่ระบบด้วยบัญชีทดสอบ (admin_1/2/3) — สร้างบัญชีให้อัตโนมัติถ้ายังไม่เคยมี
+  /// (ครั้งแรกเท่านั้น) แล้วนำทางไปหน้าโฮมของบทบาทนั้นๆ เหมือนล็อกอินสำเร็จปกติทุกอย่าง
+  /// ข้ามการสแกนใบหน้า/สมัครสมาชิกทั้งหมด ใช้เฉพาะตอน [kEnableDemoQuickLogin] เป็น true
+  Future<void> _handleDemoQuickLogin(_DemoAccount demo) async {
+    setState(() => _isLoading = true);
+    try {
+      final alreadyExists =
+          await FaceAuthRepository.isEmailRegistered(demo.email);
+
+      UserFaceProfile profile;
+
+      if (alreadyExists) {
+        final users = await FaceAuthRepository.getAllUsers();
+        profile = users.firstWhere(
+          (u) => u.email.trim().toLowerCase() == demo.email,
+          orElse: () => UserFaceProfile(
+            id: demo.email,
+            email: demo.email,
+            name: demo.displayName,
+            role: demo.role,
+            faceEmbedding: const [],
+            registeredAt: DateTime.now(),
+          ),
+        );
+        await FaceAuthRepository.setCurrentUser(profile);
+      } else {
+        profile = UserFaceProfile(
+          id: demo.email,
+          email: demo.email,
+          name: demo.displayName,
+          role: demo.role,
+          faceEmbedding: const [],
+          registeredAt: DateTime.now(),
+        );
+        // registerUser() เซ็ต current user ให้อัตโนมัติอยู่แล้ว
+        await FaceAuthRepository.registerUser(profile);
+        await FaceAuthRepository.updateUserPassword(
+            demo.email, _kDemoQuickLoginPassword);
+
+        // เติมข้อมูลเริ่มต้นให้หน้าจอของบทบาทนั้นๆ ไม่ขึ้นเป็นค่าว่าง/พัง
+        // (ทำครั้งเดียวตอนสร้างบัญชีทดสอบใหม่เท่านั้น ไม่ทำซ้ำทุกครั้งที่ล็อกอิน)
+        if (demo.role == 'ambulance') {
+          await AmbulanceStorageService.saveProfile(
+            ambulanceId: 'AMB-DEMO-2',
+            plateNumber: 'ทดสอบ-001',
+            callSign: 'หน่วยทดสอบ 1',
+          );
+        } else if (demo.role == 'agency') {
+          final hospitalService = HospitalLocationService();
+          await hospitalService.updatePinnedLocation(
+            newLocation: hospitalService.hospitalLocation,
+            hospitalName: 'โรงพยาบาลทดสอบ',
+            address: 'ที่อยู่ทดสอบสำหรับสาธิตโปรเจกต์',
+            erPhone: '000-000-0000',
+          );
+        }
+      }
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: const Color(0xFF00A896),
+          content: Text('🎉 เข้าสู่ระบบบัญชีทดสอบสำเร็จ (${demo.displayName})'),
+        ),
+      );
+
+      _navigateToRoleScreen(profile);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: Colors.redAccent,
+            content: Text('เกิดข้อผิดพลาดในการเข้าสู่ระบบบัญชีทดสอบ: $e'),
           ),
         );
       }
@@ -469,7 +602,7 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
                       borderRadius: BorderRadius.circular(24)),
                 ),
                 onPressed: () async {
-                  final email = googleEmailCtrl.text.trim();
+                  final email = googleEmailCtrl.text.trim().toLowerCase();
                   if (email.isEmpty || !email.contains('@')) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
@@ -480,6 +613,41 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
                     return;
                   }
                   Navigator.pop(ctx);
+                  setState(() => _isLoading = true);
+
+                  // SECURITY: This email is manually typed and NOT verified by
+                  // Google OAuth (native Google Sign-In failed, which is why
+                  // this fallback modal is showing). Never auto-login into an
+                  // existing account from an unverified typed string — that
+                  // would let anyone impersonate any registered user just by
+                  // knowing their email. If the email belongs to an existing
+                  // account, redirect to the real face/password verification
+                  // flow instead. Only genuinely new emails proceed to the
+                  // new-user path, which still requires a live Face ID scan
+                  // before the account becomes usable.
+                  final alreadyRegistered =
+                      await FaceAuthRepository.isEmailRegistered(email);
+                  setState(() => _isLoading = false);
+
+                  if (!mounted) return;
+
+                  if (alreadyRegistered) {
+                    setState(() {
+                      isLogin = true;
+                      _emailController.text = email;
+                    });
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        backgroundColor: Colors.orangeAccent,
+                        content: Text(
+                          '⚠️ อีเมลนี้มีบัญชีอยู่แล้ว เพื่อความปลอดภัย กรุณาเข้าสู่ระบบด้วยรหัสผ่าน หรือสแกนใบหน้า (Face ID) แทน การพิมพ์อีเมลเองไม่สามารถเข้าสู่ระบบอัตโนมัติได้',
+                        ),
+                        duration: Duration(seconds: 5),
+                      ),
+                    );
+                    return;
+                  }
+
                   setState(() => _isLoading = true);
                   final processed = await GoogleAuthService.processGoogleUser(
                     email: email,

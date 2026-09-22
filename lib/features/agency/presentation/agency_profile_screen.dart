@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import '../../../core/models/incident_report.dart';
 import '../../../core/services/incident_service.dart';
+import '../../../core/services/hospital_location_service.dart';
 import '../../auth_face_login/data/models/user_face_profile.dart';
 import '../../auth_face_login/data/services/face_auth_repository.dart';
 import '../../auth_face_login/presentation/face_login_screen.dart';
@@ -23,19 +25,48 @@ class _AgencyProfileScreenState extends State<AgencyProfileScreen> {
   int _monthlyCaseCount = 0;
   double _erOnTimeRate = 0.0;
   int _criticalCaseCount = 0;
+  // จำนวนเคสของ 6 เดือนล่าสุด เรียงเก่า -> ใหม่ (index 5 = เดือนปัจจุบัน)
+  List<int> _sixMonthTrend = List.filled(6, 0);
   StreamSubscription<List<IncidentReport>>? _incidentSub;
+  StreamSubscription<HospitalProfile>? _hospitalSub;
 
   @override
   void initState() {
     super.initState();
     _loadUserData();
     _loadIncidentStats();
+    _loadHospitalProfile();
   }
 
   @override
   void dispose() {
     _incidentSub?.cancel();
+    _hospitalSub?.cancel();
     super.dispose();
+  }
+
+  // โหลดข้อมูลหน่วยงาน/สถานะ ER จริงจาก HospitalLocationService (เดิม _isErAvailable
+  // และ _hospitalName เป็นแค่ local state ที่ไม่เชื่อมกับ service จริงเลย)
+  Future<void> _loadHospitalProfile() async {
+    await HospitalLocationService().initialize();
+    final profile = HospitalLocationService().currentProfile;
+    if (mounted) {
+      setState(() {
+        _hospitalName = profile.hospitalName;
+        _contactNumber = profile.erPhone;
+        _isErAvailable = profile.isErAvailable;
+      });
+    }
+
+    _hospitalSub = HospitalLocationService().profileStream.listen((profile) {
+      if (mounted) {
+        setState(() {
+          _hospitalName = profile.hospitalName;
+          _contactNumber = profile.erPhone;
+          _isErAvailable = profile.isErAvailable;
+        });
+      }
+    });
   }
 
   // คำนวณสถิติจริงจากเคสในระบบ (เดิมเป็นเลข 154/92%/34 hardcode คงที่)
@@ -65,10 +96,23 @@ class _AgencyProfileScreenState extends State<AgencyProfileScreen> {
             i.severity.contains('Code Red') || i.severity.contains('วิกฤต'))
         .length;
 
+    // นับจำนวนเคสของ 6 เดือนล่าสุดจริง (ไม่รวมเคสที่ถูกยกเลิก) สำหรับกราฟแนวโน้ม
+    final trend = List<int>.filled(6, 0);
+    for (int i = 0; i < 6; i++) {
+      final target = DateTime(now.year, now.month - (5 - i));
+      trend[i] = incidents
+          .where((inc) =>
+              inc.status != 'cancelled' &&
+              inc.createdAt.year == target.year &&
+              inc.createdAt.month == target.month)
+          .length;
+    }
+
     setState(() {
       _monthlyCaseCount = total;
       _erOnTimeRate = total > 0 ? erPreparedCount / total : 0.0;
       _criticalCaseCount = criticalCount;
+      _sixMonthTrend = trend;
     });
   }
 
@@ -77,7 +121,8 @@ class _AgencyProfileScreenState extends State<AgencyProfileScreen> {
     if (mounted && user != null) {
       setState(() {
         _currentUser = user;
-        _hospitalName = user.name;
+        // หมายเหตุ: user.name คือชื่อบัญชีส่วนตัวของเจ้าหน้าที่ (dispatcher) ไม่ใช่ชื่อ
+        // โรงพยาบาล/หน่วยงาน ซึ่งโหลดแยกจาก HospitalLocationService ใน _loadHospitalProfile()
       });
     }
   }
@@ -284,8 +329,93 @@ class _AgencyProfileScreenState extends State<AgencyProfileScreen> {
               ),
             ],
           ),
+
+          const SizedBox(height: 28),
+          _buildMonthlyTrendChart(),
         ],
       ),
+    );
+  }
+
+  // --- กราฟแนวโน้มจำนวนเคสย้อนหลัง 6 เดือน (คำนวณจากเคสจริงในระบบ) ---
+  Widget _buildMonthlyTrendChart() {
+    final now = DateTime.now();
+    const monthAbbrTH = [
+      'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
+      'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.',
+    ];
+    final maxVal = _sixMonthTrend.reduce((a, b) => a > b ? a : b);
+    final chartMax = (maxVal < 5 ? 5 : maxVal).toDouble() * 1.2;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'แนวโน้มจำนวนเคสย้อนหลัง 6 เดือน',
+          style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.black87),
+        ),
+        const SizedBox(height: 12),
+        SizedBox(
+          height: 140,
+          child: BarChart(
+            BarChartData(
+              maxY: chartMax,
+              alignment: BarChartAlignment.spaceAround,
+              gridData: const FlGridData(show: false),
+              borderData: FlBorderData(show: false),
+              titlesData: FlTitlesData(
+                leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                bottomTitles: AxisTitles(
+                  sideTitles: SideTitles(
+                    showTitles: true,
+                    getTitlesWidget: (value, meta) {
+                      final idx = value.toInt();
+                      if (idx < 0 || idx > 5) return const SizedBox.shrink();
+                      final monthIdx = (now.month - (5 - idx) - 1) % 12;
+                      final normalizedIdx = monthIdx < 0 ? monthIdx + 12 : monthIdx;
+                      return Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: Text(
+                          monthAbbrTH[normalizedIdx],
+                          style: const TextStyle(fontSize: 10, color: Colors.black54),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ),
+              barTouchData: BarTouchData(
+                touchTooltipData: BarTouchTooltipData(
+                  getTooltipItem: (group, groupIndex, rod, rodIndex) {
+                    return BarTooltipItem(
+                      '${rod.toY.round()} เคส',
+                      const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11),
+                    );
+                  },
+                ),
+              ),
+              barGroups: List.generate(_sixMonthTrend.length, (i) {
+                final isCurrentMonth = i == _sixMonthTrend.length - 1;
+                return BarChartGroupData(
+                  x: i,
+                  barRods: [
+                    BarChartRodData(
+                      toY: _sixMonthTrend[i].toDouble(),
+                      width: 18,
+                      borderRadius: const BorderRadius.vertical(top: Radius.circular(4)),
+                      color: isCurrentMonth
+                          ? const Color(0xFF1B5E20)
+                          : const Color(0xFF1B5E20).withValues(alpha: 0.35),
+                    ),
+                  ],
+                );
+              }),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -390,14 +520,27 @@ class _AgencyProfileScreenState extends State<AgencyProfileScreen> {
               activeTrackColor: const Color(0xFF2E7D32),
               inactiveThumbColor: Colors.white,
               inactiveTrackColor: const Color(0xFFEB5757),
-              onChanged: (val) {
-                setState(() => _isErAvailable = val);
+              onChanged: (val) async {
+                // เขียนสถานะจริงลง HospitalLocationService (sync ข้าม device ผ่าน Firestore)
+                // เดิม setState local เฉยๆ ไม่เคยเรียก service เลย
+                final success =
+                    await HospitalLocationService().updateErAvailability(val);
+                if (!mounted) return;
+                setState(() {
+                  if (success) _isErAvailable = val;
+                });
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
                     content: Text(
-                      val ? '✅ อัปเดตสถานะ: ห้องฉุกเฉินพร้อมรับผู้ป่วย' : '🚨 อัปเดตสถานะ: ประกาศเตียงเต็ม (Divert)',
+                      success
+                          ? (val
+                              ? '✅ อัปเดตสถานะ: ห้องฉุกเฉินพร้อมรับผู้ป่วย'
+                              : '🚨 อัปเดตสถานะ: ประกาศเตียงเต็ม (Divert)')
+                          : '❌ อัปเดตสถานะไม่สำเร็จ กรุณาลองใหม่',
                     ),
-                    backgroundColor: val ? const Color(0xFF2E7D32) : const Color(0xFFEB5757),
+                    backgroundColor: success
+                        ? (val ? const Color(0xFF2E7D32) : const Color(0xFFEB5757))
+                        : Colors.grey,
                   ),
                 );
               },
@@ -561,12 +704,35 @@ class _AgencyProfileScreenState extends State<AgencyProfileScreen> {
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
-                  onPressed: () {
-                    setState(() {
-                      _hospitalName = nameCtrl.text;
-                      _contactNumber = phoneCtrl.text;
-                    });
+                  onPressed: () async {
+                    // บันทึกจริงผ่าน HospitalLocationService (sync ข้าม device ผ่าน Firestore)
+                    // เดิมแก้แค่ local state หาย ทันทีที่ปิดแอพ/รีสตาร์ท
+                    final currentLocation =
+                        HospitalLocationService().currentProfile.location;
+                    final success =
+                        await HospitalLocationService().updatePinnedLocation(
+                      newLocation: currentLocation,
+                      hospitalName: nameCtrl.text,
+                      erPhone: phoneCtrl.text,
+                    );
+                    if (success && mounted) {
+                      setState(() {
+                        _hospitalName = nameCtrl.text;
+                        _contactNumber = phoneCtrl.text;
+                      });
+                    }
+                    if (!ctx.mounted) return;
                     Navigator.pop(ctx);
+                    if (!mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(success
+                            ? '✅ บันทึกข้อมูลหน่วยงานสำเร็จ'
+                            : '❌ บันทึกข้อมูลไม่สำเร็จ กรุณาลองใหม่'),
+                        backgroundColor:
+                            success ? const Color(0xFF2E7D32) : Colors.grey,
+                      ),
+                    );
                   },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF2E7D32),

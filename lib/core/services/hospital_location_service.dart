@@ -241,7 +241,15 @@ class HospitalLocationService {
       ));
     }
 
-    result.sort((a, b) => a.distanceKm.compareTo(b.distanceKm));
+    // เรียงโรงพยาบาลที่ ER ว่างไว้ก่อนเสมอ (ตัดสินใจจริงจาก isErAvailable แล้ว
+    // ไม่ใช่แค่ระยะทางอย่างเดียวเหมือนเดิม) ถ้า ER เต็มพอกัน/ว่างพอกัน ค่อยเรียงตามระยะทาง
+    // ถ้าทุก รพ. เต็มหมด ก็ยังคืนค่าที่ใกล้ที่สุดให้ (ดีกว่าไม่มีคำตอบเลย)
+    result.sort((a, b) {
+      if (a.profile.isErAvailable != b.profile.isErAvailable) {
+        return a.profile.isErAvailable ? -1 : 1;
+      }
+      return a.distanceKm.compareTo(b.distanceKm);
+    });
     return result;
   }
 

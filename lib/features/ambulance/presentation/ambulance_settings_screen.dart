@@ -1,7 +1,13 @@
 import 'package:flutter/material.dart';
+import '../../onboarding/presentation/onboarding_screen.dart';
 
 class AmbulanceSettingsScreen extends StatefulWidget {
-  const AmbulanceSettingsScreen({super.key});
+  /// เรียกเมื่อกด "สอนการใช้งานปุ่มต่างๆ" — ให้ AmbulanceMainScreen สลับไปแท็บแผนที่
+  /// แล้วเปิด Coach Mark ชี้ปุ่มจริงให้ (Coach Mark ผูกอยู่กับ AmbulanceHomeScreen
+  /// คนละหน้ากับหน้านี้ เลยต้องส่งผ่าน callback ขึ้นไปให้ตัว MainScreen จัดการ)
+  final VoidCallback? onShowCoachMark;
+
+  const AmbulanceSettingsScreen({super.key, this.onShowCoachMark});
 
   @override
   State<AmbulanceSettingsScreen> createState() =>
@@ -102,6 +108,16 @@ class _AmbulanceSettingsScreenState extends State<AmbulanceSettingsScreen> {
                         setState(() => _isAutoErNotify = val);
                       },
                     ),
+                    const SizedBox(height: 16),
+
+                    // ดูคำแนะนำการใช้งาน (Onboarding) ซ้ำอีกครั้ง
+                    _buildOnboardingReplayCard(context),
+                    const SizedBox(height: 16),
+
+                    // สอนการใช้งานปุ่มต่างๆ (Coach Mark) — ชี้ตำแหน่งปุ่มจริงบนแผนที่
+                    // พร้อมคำอธิบาย เดิมโชว์อัตโนมัติครั้งแรก เปลี่ยนเป็นกดดูเองได้ตาม
+                    // ใจที่นี่แทน (ผู้ใช้ขอให้ย้ายมาไว้ในหน้าตั้งค่าแทนการโชว์อัตโนมัติ)
+                    _buildCoachMarkTourCard(),
                     const SizedBox(height: 20),
                   ],
                 ),
@@ -111,6 +127,98 @@ class _AmbulanceSettingsScreenState extends State<AmbulanceSettingsScreen> {
         ),
       ),
       // ❌ ไม่ใส่ bottomNavigationBar เพราะควบคุมผ่าน AmbulanceMainScreen
+    );
+  }
+
+  // --- เมนู ดูคำแนะนำการใช้งานอีกครั้ง ---
+  Widget _buildOnboardingReplayCard(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFF00A896), width: 1.8),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF00A896).withValues(alpha: 0.12),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) =>
+                  const OnboardingScreen(role: 'ambulance', isReplay: true),
+            ),
+          );
+        },
+        child: const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          child: Row(
+            children: [
+              Icon(Icons.info_outline_rounded, color: Color(0xFF00A896)),
+              SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'ดูคำแนะนำการใช้งานอีกครั้ง',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.black87,
+                  ),
+                ),
+              ),
+              Icon(Icons.chevron_right_rounded, color: Colors.black38),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // --- เมนู สอนการใช้งานปุ่มต่างๆ (Coach Mark) ---
+  Widget _buildCoachMarkTourCard() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFF2563EB), width: 1.8),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF2563EB).withValues(alpha: 0.12),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: () => widget.onShowCoachMark?.call(),
+        child: const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          child: Row(
+            children: [
+              Icon(Icons.touch_app_rounded, color: Color(0xFF2563EB)),
+              SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'สอนการใช้งานปุ่มต่างๆ',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.black87,
+                  ),
+                ),
+              ),
+              Icon(Icons.chevron_right_rounded, color: Colors.black38),
+            ],
+          ),
+        ),
+      ),
     );
   }
 

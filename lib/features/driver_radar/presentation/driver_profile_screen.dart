@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../core/services/driver_storage_service.dart';
+import '../../../core/services/theme_settings_service.dart';
 import '../../auth_face_login/data/models/user_face_profile.dart';
 import '../../auth_face_login/data/services/face_auth_repository.dart';
 import '../../auth_face_login/presentation/face_login_screen.dart';
@@ -17,11 +18,24 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
   UserFaceProfile? _currentUser;
   String _phone = '081-234-5678';
   String _carPlate = 'กข-9999 เชียงใหม่';
+  bool _isNightMode = false;
 
   @override
   void initState() {
     super.initState();
     _loadData();
+    _isNightMode = ThemeSettingsService.isNightMode.value;
+    ThemeSettingsService.isNightMode.addListener(_onNightModeChanged);
+  }
+
+  @override
+  void dispose() {
+    ThemeSettingsService.isNightMode.removeListener(_onNightModeChanged);
+    super.dispose();
+  }
+
+  void _onNightModeChanged() {
+    if (mounted) setState(() => _isNightMode = ThemeSettingsService.isNightMode.value);
   }
 
   Future<void> _loadData() async {
@@ -31,6 +45,16 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
       setState(() {
         _yieldsCount = count;
         _currentUser = user;
+        // โหลดเบอร์โทรจริงของผู้ใช้ ถ้ายังไม่เคยตั้งค่าไว้เลยค่อย fallback เป็นค่า
+        // ตัวอย่างเดิม (เดิมไม่เคยโหลดจาก user เลย ค้างเป็นเบอร์ hardcode ตลอด)
+        if (user != null && user.phone != null && user.phone!.isNotEmpty) {
+          _phone = user.phone!;
+        }
+        // โหลดทะเบียนรถจริงที่บันทึกไว้ ถ้ายังไม่เคยตั้งค่าไว้เลยค่อย fallback
+        // เป็นค่าตัวอย่างเดิม (เดิมไม่เคยโหลดจาก user เลย ค้างเป็นค่า hardcode ตลอด)
+        if (user != null && user.carPlate != null && user.carPlate!.isNotEmpty) {
+          _carPlate = user.carPlate!;
+        }
       });
     }
   }
@@ -181,14 +205,30 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
               width: double.infinity,
               height: 48,
               child: ElevatedButton(
-                onPressed: () {
+                onPressed: () async {
+                  final newPhone = phoneCtrl.text.trim();
+                  final newName = nameCtrl.text.trim();
+                  final newPlate = plateCtrl.text.trim();
+                  // เดิมมีแต่ FaceAuthRepository.updateUserPhone() เท่านั้นที่ persist
+                  // จริง ส่วนชื่อและทะเบียนรถถูกแก้แค่ใน state ในเครื่องด้วย copyWith()
+                  // แล้วหายไปทันทีที่ _loadData() โหลดโปรไฟล์เดิมกลับมาตอนเปิดแอพใหม่
+                  if (_currentUser != null && newPhone.isNotEmpty) {
+                    await FaceAuthRepository.updateUserPhone(_currentUser!.email, newPhone);
+                  }
+                  if (_currentUser != null && newName.isNotEmpty) {
+                    await FaceAuthRepository.updateUserName(_currentUser!.email, newName);
+                  }
+                  if (_currentUser != null && newPlate.isNotEmpty) {
+                    await FaceAuthRepository.updateUserCarPlate(_currentUser!.email, newPlate);
+                  }
                   setState(() {
-                    if (nameCtrl.text.isNotEmpty && _currentUser != null) {
-                      _currentUser = _currentUser!.copyWith(name: nameCtrl.text.trim());
+                    if (newName.isNotEmpty && _currentUser != null) {
+                      _currentUser = _currentUser!.copyWith(name: newName);
                     }
-                    _phone = phoneCtrl.text.trim();
-                    _carPlate = plateCtrl.text.trim();
+                    _phone = newPhone;
+                    _carPlate = newPlate;
                   });
+                  if (!ctx.mounted) return;
                   Navigator.pop(ctx);
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
@@ -403,7 +443,14 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
     );
   }
 
-  void _showYieldHistoryDialog() {
+  // เดิมโชว์ 2 แถวประวัติตัวอย่าง hardcode ตายตัวเสมอ ไม่ว่าผู้ใช้จะเปิดทางไปแล้ว
+  // กี่ครั้งจริงก็ตาม (แม้แต่ผู้ใช้ใหม่ที่ยังไม่เคยเปิดทางเลยก็เห็น 2 แถวนี้) ตอนนี้
+  // ดึงประวัติจริงจาก DriverStorageService มาแสดงแทน และโชว่สถานะว่างอย่างตรงไปตรงมา
+  // เมื่อยังไม่มีประวัติจริง
+  void _showYieldHistoryDialog() async {
+    final history = await DriverStorageService.getYieldHistory();
+    if (!mounted) return;
+
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
@@ -424,29 +471,55 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                 ],
               ),
               const SizedBox(height: 16),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: const BoxDecoration(color: Color(0xFFFEE2E2), shape: BoxShape.circle),
-                  child: const Text('🚑', style: TextStyle(fontSize: 20)),
+              if (history.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  child: Center(
+                    child: Column(
+                      children: [
+                        Icon(Icons.info_outline_rounded, color: Colors.grey.shade400, size: 32),
+                        const SizedBox(height: 8),
+                        Text(
+                          'ยังไม่มีประวัติการเปิดทางช่วยเหลือ',
+                          style: TextStyle(color: Colors.grey.shade600, fontWeight: FontWeight.w600),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              else
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 320),
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: history.length,
+                    separatorBuilder: (_, __) => Divider(color: Colors.grey.shade200),
+                    itemBuilder: (context, index) {
+                      final entry = history[index];
+                      final label = entry['label']?.toString() ?? 'เปิดทางให้รถฉุกเฉิน';
+                      DateTime? time;
+                      try {
+                        time = DateTime.parse(entry['time']?.toString() ?? '');
+                      } catch (_) {
+                        time = null;
+                      }
+                      final timeText = time != null
+                          ? '${time.day.toString().padLeft(2, '0')}/${time.month.toString().padLeft(2, '0')}/${time.year} ${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}'
+                          : '';
+                      return ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: const BoxDecoration(color: Color(0xFFFEE2E2), shape: BoxShape.circle),
+                          child: const Text('🚑', style: TextStyle(fontSize: 20)),
+                        ),
+                        title: Text(label, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                        subtitle: timeText.isNotEmpty ? Text(timeText) : null,
+                        trailing: const Text('+1 แต้ม', style: TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.bold)),
+                      );
+                    },
+                  ),
                 ),
-                title: const Text('เปิดทางให้รถกู้ชีพ 1669 (ถ.สุเทพ)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                subtitle: const Text('ช่วยประหยัดเวลาส่งผู้ป่วยฉุกเฉิน ~2.5 นาที'),
-                trailing: const Text('+1 แต้ม', style: TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.bold)),
-              ),
-              Divider(color: Colors.grey.shade200),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: const BoxDecoration(color: Color(0xFFE0F2FE), shape: BoxShape.circle),
-                  child: const Text('🚑', style: TextStyle(fontSize: 20)),
-                ),
-                title: const Text('เปิดทางให้รถฉุกเฉิน รพ.มหาราชนคร', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                subtitle: const Text('ช่วยประหยัดเวลาส่งผู้ป่วยฉุกเฉิน ~3.0 นาที'),
-                trailing: const Text('+1 แต้ม', style: TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.bold)),
-              ),
               const SizedBox(height: 12),
               Center(
                 child: Text('รวมทั้งหมด $_yieldsCount ครั้ง • ประหยัดเวลารวม ${(_yieldsCount * 2.5).toStringAsFixed(1)} นาที',
@@ -462,7 +535,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
+      backgroundColor: _isNightMode ? const Color(0xFF121212) : const Color(0xFFF8FAFC),
       body: SafeArea(
         child: Column(
           children: [
@@ -579,7 +652,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: _isNightMode ? const Color(0xFF1E1E1E) : Colors.white,
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.05),
@@ -588,13 +661,13 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
           ),
         ],
       ),
-      child: const Center(
+      child: Center(
         child: Text(
           'RouteAlert Driver Profile',
           style: TextStyle(
             fontSize: 18,
             fontWeight: FontWeight.bold,
-            color: Colors.black87,
+            color: _isNightMode ? Colors.white : Colors.black87,
           ),
         ),
       ),
@@ -610,7 +683,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
       width: double.infinity,
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: _isNightMode ? const Color(0xFF1E1E1E) : Colors.white,
         borderRadius: BorderRadius.circular(24),
         boxShadow: [
           BoxShadow(
@@ -647,10 +720,10 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                       name,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
-                        color: Colors.black87,
+                        color: _isNightMode ? Colors.white : Colors.black87,
                       ),
                     ),
                     const SizedBox(height: 2),
@@ -697,7 +770,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
       width: double.infinity,
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: _isNightMode ? const Color(0xFF1E1E1E) : Colors.white,
         borderRadius: BorderRadius.circular(24),
         border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.3), width: 1.5),
         boxShadow: [
@@ -711,20 +784,20 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Row(
+          Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Row(
                 children: [
-                  Icon(Icons.workspace_premium_rounded, color: Color(0xFFF59E0B), size: 22),
-                  SizedBox(width: 6),
+                  const Icon(Icons.workspace_premium_rounded, color: Color(0xFFF59E0B), size: 22),
+                  const SizedBox(width: 6),
                   Text(
                     'สถิติพลเมืองดี (Good Citizen)',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87),
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: _isNightMode ? Colors.white : Colors.black87),
                   ),
                 ],
               ),
-              Text(
+              const Text(
                 '🥇 Gold Hero',
                 style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFFD97706)),
               ),
@@ -799,7 +872,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
       width: double.infinity,
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: _isNightMode ? const Color(0xFF1E1E1E) : Colors.white,
         borderRadius: BorderRadius.circular(24),
         boxShadow: [
           BoxShadow(
@@ -824,12 +897,12 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                 size: 24,
               ),
               const SizedBox(width: 10),
-              const Text(
+              Text(
                 'ระบบความปลอดภัย Face ID Login',
                 style: TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.bold,
-                  color: Colors.black87,
+                  color: _isNightMode ? Colors.white : Colors.black87,
                 ),
               ),
             ],
@@ -904,7 +977,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: _isNightMode ? const Color(0xFF1E1E1E) : Colors.white,
         borderRadius: BorderRadius.circular(18),
         boxShadow: [
           BoxShadow(
@@ -923,10 +996,10 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
           leading: Icon(icon, color: const Color(0xFF5B9EE1)),
           title: Text(
             title,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 14.5,
               fontWeight: FontWeight.w600,
-              color: Colors.black87,
+              color: _isNightMode ? Colors.white : Colors.black87,
             ),
           ),
           trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 16, color: Colors.grey),

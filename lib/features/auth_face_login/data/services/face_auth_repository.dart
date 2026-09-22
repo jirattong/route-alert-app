@@ -240,6 +240,7 @@ class FaceAuthRepository {
       role: user.role,
       faceEmbedding: normalized,
       avatarPath: user.avatarPath,
+      phone: user.phone,
       registeredAt: user.registeredAt,
     );
 
@@ -315,16 +316,60 @@ class FaceAuthRepository {
     final users = await getAllUsers();
     final index = users.indexWhere((u) => u.email == email);
     if (index != -1) {
-      final updatedUser = UserFaceProfile(
-        id: users[index].id,
-        email: users[index].email,
-        name: users[index].name,
-        role: newRole,
-        faceEmbedding: users[index].faceEmbedding,
-        avatarPath: users[index].avatarPath,
-        registeredAt: users[index].registeredAt,
-      );
+      final updatedUser = users[index].copyWith(role: newRole);
       await registerUser(updatedUser);
+      return true;
+    }
+    return false;
+  }
+
+  /// บันทึกเบอร์โทรศัพท์จริงของผู้ใช้ (เดิมไม่มี field นี้เลย หน้าโปรไฟล์และหน้า
+  /// SOS report เลยใช้เบอร์ hardcode '081-234-5678' ตลอด แยกผู้ใช้แต่ละคนไม่ออก)
+  static Future<bool> updateUserPhone(String email, String newPhone) async {
+    final users = await getAllUsers();
+    final index = users.indexWhere((u) => u.email == email);
+    if (index != -1) {
+      final updatedUser = users[index].copyWith(phone: newPhone);
+      await registerUser(updatedUser);
+      final current = await getCurrentUser();
+      if (current != null && current.email == email) {
+        await setCurrentUser(updatedUser);
+      }
+      return true;
+    }
+    return false;
+  }
+
+  /// บันทึกชื่อ-นามสกุลที่แก้ไขจากหน้าโปรไฟล์ (เดิมหน้าโปรไฟล์แก้แค่ state ในเครื่อง
+  /// ด้วย copyWith() โดยไม่เคยเรียก repository เก็บลง storage จริง ทำให้ข้อมูลหาย
+  /// ทันทีที่ปิดแอพ/ล็อกอินใหม่ แม้จะโชว์ข้อความ "อัปเดตสำเร็จ" ก็ตาม)
+  static Future<bool> updateUserName(String email, String newName) async {
+    final users = await getAllUsers();
+    final index = users.indexWhere((u) => u.email == email);
+    if (index != -1) {
+      final updatedUser = users[index].copyWith(name: newName);
+      await registerUser(updatedUser);
+      final current = await getCurrentUser();
+      if (current != null && current.email == email) {
+        await setCurrentUser(updatedUser);
+      }
+      return true;
+    }
+    return false;
+  }
+
+  /// บันทึกทะเบียนรถส่วนตัวที่แก้ไขจากหน้าโปรไฟล์ (เดิมไม่มี field นี้เลย ใช้แค่
+  /// ค่า hardcode 'กข-9999 เชียงใหม่' ตลอด ไม่ persist การแก้ไขจริง)
+  static Future<bool> updateUserCarPlate(String email, String newCarPlate) async {
+    final users = await getAllUsers();
+    final index = users.indexWhere((u) => u.email == email);
+    if (index != -1) {
+      final updatedUser = users[index].copyWith(carPlate: newCarPlate);
+      await registerUser(updatedUser);
+      final current = await getCurrentUser();
+      if (current != null && current.email == email) {
+        await setCurrentUser(updatedUser);
+      }
       return true;
     }
     return false;
@@ -335,15 +380,7 @@ class FaceAuthRepository {
     final users = await getAllUsers();
     final index = users.indexWhere((u) => u.email == email);
     if (index != -1) {
-      final updatedUser = UserFaceProfile(
-        id: users[index].id,
-        email: users[index].email,
-        name: users[index].name,
-        role: users[index].role,
-        faceEmbedding: newEmbedding,
-        avatarPath: users[index].avatarPath,
-        registeredAt: users[index].registeredAt,
-      );
+      final updatedUser = users[index].copyWith(faceEmbedding: newEmbedding);
       await registerUser(updatedUser);
       return true;
     }

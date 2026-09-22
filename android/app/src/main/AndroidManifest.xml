@@ -10,6 +10,9 @@
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
     <uses-feature android:name="android.hardware.camera.front" android:required="false" />
 
+    <!-- 🎙️ ไมโครโฟนสำหรับตรวจจับเสียงไซเรนรถพยาบาล (on-device siren detection) -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+
     <!-- 📍 สิทธิ์ GPS ตรวจจับเรดาร์ Geofence และนำทางฉุกเฉิน -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />

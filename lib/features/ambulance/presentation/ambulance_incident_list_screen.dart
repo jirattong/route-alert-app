@@ -204,11 +204,16 @@ class _AmbulanceIncidentListScreenState
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                item.address.isNotEmpty ? item.address : item.province,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Colors.black87),
+              // เผื่อระยะขวาให้พ้นปุ่มลูกศร > (ดูดูรายละเอียด) มุมขวาบน ไม่งั้นที่อยู่
+              // ยาวๆ ที่ถูกตัดด้วย ellipsis จะไปซ้อนทับ/โผล่ใต้ไอคอนลูกศรพอดี
+              Padding(
+                padding: const EdgeInsets.only(right: 24),
+                child: Text(
+                  item.address.isNotEmpty ? item.address : item.province,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Colors.black87),
+                ),
               ),
               const SizedBox(height: 2),
               Text(

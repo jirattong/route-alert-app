@@ -4,6 +4,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import '../../../core/models/incident_report.dart';
 import '../../../core/services/incident_service.dart';
+import 'driver_main_screen.dart';
 
 class IncidentDetailScreen extends StatelessWidget {
   final IncidentReport? incident;
@@ -168,6 +169,12 @@ class IncidentDetailScreen extends StatelessWidget {
     final String address = incident?.address ?? incidentData?['location'] ?? 'อ.ฝาง จ.เชียงใหม่';
     final String desc = incident?.description ?? incidentData?['description'] ?? '-';
     final String? photoBase64 = incident?.photoBase64;
+    // เดิมแสดงแค่รูปแรก (photoBase64) รูปเดียว ทั้งที่โมเดลรองรับแนบได้สูงสุด 5 รูป
+    // (photosBase64) และหน้า SOS report ก็บันทึกครบทุกรูปจริง จึงต้องดึงรายการ
+    // เต็มมาแสดงทั้งหมด ถ้าไม่มี photosBase64 เลยค่อย fallback ไปใช้รูปเดียวเดิม
+    final List<String> photosBase64 = (incident?.photosBase64.isNotEmpty ?? false)
+        ? incident!.photosBase64
+        : (photoBase64 != null && photoBase64.isNotEmpty ? [photoBase64] : []);
     final String carPlate = incident?.assignedAmbulancePlate ?? incidentData?['carPlate'] ?? 'รอศูนย์จ่ายงาน';
     final bool canCancel = incident?.canBeCancelled ?? false;
     final bool isCancelled = incident?.status == 'cancelled';
@@ -332,17 +339,50 @@ class IncidentDetailScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 10),
 
-                    // รูปภาพที่แนบมา (ถ้ามี)
-                    if (photoBase64 != null && photoBase64.isNotEmpty) ...[
+                    // รูปภาพที่แนบมา (แสดงทุกรูปที่แนบจริง สูงสุด 5 รูป แทนที่จะโชว์
+                    // แค่รูปแรกรูปเดียวเหมือนเดิม)
+                    if (photosBase64.length == 1) ...[
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 8),
                         child: ClipRRect(
                           borderRadius: BorderRadius.circular(16),
                           child: Image.memory(
-                            base64Decode(photoBase64),
+                            base64Decode(photosBase64.first),
                             height: 180,
                             width: double.infinity,
                             fit: BoxFit.cover,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                    ] else if (photosBase64.length > 1) ...[
+                      SizedBox(
+                        height: 180,
+                        child: ListView.separated(
+                          scrollDirection: Axis.horizontal,
+                          padding: const EdgeInsets.symmetric(horizontal: 28),
+                          itemCount: photosBase64.length,
+                          separatorBuilder: (_, __) => const SizedBox(width: 10),
+                          itemBuilder: (context, index) {
+                            return ClipRRect(
+                              borderRadius: BorderRadius.circular(16),
+                              child: Image.memory(
+                                base64Decode(photosBase64[index]),
+                                height: 180,
+                                width: 240,
+                                fit: BoxFit.cover,
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4, right: 28),
+                        child: Align(
+                          alignment: Alignment.centerRight,
+                          child: Text(
+                            '${photosBase64.length} รูป',
+                            style: TextStyle(fontSize: 11, color: Colors.grey.shade500, fontWeight: FontWeight.w600),
                           ),
                         ),
                       ),
@@ -491,7 +531,7 @@ class IncidentDetailScreen extends StatelessWidget {
 
   Widget _buildHeader(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
       decoration: BoxDecoration(
         color: Colors.white,
         boxShadow: [
@@ -503,32 +543,57 @@ class IncidentDetailScreen extends StatelessWidget {
         ],
       ),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Container(
-            width: 34,
-            height: 34,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(color: const Color(0xFF2C3E50), width: 1.8),
-            ),
-            child: Stack(
-              alignment: Alignment.center,
+          // ปุ่มย้อนกลับ — เดิมไม่มีเลย เข้าหน้านี้แล้วออกไม่ได้ (โดยเฉพาะตอนมาจาก
+          // การส่ง SOS ซึ่งใช้ pushReplacement แทนที่หน้าฟอร์มไปเลย ไม่มีหน้าให้ pop
+          // กลับ) เช็คก่อนว่า pop ได้จริงไหม ถ้าไม่ได้ค่อยพากลับไปหน้าแรกของแอปแทน
+          IconButton(
+            icon: const Icon(Icons.arrow_back_ios_new_rounded,
+                color: Color(0xFF2C3E50), size: 20),
+            onPressed: () {
+              if (Navigator.canPop(context)) {
+                Navigator.pop(context);
+              } else {
+                Navigator.pushReplacement(
+                  context,
+                  MaterialPageRoute(builder: (_) => const DriverMainScreen()),
+                );
+              }
+            },
+          ),
+          Expanded(
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(Icons.airport_shuttle_outlined, size: 18, color: Color(0xFF2C3E50)),
-                Positioned(
-                  top: 3,
-                  right: 3,
-                  child: Icon(Icons.wifi, size: 8, color: Colors.redAccent.shade700),
+                Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: const Color(0xFF2C3E50), width: 1.8),
+                  ),
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      const Icon(Icons.airport_shuttle_outlined, size: 18, color: Color(0xFF2C3E50)),
+                      Positioned(
+                        top: 3,
+                        right: 3,
+                        child: Icon(Icons.wifi, size: 8, color: Colors.redAccent.shade700),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 10),
+                const Text(
+                  'RouteAlert Incident',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87),
                 ),
               ],
             ),
           ),
-          const SizedBox(width: 10),
-          const Text(
-            'RouteAlert Incident',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87),
-          ),
+          // เว้นพื้นที่เท่ากับปุ่มย้อนกลับฝั่งซ้าย ให้โลโก้+ชื่อยังอยู่กึ่งกลางจอจริง
+          const SizedBox(width: 48),
         ],
       ),
     );

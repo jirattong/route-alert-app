@@ -3,6 +3,8 @@ import 'package:latlong2/latlong.dart';
 import '../../../core/models/incident_report.dart';
 import '../../../core/services/incident_service.dart';
 import '../../../core/services/location_service.dart';
+import '../../../core/services/theme_settings_service.dart';
+import '../../auth_face_login/data/services/face_auth_repository.dart';
 import 'incident_detail_screen.dart';
 
 class IncidentListScreen extends StatefulWidget {
@@ -18,12 +20,37 @@ class _IncidentListScreenState extends State<IncidentListScreen> {
   double _selectedRadiusKm = 15.0; // ค่าเริ่มต้น: ไม่เกิน 15 กม. ตามที่ผู้ใช้ต้องการ
   int _selectedTab = 0; // 0 = เหตุในบริเวณพื้นที่, 1 = รายงานของฉัน (SOS)
   LatLng _userLocation = const LatLng(19.0284, 99.8962);
+  bool _isNightMode = false;
+  // อีเมลผู้ใช้จริงที่ล็อกอินอยู่ ใช้เช็คว่าเคสไหนเป็นของเรา (เดิมเทียบกับเบอร์
+  // hardcode '081-234-5678' ซึ่งทุกคนที่ยังไม่กรอกเบอร์เองจะตรงกันหมด แยกไม่ออก
+  // ว่าเคสเป็นของใครจริง)
+  String _currentUserEmail = 'verified_user@routealert.app';
 
   @override
   void initState() {
     super.initState();
     IncidentService().initialize();
     _loadUserLocation();
+    _loadCurrentUserEmail();
+    _isNightMode = ThemeSettingsService.isNightMode.value;
+    ThemeSettingsService.isNightMode.addListener(_onNightModeChanged);
+  }
+
+  Future<void> _loadCurrentUserEmail() async {
+    final user = await FaceAuthRepository.getCurrentUser();
+    if (mounted && user != null && user.id != 'guest') {
+      setState(() => _currentUserEmail = user.email);
+    }
+  }
+
+  @override
+  void dispose() {
+    ThemeSettingsService.isNightMode.removeListener(_onNightModeChanged);
+    super.dispose();
+  }
+
+  void _onNightModeChanged() {
+    if (mounted) setState(() => _isNightMode = ThemeSettingsService.isNightMode.value);
   }
 
   Future<void> _loadUserLocation() async {
@@ -40,7 +67,7 @@ class _IncidentListScreenState extends State<IncidentListScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: _isNightMode ? const Color(0xFF121212) : Colors.white,
       body: SafeArea(
         child: Stack(
           children: [
@@ -55,16 +82,16 @@ class _IncidentListScreenState extends State<IncidentListScreen> {
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Row(
+                      Row(
                         children: [
-                          Icon(Icons.radar_rounded, color: Color(0xFF2563EB), size: 20),
-                          SizedBox(width: 6),
+                          const Icon(Icons.radar_rounded, color: Color(0xFF2563EB), size: 20),
+                          const SizedBox(width: 6),
                           Text(
                             'ขอบเขตแสดงเหตุ:',
                             style: TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.bold,
-                              color: Colors.black87,
+                              color: _isNightMode ? Colors.white : Colors.black87,
                             ),
                           ),
                         ],
@@ -181,8 +208,8 @@ class _IncidentListScreenState extends State<IncidentListScreen> {
                           return true;
                         } else {
                           // เคสที่ผู้ใช้แจ้งเอง จะแสดงเสมอไม่ถูกซ่อนตามรัศมี
-                          final isMyReport = item.id.startsWith('Case #AVCB') ||
-                              item.reporterPhone == '081-234-5678';
+                          final isMyReport =
+                              item.reporterEmail == _currentUserEmail;
                           if (isMyReport) return true;
 
                           // Area incidents by radius
@@ -197,8 +224,8 @@ class _IncidentListScreenState extends State<IncidentListScreen> {
 
                       // เรียงลำดับ: เคสของผู้ใช้ขึ้นบนสุดเสมอ จากนั้นเรียงตามเวลาล่าสุด
                       filtered.sort((a, b) {
-                        final aIsMine = a.id.startsWith('Case #AVCB') || a.reporterPhone == '081-234-5678';
-                        final bIsMine = b.id.startsWith('Case #AVCB') || b.reporterPhone == '081-234-5678';
+                        final aIsMine = a.reporterEmail == _currentUserEmail;
+                        final bIsMine = b.reporterEmail == _currentUserEmail;
                         if (aIsMine && !bIsMine) return -1;
                         if (!aIsMine && bIsMine) return 1;
                         return b.createdAt.compareTo(a.createdAt);
@@ -307,7 +334,7 @@ class _IncidentListScreenState extends State<IncidentListScreen> {
         margin: const EdgeInsets.only(bottom: 14),
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: _isNightMode ? const Color(0xFF1E1E1E) : Colors.white,
           borderRadius: BorderRadius.circular(22),
           border: Border.all(
             color: item.status == 'cancelled'
@@ -337,7 +364,11 @@ class _IncidentListScreenState extends State<IncidentListScreen> {
                           item.address.isNotEmpty ? item.address : item.province,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
+                            color: _isNightMode ? Colors.white : Colors.black87,
+                          ),
                         ),
                       ),
                       Container(
@@ -360,7 +391,7 @@ class _IncidentListScreenState extends State<IncidentListScreen> {
                         item.id,
                         style: TextStyle(fontSize: 12, color: Colors.grey.shade600, fontWeight: FontWeight.w600),
                       ),
-                      if (item.id.startsWith('Case #AVCB') || item.reporterPhone == '081-234-5678') ...[
+                      if (item.reporterEmail == _currentUserEmail) ...[
                         const SizedBox(width: 6),
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
@@ -380,7 +411,7 @@ class _IncidentListScreenState extends State<IncidentListScreen> {
                   const SizedBox(height: 4),
                   Text(
                     item.type,
-                    style: const TextStyle(fontSize: 13, color: Colors.black87),
+                    style: TextStyle(fontSize: 13, color: _isNightMode ? Colors.white70 : Colors.black87),
                   ),
                   if (item.assignedAmbulancePlate != null && item.assignedAmbulancePlate!.isNotEmpty) ...[
                     const SizedBox(height: 2),
@@ -437,7 +468,7 @@ class _IncidentListScreenState extends State<IncidentListScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: _isNightMode ? const Color(0xFF1E1E1E) : Colors.white,
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.04),
@@ -469,9 +500,13 @@ class _IncidentListScreenState extends State<IncidentListScreen> {
             ),
           ),
           const SizedBox(width: 10),
-          const Text(
+          Text(
             'RouteAlert',
-            style: TextStyle(fontSize: 19, fontWeight: FontWeight.w700, color: Color(0xFF1E293B)),
+            style: TextStyle(
+              fontSize: 19,
+              fontWeight: FontWeight.w700,
+              color: _isNightMode ? Colors.white : const Color(0xFF1E293B),
+            ),
           ),
         ],
       ),

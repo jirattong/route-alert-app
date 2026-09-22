@@ -834,7 +834,14 @@ class _AmbulanceProfileScreenState extends State<AmbulanceProfileScreen> {
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
-                  onPressed: () {
+                  onPressed: () async {
+                    // เดิมไม่เคยเรียก logout() จริงเลย (แค่ push ไปหน้าล็อกอินเฉยๆ)
+                    // ที่ผ่านมา "ดูเหมือน" ทำงานได้เพราะ FaceLoginScreen เคยบังคับ
+                    // logout ทุกครั้งที่เปิดหน้าอยู่แล้วไม่ว่ากรณีใด — ตอนนี้เปลี่ยน
+                    // เป็นจำ session ข้ามการเปิดแอปแล้ว ถ้าไม่เรียก logout() ตรงนี้
+                    // ปุ่มนี้จะไม่ออกจากระบบจริง (เปิดแอปใหม่จะเด้งกลับเข้าบัญชีเดิม)
+                    await FaceAuthRepository.logout();
+                    if (!ctx.mounted) return;
                     Navigator.pop(ctx);
                     Navigator.pushAndRemoveUntil(
                       context,

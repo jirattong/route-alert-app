@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -27,6 +28,7 @@ class _AgencyIncidentDetailScreenState
   late IncidentReport _currentIncident;
   late bool _isPrepared;
   bool _isDispatching = false;
+  StreamSubscription<List<IncidentReport>>? _incidentSub;
 
   @override
   void initState() {
@@ -39,7 +41,7 @@ class _AgencyIncidentDetailScreenState
     _isPrepared = _currentIncident.isErPrepared;
 
     // Listen to real-time updates for this specific incident
-    IncidentService().incidentsStream.listen((list) {
+    _incidentSub = IncidentService().incidentsStream.listen((list) {
       if (!mounted) return;
       final found = list.firstWhere(
         (i) => i.id == _currentIncident.id,
@@ -52,6 +54,12 @@ class _AgencyIncidentDetailScreenState
         });
       }
     });
+  }
+
+  @override
+  void dispose() {
+    _incidentSub?.cancel();
+    super.dispose();
   }
 
   Future<void> _handleDispatchCase() async {
@@ -593,6 +601,7 @@ class _AgencyIncidentDetailScreenState
       {'title': 'เดินทาง', 'sub': 'ไปจุดเกิดเหตุ', 'active': step >= 1},
       {'title': 'ถึงที่เกิดเหตุ', 'sub': 'ปฐมพยาบาล', 'active': step >= 2},
       {'title': 'กำลังนำส่ง', 'sub': 'มุ่งหน้ามา รพ.', 'active': step >= 3},
+      {'title': 'ใกล้ถึง รพ.', 'sub': 'เตรียมทีม ER', 'active': step >= 4},
       {'title': 'ถึง รพ.', 'sub': 'เสร็จสิ้น', 'active': step >= 5},
     ];
 

@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../../../core/services/onboarding_service.dart';
+import '../../onboarding/presentation/onboarding_screen.dart';
 import 'agency_home_screen.dart';
 import 'agency_incident_list_screen.dart';
 import 'agency_settings_screen.dart';
@@ -13,13 +15,54 @@ class AgencyMainScreen extends StatefulWidget {
 
 class _AgencyMainScreenState extends State<AgencyMainScreen> {
   int _currentIndex = 0;
+  late final List<Widget> _pages;
 
-  final List<Widget> _pages = const [
-    AgencyHomeScreen(),         // Index 0: แผนที่เฝ้าระวัง
-    AgencyIncidentListScreen(), // Index 1: รายการเคส ER
-    AgencySettingsScreen(),     // Index 2: ตั้งค่า (เสียง, Background)
-    AgencyProfileScreen(),      // Index 3: ข้อมูลสถิติ (Dashboard)
-  ];
+  // ฟังก์ชันเปิด Coach Mark ที่ AgencyHomeScreen ส่งขึ้นมาให้ตอน initState ของมัน
+  // เก็บไว้เรียกตอนผู้ใช้กด "สอนการใช้งานปุ่มต่างๆ" จากหน้าตั้งค่า (คนละหน้ากัน
+  // แต่ยังอยู่ใน IndexedStack เดียวกัน เลยเรียกใช้ผ่าน callback แทนได้)
+  VoidCallback? _showAgencyCoachMark;
+
+  @override
+  void initState() {
+    super.initState();
+    _pages = [
+      AgencyHomeScreen(
+        onCoachMarkReady: (fn) => _showAgencyCoachMark = fn,
+      ), // Index 0: แผนที่เฝ้าระวัง
+      const AgencyIncidentListScreen(), // Index 1: รายการเคส ER
+      AgencySettingsScreen(onShowCoachMark: _showCoachMarkTour), // Index 2: ตั้งค่า (เสียง, Background)
+      const AgencyProfileScreen(), // Index 3: ข้อมูลสถิติ (Dashboard)
+    ];
+    _maybeShowOnboarding();
+  }
+
+  // โชว์หน้าแนะนำการใช้งานแบบละเอียด (Onboarding) เฉพาะครั้งแรกที่เข้าหน้าหลักของ
+  // Agency หลังล็อกอินเท่านั้น — เดิมเคยโชว์ก่อนล็อกอินรวมทั้ง 3 role ในหน้าเดียว
+  // ย้ายมาตรงนี้เพราะรู้ role แน่ชัดแล้ว อธิบายเจาะจงเรื่องปุ่ม/ฟีเจอร์ได้ตรงจุดกว่า
+  void _maybeShowOnboarding() {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      final seen = await OnboardingService.hasSeenOnboarding('agency');
+      if (seen || !mounted) return;
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          fullscreenDialog: true,
+          builder: (_) => const OnboardingScreen(role: 'agency'),
+        ),
+      );
+    });
+  }
+
+  // สลับไปแท็บแผนที่ (หน้าหลัก) แล้วเปิด Coach Mark ให้ทันที — เรียกจากปุ่ม
+  // "สอนการใช้งานปุ่มต่างๆ" ในหน้าตั้งค่า ต้องรอเฟรมถัดไปก่อนเพราะปุ่ม/แถบต้อง
+  // แสดงผลจริงบนจอถึงจะชี้ตำแหน่งได้ถูกต้อง (สลับแท็บอย่างเดียวยังไม่พอ)
+  void _showCoachMarkTour() {
+    setState(() => _currentIndex = 0);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _showAgencyCoachMark?.call();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {

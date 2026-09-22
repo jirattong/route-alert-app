@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../../../core/services/onboarding_service.dart';
+import '../../onboarding/presentation/onboarding_screen.dart';
 import 'ambulance_home_screen.dart';
 import 'ambulance_settings_screen.dart';
 import 'ambulance_incident_list_screen.dart';
@@ -13,14 +15,55 @@ class AmbulanceMainScreen extends StatefulWidget {
 
 class _AmbulanceMainScreenState extends State<AmbulanceMainScreen> {
   int _currentIndex = 0;
+  late final List<Widget> _pages;
 
-  // รวมหน้าทั้ง 4 หน้าของฝั่งรถพยาบาลไว้ใน IndexedStack เพื่อสลับหน้าลื่นไหลไม่กระตุก
-  final List<Widget> _pages = const [
-    AmbulanceHomeScreen(),          // Index 0: หน้า Map / Home ฝั่งรถพยาบาล
-    AmbulanceIncidentListScreen(),  // Index 1: หน้า Incident เคสฝั่งรถพยาบาล
-    AmbulanceSettingsScreen(),        // Index 2: หน้า Settings
-    AmbulanceProfileScreen(),          // Index 3: หน้า Profile
-  ];
+  // ฟังก์ชันเปิด Coach Mark ที่ AmbulanceHomeScreen ส่งขึ้นมาให้ตอน initState ของมัน
+  // เก็บไว้เรียกตอนผู้ใช้กด "สอนการใช้งานปุ่มต่างๆ" จากหน้าตั้งค่า (คนละหน้ากัน
+  // แต่ยังอยู่ใน IndexedStack เดียวกัน เลยเรียกใช้ผ่าน callback แทนได้)
+  VoidCallback? _showAmbulanceCoachMark;
+
+  @override
+  void initState() {
+    super.initState();
+    // รวมหน้าทั้ง 4 หน้าของฝั่งรถพยาบาลไว้ใน IndexedStack เพื่อสลับหน้าลื่นไหลไม่กระตุก
+    _pages = [
+      AmbulanceHomeScreen(
+        onCoachMarkReady: (fn) => _showAmbulanceCoachMark = fn,
+      ), // Index 0: หน้า Map / Home ฝั่งรถพยาบาล
+      const AmbulanceIncidentListScreen(), // Index 1: หน้า Incident เคสฝั่งรถพยาบาล
+      AmbulanceSettingsScreen(onShowCoachMark: _showCoachMarkTour), // Index 2: หน้า Settings
+      const AmbulanceProfileScreen(), // Index 3: หน้า Profile
+    ];
+    _maybeShowOnboarding();
+  }
+
+  // โชว์หน้าแนะนำการใช้งานแบบละเอียด (Onboarding) เฉพาะครั้งแรกที่เข้าหน้าหลักของ
+  // Ambulance หลังล็อกอินเท่านั้น — เดิมเคยโชว์ก่อนล็อกอินรวมทั้ง 3 role ในหน้าเดียว
+  // ย้ายมาตรงนี้เพราะรู้ role แน่ชัดแล้ว อธิบายเจาะจงเรื่องปุ่ม/ฟีเจอร์ได้ตรงจุดกว่า
+  void _maybeShowOnboarding() {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      final seen = await OnboardingService.hasSeenOnboarding('ambulance');
+      if (seen || !mounted) return;
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          fullscreenDialog: true,
+          builder: (_) => const OnboardingScreen(role: 'ambulance'),
+        ),
+      );
+    });
+  }
+
+  // สลับไปแท็บแผนที่ (หน้าหลัก) แล้วเปิด Coach Mark ให้ทันที — เรียกจากปุ่ม
+  // "สอนการใช้งานปุ่มต่างๆ" ในหน้าตั้งค่า ต้องรอเฟรมถัดไปก่อนเพราะการ์ดสถานะต้อง
+  // แสดงผลจริงบนจอถึงจะชี้ตำแหน่งได้ถูกต้อง (สลับแท็บอย่างเดียวยังไม่พอ)
+  void _showCoachMarkTour() {
+    setState(() => _currentIndex = 0);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _showAmbulanceCoachMark?.call();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
