@@ -18,4 +18,13 @@ class OnboardingService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('$_keyPrefix$roleKey', true);
   }
+
+  /// ล้างสถานะ "เคยดูแล้ว" ของ role นี้ — เรียกตอน logout เท่านั้น (ดู
+  /// [FaceAuthRepository.logout]) ให้ตรงกับพฤติกรรมที่ตั้งใจไว้: logout แล้ว
+  /// login ใหม่ (ไม่ว่าจะบัญชีเดิมหรือบัญชีอื่นใน role เดียวกัน) จะเห็น Onboarding
+  /// อีกครั้งเสมอ ต่างจากแค่ปิดแอปเฉยๆ (ไม่ logout) ที่ session ยังอยู่ ไม่ควรโชว์ซ้ำ
+  static Future<void> clearOnboardingSeen(String roleKey) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('$_keyPrefix$roleKey');
+  }
 }

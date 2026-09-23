@@ -70,7 +70,28 @@ class _AgencyIncidentDetailScreenState
     // (ก่อนหน้านี้เป็นการยิง ID ตายตัวเดียวเสมอ ไม่มีการคำนวณระยะเลย)
     final incidentLocation =
         LatLng(_currentIncident.latitude, _currentIncident.longitude);
-    final fleet = EmergencyMqttService().activeFleet;
+
+    final onlineFleet = EmergencyMqttService().activeFleet;
+
+    if (onlineFleet.isEmpty) {
+      if (mounted) {
+        setState(() => _isDispatching = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+                '⚠️ ไม่พบรถพยาบาลที่ออนไลน์อยู่ในขณะนี้ กรุณารอให้หน่วยกู้ชีพเปิดสถานะปฏิบัติงานก่อน'),
+            backgroundColor: Color(0xFFEF4444),
+          ),
+        );
+      }
+      return;
+    }
+
+    // ตัดรถพยาบาลที่กำลังมีเคส active อยู่แล้วออกก่อนหาคันที่ใกล้ที่สุด — กันไม่ให้
+    // รถคันเดียวถูกมอบหมาย 2 เคสพร้อมกัน (เดิมไม่มีการเช็คนี้เลย)
+    final busyIds = await IncidentService().getBusyAmbulanceIds();
+    final fleet =
+        onlineFleet.where((a) => !busyIds.contains(a.id)).toList();
 
     if (fleet.isEmpty) {
       if (mounted) {
@@ -78,7 +99,7 @@ class _AgencyIncidentDetailScreenState
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
-                '⚠️ ไม่พบรถพยาบาลที่ออนไลน์อยู่ในขณะนี้ กรุณารอให้หน่วยกู้ชีพเปิดสถานะปฏิบัติงานก่อน'),
+                '⚠️ รถพยาบาลที่ออนไลน์อยู่ตอนนี้กำลังปฏิบัติภารกิจอื่นอยู่ทั้งหมด กรุณารอสักครู่แล้วลองใหม่'),
             backgroundColor: Color(0xFFEF4444),
           ),
         );
@@ -123,6 +144,19 @@ class _AgencyIncidentDetailScreenState
             content: Text(
                 '✅ ยืนยันรับเคสและส่งต่อให้ ${nearest.callSign} (ใกล้ที่สุด $distKm กม.) เรียบร้อยแล้ว'),
             backgroundColor: const Color(0xFF00A896),
+          ),
+        );
+      } else {
+        // เดิม dispatchIncidentByHospital คืนค่า true เสมอแม้ Firestore ล้มเหลว
+        // ทำให้ agency เห็นว่ามอบหมายสำเร็จ ทั้งที่รถพยาบาลไม่มีทางรู้เรื่องเลย
+        // (คนละเครื่องกัน สื่อสารผ่าน Firestore เท่านั้น) — ตอนนี้คืนค่าจริงแล้ว
+        // ต้องแจ้งเตือนให้กดใหม่แทนการนิ่งเงียบ
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+                '⚠️ ส่งมอบหมายเคสไม่สำเร็จ (เช็คสัญญาณอินเทอร์เน็ต) กรุณาลองกดใหม่อีกครั้ง'),
+            backgroundColor: Color(0xFFDC2626),
+            duration: Duration(seconds: 4),
           ),
         );
       }
@@ -352,70 +386,6 @@ class _AgencyIncidentDetailScreenState
                       child: _buildProgressTimeline(),
                     ),
 
-                    // 3. Live Medical Tele-Report Box (From Ambulance)
-                    if (_currentIncident.vitalSigns != null ||
-                        _currentIncident.patientCondition != null)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 20, vertical: 8),
-                        child: Container(
-                          padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF0F172A),
-                            borderRadius: BorderRadius.circular(18),
-                            border: Border.all(
-                                color: Colors.cyanAccent.withValues(alpha: 0.8),
-                                width: 1.5),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Row(
-                                children: [
-                                  Icon(Icons.monitor_heart_rounded,
-                                      color: Colors.cyanAccent, size: 20),
-                                  SizedBox(width: 8),
-                                  Text(
-                                    '📞 สัญญาณชีพและรายงานอาการสดจากรถพยาบาล',
-                                    style: TextStyle(
-                                        fontSize: 13.5,
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.cyanAccent),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 10),
-                              if (_currentIncident.vitalSigns != null)
-                                Text(
-                                  'สัญญาณชีพ: ${_currentIncident.vitalSigns}',
-                                  style: const TextStyle(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.white),
-                                ),
-                              if (_currentIncident.patientCondition != null)
-                                Padding(
-                                  padding: const EdgeInsets.only(top: 4),
-                                  child: Text(
-                                    'อาการผู้ป่วย: ${_currentIncident.patientCondition}',
-                                    style: const TextStyle(
-                                        fontSize: 12.5, color: Colors.white70),
-                                  ),
-                                ),
-                              if (_currentIncident.medicalNotes != null &&
-                                  _currentIncident.medicalNotes!.isNotEmpty)
-                                Padding(
-                                  padding: const EdgeInsets.only(top: 4),
-                                  child: Text(
-                                    'บันทึกเพิ่มเติม: ${_currentIncident.medicalNotes}',
-                                    style: const TextStyle(
-                                        fontSize: 12, color: Colors.amberAccent),
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
-                      ),
 
                     // 4. Case Details
                     Padding(
@@ -545,20 +515,28 @@ class _AgencyIncidentDetailScreenState
                             final newStatus = !_isPrepared;
                             setState(() => _isPrepared = newStatus);
                             final messenger = ScaffoldMessenger.of(context);
-                            await IncidentService()
+                            final ok = await IncidentService()
                                 .setErPrepared(_currentIncident.id, newStatus);
-                            if (mounted) {
-                              messenger.showSnackBar(
-                                SnackBar(
-                                  content: Text(newStatus
-                                      ? '✅ ยืนยันการเตรียมเตียงห้องฉุกเฉิน (ER Ready) สำเร็จ'
-                                      : '⚪ ยกเลิกสถานะเตรียมเตียง'),
-                                  backgroundColor: newStatus
-                                      ? const Color(0xFF10B981)
-                                      : Colors.black87,
-                                ),
-                              );
+                            if (!mounted) return;
+                            if (!ok) {
+                              // Firestore ล้มเหลวจริง — ย้อน UI กลับให้ตรงกับ
+                              // สถานะจริงที่ยังไม่ถูกบันทึก แทนที่จะค้างค่าที่ผิด
+                              setState(() => _isPrepared = !newStatus);
                             }
+                            messenger.showSnackBar(
+                              SnackBar(
+                                content: Text(!ok
+                                    ? '⚠️ บันทึกไม่สำเร็จ เช็คสัญญาณอินเทอร์เน็ตแล้วลองใหม่'
+                                    : newStatus
+                                        ? '✅ ยืนยันการเตรียมเตียงห้องฉุกเฉิน (ER Ready) สำเร็จ'
+                                        : '⚪ ยกเลิกสถานะเตรียมเตียง'),
+                                backgroundColor: !ok
+                                    ? const Color(0xFFDC2626)
+                                    : newStatus
+                                        ? const Color(0xFF10B981)
+                                        : Colors.black87,
+                              ),
+                            );
                           },
                           style: ElevatedButton.styleFrom(
                             backgroundColor: _isPrepared

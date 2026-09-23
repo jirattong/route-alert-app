@@ -164,13 +164,21 @@ class AiVisionTriageService {
 
     for (final model in candidateModels) {
       try {
+        // เดิมส่ง apiKey แปะไว้ใน query string ตรงๆ (?key=$apiKey) ทำให้ตอน
+        // request ล้มเหลว (เน็ตหลุด/timeout) ข้อความ exception ที่ debugPrint ไว้
+        // ด้านล่างจะมี URL เต็มๆ รวม API key แปะอยู่ด้วย รั่วลง log เครื่องแม้แต่ใน
+        // release build — ย้ายไปส่งผ่าน header 'x-goog-api-key' แทน (Gemini API
+        // รองรับทั้ง 2 แบบ) ตัด key ออกจาก URL ไปเลย ไม่มีทางรั่วผ่าน log อีก
         final url = Uri.parse(
-          'https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey',
+          'https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent',
         );
 
         final response = await http.post(
           url,
-          headers: {'Content-Type': 'application/json'},
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': apiKey,
+          },
           body: requestBody,
         ).timeout(const Duration(seconds: 9));
 

@@ -252,6 +252,24 @@ class VoiceAlertService {
     await _speak('ขอบคุณที่ร่วมเปิดทางช่วยชีวิตผู้ป่วยฉุกเฉินครับ');
   }
 
+  // Cooldown แยกของฝั่ง Agency (เคสใหม่จาก Driver SOS) — กันสแปมเสียงถ้ามีหลาย
+  // เคสโผล่มาพร้อมกันรัวๆ ในเวลาไล่เลี่ยกัน
+  DateTime? _lastNewIncidentAlertTime;
+
+  /// Speaks a notification when a new pending incident report arrives
+  /// (Agency role — ยังไม่มีใครเรียกใช้เมธอดนี้มาก่อน เพิ่งเชื่อมกับการตั้งค่า
+  /// "เสียงแจ้งเตือน" ของ agency ที่เดิมบันทึกค่าได้แต่ไม่มีผลอะไรเลย)
+  Future<void> speakNewIncidentAlert() async {
+    final now = DateTime.now();
+    if (_lastNewIncidentAlertTime != null &&
+        now.difference(_lastNewIncidentAlertTime!).inSeconds < 5) {
+      return;
+    }
+    _lastNewIncidentAlertTime = now;
+
+    await _speak('มีเคสฉุกเฉินใหม่แจ้งเข้ามา กรุณาตรวจสอบและมอบหมายรถพยาบาล');
+  }
+
   Future<void> _speak(String text) async {
     if (!_isInitialized) await initialize();
     try {

@@ -5,9 +5,11 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:tutorial_coach_mark/tutorial_coach_mark.dart';
 import '../../../core/models/incident_report.dart';
+import '../../../core/services/agency_storage_service.dart';
 import '../../../core/services/emergency_mqtt_service.dart';
 import '../../../core/services/hospital_location_service.dart';
 import '../../../core/services/incident_service.dart';
+import '../../../core/services/voice_alert_service.dart';
 import 'agency_incident_detail_screen.dart';
 
 class AgencyHomeScreen extends StatefulWidget {
@@ -22,7 +24,8 @@ class AgencyHomeScreen extends StatefulWidget {
   State<AgencyHomeScreen> createState() => _AgencyHomeScreenState();
 }
 
-class _AgencyHomeScreenState extends State<AgencyHomeScreen> {
+class _AgencyHomeScreenState extends State<AgencyHomeScreen>
+    with SingleTickerProviderStateMixin {
   final MapController _mapController = MapController();
   late LatLng _hospitalLocation;
   late HospitalProfile _hospitalProfile;
@@ -34,6 +37,19 @@ class _AgencyHomeScreenState extends State<AgencyHomeScreen> {
   // Real-time Incidents list from Driver SOS
   List<IncidentReport> _incidents = [];
   bool _showHotspotHeatmap = false;
+
+  // เคสที่ผู้ใช้กดปิดแบนเนอร์แจ้งเตือนไปแล้ว (ไม่ลบเคสออกจากระบบ แค่ไม่โผล่
+  // แบนเนอร์เด่นซ้ำอีก ยังกดเข้าไปจัดการจากรายการเคสได้ตามปกติเสมอ — กันไม่ให้
+  // แบนเนอร์ค้างบังหน้าจอตอนมีหลายเคสพร้อมกัน)
+  final Set<String> _dismissedBannerIds = {};
+
+  // เดิมการตั้งค่า "เสียงแจ้งเตือน"/"หน้าจอกะพริบแจ้งเตือน" ในหน้าตั้งค่าฝั่ง
+  // agency บันทึกค่าได้จริง แต่ไม่มีอะไรอ่านไปใช้งานจริงเลยสักจุด (ตั้งค่าไว้ก็
+  // ไม่มีผลอะไร) — เพิ่มการตรวจจับ "เคสใหม่ที่เพิ่งโผล่มา" ตรงนี้ แล้วเล่นเสียง/
+  // กะพริบจอจริงตามค่าที่ตั้งไว้ ไม่ใช่แค่มีสวิตช์ประดับ
+  Set<String> _knownIncidentIds = {};
+  bool _hasLoadedInitialIncidents = false;
+  late final AnimationController _flashController;
 
   StreamSubscription<HospitalProfile>? _profileSub;
   StreamSubscription<List<EmergencyVehicleData>>? _mqttSub;
@@ -49,6 +65,10 @@ class _AgencyHomeScreenState extends State<AgencyHomeScreen> {
     super.initState();
     _hospitalProfile = HospitalLocationService().currentProfile;
     _hospitalLocation = _hospitalProfile.location;
+    _flashController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    );
 
     _initHospitalProfile();
     _initLiveMqttFleet();
@@ -138,13 +158,36 @@ class _AgencyHomeScreenState extends State<AgencyHomeScreen> {
   void _initIncidentStream() async {
     await IncidentService().initialize();
     final initial = await IncidentService().getLocalIncidents();
+    // เคสที่มีอยู่แล้วตอนเปิดหน้าครั้งแรกไม่นับเป็น "เคสใหม่" (ไม่งั้นเปิดแอปทีไร
+    // จะโดนแจ้งเตือนเสียง/กะพริบจอทุกเคสเก่าที่ค้างอยู่ในระบบทันที)
+    _knownIncidentIds = initial.map((i) => i.id).toSet();
+    _hasLoadedInitialIncidents = true;
     if (mounted) {
       setState(() => _incidents = initial);
     }
     _incidentSub = IncidentService().incidentsStream.listen((list) {
       if (!mounted) return;
+      _handleNewIncidentAlerts(list);
       setState(() => _incidents = list);
     });
+  }
+
+  void _handleNewIncidentAlerts(List<IncidentReport> list) {
+    if (!_hasLoadedInitialIncidents) return;
+    final currentIds = list.map((i) => i.id).toSet();
+    final newlyArrivedPending = list.where((i) =>
+        i.status == 'pending' && !_knownIncidentIds.contains(i.id));
+    _knownIncidentIds = currentIds;
+
+    if (newlyArrivedPending.isEmpty) return;
+
+    final settings = AgencyStorageService.settingsNotifier.value;
+    if (settings['voiceAnnouncement'] as bool? ?? true) {
+      VoiceAlertService().speakNewIncidentAlert();
+    }
+    if (settings['screenFlashAlert'] as bool? ?? true) {
+      _flashController.forward(from: 0);
+    }
   }
 
   // ใช้ activeFleetStream (Stream<List<EmergencyVehicleData>>) จาก
@@ -215,6 +258,7 @@ class _AgencyHomeScreenState extends State<AgencyHomeScreen> {
     _profileSub?.cancel();
     _mqttSub?.cancel();
     _incidentSub?.cancel();
+    _flashController.dispose();
     super.dispose();
   }
 
@@ -436,24 +480,12 @@ class _AgencyHomeScreenState extends State<AgencyHomeScreen> {
 
     // Check for incoming pending incidents
     final pendingIncidents = _incidents.where((i) => i.status == 'pending').toList();
-
-    // Check for active medical tele-call report
-    final teleReportIncident = _incidents.firstWhere(
-      (i) => i.callSessionActive || (i.patientCondition != null && i.status != 'resolved'),
-      orElse: () => IncidentReport(
-        id: '',
-        type: '',
-        severity: '',
-        description: '',
-        latitude: 0,
-        longitude: 0,
-        province: '',
-        address: '',
-        reporterName: '',
-        reporterEmail: '',
-        createdAt: DateTime.now(),
-      ),
-    );
+    // เคสที่ยังไม่ถูกกดปิดแบนเนอร์ — ตัวนับใน fleet stats bar ยังใช้ pendingIncidents
+    // เต็มจำนวนเสมอ (ปิดแบนเนอร์ไม่ได้แปลว่าเคสหายไป) แต่แบนเนอร์เด่นด้านบนโชว์แค่
+    // เคสที่ยังไม่ถูกปิดเท่านั้น
+    final visiblePendingIncidents = pendingIncidents
+        .where((i) => !_dismissedBannerIds.contains(i.id))
+        .toList();
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
@@ -476,12 +508,13 @@ class _AgencyHomeScreenState extends State<AgencyHomeScreen> {
                       child: _buildApproachingErBanner(approachingAmb),
                     )
                   // 2. Incoming Driver SOS Notification
-                  else if (pendingIncidents.isNotEmpty)
+                  else if (visiblePendingIncidents.isNotEmpty)
                     Positioned(
                       top: 14,
                       left: 16,
                       right: 16,
-                      child: _buildPendingIncidentAlertBanner(pendingIncidents.first),
+                      child: _buildPendingIncidentAlertBanner(
+                          visiblePendingIncidents.first),
                     )
                   else
                     Positioned(
@@ -489,15 +522,6 @@ class _AgencyHomeScreenState extends State<AgencyHomeScreen> {
                       left: 16,
                       right: 16,
                       child: _buildTopAlertBadge(),
-                    ),
-
-                  // 3. Live Medical Tele-Report Banner from Ambulance
-                  if (teleReportIncident.id.isNotEmpty && teleReportIncident.vitalSigns != null)
-                    Positioned(
-                      top: approachingAmb != null || pendingIncidents.isNotEmpty ? 92 : 68,
-                      left: 16,
-                      right: 16,
-                      child: _buildLiveTeleReportCard(teleReportIncident),
                     ),
 
                   // 4. Selected Ambulance Card Bottom Sheet
@@ -508,6 +532,25 @@ class _AgencyHomeScreenState extends State<AgencyHomeScreen> {
                       bottom: 16,
                       child: _buildSelectedAmbulanceCard(),
                     ),
+
+                  // 5. หน้าจอกะพริบแจ้งเตือนตอนมีเคสใหม่ (ตามการตั้งค่า
+                  // screenFlashAlert) — วาดทับบนสุด ไม่กันการแตะแผนที่ข้างล่าง
+                  IgnorePointer(
+                    child: AnimatedBuilder(
+                      animation: _flashController,
+                      builder: (context, _) {
+                        final t = _flashController.value;
+                        // พีคตรงกลางแล้วจางไปทั้ง 2 ทาง (ขึ้นเร็ว ลงช้ากว่าเล็กน้อย)
+                        // ให้ความรู้สึกเหมือนไฟกะพริบเตือนจริง ไม่ใช่กระพริบทื่อๆ
+                        final opacity =
+                            (t < 0.3 ? t / 0.3 : (1 - t) / 0.7).clamp(0.0, 1.0);
+                        return Opacity(
+                          opacity: opacity * 0.28,
+                          child: Container(color: const Color(0xFFDC2626)),
+                        );
+                      },
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -837,6 +880,8 @@ class _AgencyHomeScreenState extends State<AgencyHomeScreen> {
                 children: [
                   Text(
                     '🚨 มีเคสฉุกเฉินใหม่จากผู้ใช้: ${incident.type}',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.bold,
@@ -846,6 +891,7 @@ class _AgencyHomeScreenState extends State<AgencyHomeScreen> {
                     '${incident.address} • แตะเพื่อยืนยันรับเคสและส่งรถพยาบาล',
                     style: const TextStyle(
                         fontSize: 11, color: Color(0xFFB91C1C)),
+                    maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
                 ],
@@ -863,51 +909,19 @@ class _AgencyHomeScreenState extends State<AgencyHomeScreen> {
                       fontSize: 11,
                       fontWeight: FontWeight.bold)),
             ),
+            // ปิดแบนเนอร์นี้ไปก่อนได้ — ไม่ได้ยกเลิก/ลบเคส แค่ไม่ให้บังหน้าจอ
+            // ตอนมีหลายเคสพร้อมกัน (ยังจัดการเคสนี้ต่อได้จากหน้ารายการเสมอ)
+            IconButton(
+              icon: const Icon(Icons.close_rounded,
+                  color: Color(0xFF991B1B), size: 18),
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(),
+              onPressed: () {
+                setState(() => _dismissedBannerIds.add(incident.id));
+              },
+            ),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _buildLiveTeleReportCard(IncidentReport incident) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: const Color(0xFF0F172A),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.cyanAccent.withValues(alpha: 0.8), width: 1.2),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.cyanAccent.withValues(alpha: 0.15),
-            blurRadius: 8,
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.phone_in_talk_rounded, color: Colors.cyanAccent, size: 18),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  '📞 สัญญาณชีพสดจากรถ: ${incident.vitalSigns ?? ""}',
-                  style: const TextStyle(
-                      color: Colors.cyanAccent,
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold),
-                ),
-                Text(
-                  'อาการ: ${incident.patientCondition ?? "ยังไม่มีการรายงานเพิ่มเติม"}',
-                  style: const TextStyle(color: Colors.white70, fontSize: 10.5),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -1073,6 +1087,10 @@ class _AgencyHomeScreenState extends State<AgencyHomeScreen> {
 
     for (final incident in _incidents) {
       if (incident.status == 'cancelled') continue;
+      // 'archived' คือของใหม่ที่เว็บ "Data" (เครื่องมือแอดมิน) ตั้งได้ ให้ซ่อน
+      // จากสถิติ/heatmap เหมือน cancelled แต่ resolved ยังนับรวมตามเดิม
+      // (ตั้งใจเก็บไว้แสดงจุดเสี่ยงสะสม)
+      if (incident.archived) continue;
       final gx = (incident.latitude / gridSize).round();
       final gy = (incident.longitude / gridSize).round();
       final key = '$gx:$gy';

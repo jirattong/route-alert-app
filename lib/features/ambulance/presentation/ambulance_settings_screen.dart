@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../../../core/services/ambulance_storage_service.dart';
+import '../../../core/services/theme_settings_service.dart';
 import '../../onboarding/presentation/onboarding_screen.dart';
 
 class AmbulanceSettingsScreen extends StatefulWidget {
@@ -15,17 +17,66 @@ class AmbulanceSettingsScreen extends StatefulWidget {
 }
 
 class _AmbulanceSettingsScreenState extends State<AmbulanceSettingsScreen> {
-  // สถานะการตั้งค่าฝั่งรถพยาบาล
+  // สถานะการตั้งค่าฝั่งรถพยาบาล — เดิมเป็นแค่ local State ปิดแอพ/ออกจากหน้าแล้ว
+  // รีเซ็ตทุกครั้ง ตอนนี้บันทึกจริงผ่าน AmbulanceStorageService (เหมือน Driver/
+  // Agency ที่มี Storage service ของตัวเองอยู่แล้ว)
   bool _keepScreenAwake = true; // หน้าจอเปิดตลอด
   bool _isHighwayMode = false; // โหมดทางหลวง
   bool _isHighPrecisionGps = true; // GPS ความละเอียดสูง
   bool _isAutoErNotify = true; // แจ้งเตือนห้อง ER อัตโนมัติ
   double _broadcastRadius = 2.0; // ระยะยิงสัญญาณเตือน (KM)
 
+  // Dark mode — เดิมมีแค่ฝั่ง Driver ทั้งที่ ThemeSettingsService เป็น service
+  // กลางใช้ร่วมกันได้ทุก role อยู่แล้ว
+  bool _isNightMode = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSettings();
+    _isNightMode = ThemeSettingsService.isNightMode.value;
+    ThemeSettingsService.isNightMode.addListener(_onNightModeChanged);
+  }
+
+  @override
+  void dispose() {
+    ThemeSettingsService.isNightMode.removeListener(_onNightModeChanged);
+    super.dispose();
+  }
+
+  void _onNightModeChanged() {
+    if (mounted) {
+      setState(() => _isNightMode = ThemeSettingsService.isNightMode.value);
+    }
+  }
+
+  Future<void> _loadSettings() async {
+    final settings = await AmbulanceStorageService.loadSettings();
+    if (!mounted) return;
+    setState(() {
+      _keepScreenAwake = settings['keepScreenAwake'] as bool;
+      _isHighwayMode = settings['isHighwayMode'] as bool;
+      _isHighPrecisionGps = settings['isHighPrecisionGps'] as bool;
+      _isAutoErNotify = settings['isAutoErNotify'] as bool;
+      _broadcastRadius = settings['broadcastRadius'] as double;
+    });
+  }
+
+  Future<void> _persistSettings() async {
+    await AmbulanceStorageService.saveSettings(
+      keepScreenAwake: _keepScreenAwake,
+      isHighwayMode: _isHighwayMode,
+      isHighPrecisionGps: _isHighPrecisionGps,
+      isAutoErNotify: _isAutoErNotify,
+      broadcastRadius: _broadcastRadius,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final bgColor = _isNightMode ? const Color(0xFF121212) : Colors.white;
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: bgColor,
       body: SafeArea(
         child: Column(
           children: [
@@ -39,6 +90,15 @@ class _AmbulanceSettingsScreenState extends State<AmbulanceSettingsScreen> {
                     const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
                 child: Column(
                   children: [
+                    // การ์ด 0: โหมดกลางคืน (Dark Mode) — เดิมมีแค่ฝั่ง Driver
+                    _buildRedSwitchCard(
+                      title: 'โหมดกลางคืน',
+                      subtitle: 'Dark Mode',
+                      value: _isNightMode,
+                      onChanged: (val) => ThemeSettingsService.setNightMode(val),
+                    ),
+                    const SizedBox(height: 16),
+
                     // การ์ด 1: หน้าจอเปิดตลอด (Keep Screen Awake)
                     _buildRedSwitchCard(
                       title: 'หน้าจอเปิดตลอด',
@@ -46,6 +106,7 @@ class _AmbulanceSettingsScreenState extends State<AmbulanceSettingsScreen> {
                       value: _keepScreenAwake,
                       onChanged: (val) {
                         setState(() => _keepScreenAwake = val);
+                        _persistSettings();
                       },
                     ),
                     const SizedBox(height: 16),
@@ -62,6 +123,7 @@ class _AmbulanceSettingsScreenState extends State<AmbulanceSettingsScreen> {
                             _broadcastRadius = 3.0; // ขยายรัศมีอัตโนมัติ
                           }
                         });
+                        _persistSettings();
                       },
                     ),
                     const SizedBox(height: 16),
@@ -84,6 +146,9 @@ class _AmbulanceSettingsScreenState extends State<AmbulanceSettingsScreen> {
                             _broadcastRadius = (val * 10).round() / 10.0;
                           });
                         },
+                        // บันทึกตอนปล่อยนิ้วเท่านั้น (ไม่ใช่ทุกครั้งที่ onChanged
+                        // ยิงระหว่างลาก ซึ่งถี่เกินไปไม่จำเป็นต้องเขียนดิสก์ทุกเฟรม)
+                        onChangeEnd: (_) => _persistSettings(),
                       ),
                     ),
                     const SizedBox(height: 16),
@@ -95,6 +160,7 @@ class _AmbulanceSettingsScreenState extends State<AmbulanceSettingsScreen> {
                       value: _isHighPrecisionGps,
                       onChanged: (val) {
                         setState(() => _isHighPrecisionGps = val);
+                        _persistSettings();
                       },
                     ),
                     const SizedBox(height: 16),
@@ -106,6 +172,7 @@ class _AmbulanceSettingsScreenState extends State<AmbulanceSettingsScreen> {
                       value: _isAutoErNotify,
                       onChanged: (val) {
                         setState(() => _isAutoErNotify = val);
+                        _persistSettings();
                       },
                     ),
                     const SizedBox(height: 16),
@@ -227,7 +294,7 @@ class _AmbulanceSettingsScreenState extends State<AmbulanceSettingsScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: _isNightMode ? const Color(0xFF1E1E1E) : Colors.white,
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.06),
@@ -261,12 +328,12 @@ class _AmbulanceSettingsScreenState extends State<AmbulanceSettingsScreen> {
             ),
           ),
           const SizedBox(width: 12),
-          const Text(
+          Text(
             'RouteAlert',
             style: TextStyle(
               fontSize: 20,
               fontWeight: FontWeight.bold,
-              color: Colors.black87,
+              color: _isNightMode ? Colors.white : Colors.black87,
             ),
           ),
         ],
@@ -284,7 +351,7 @@ class _AmbulanceSettingsScreenState extends State<AmbulanceSettingsScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: _isNightMode ? const Color(0xFF1E1E1E) : Colors.white,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: const Color(0xFFEB5757), width: 1.8), // ขอบแดงตามรูป
         boxShadow: [
@@ -304,10 +371,10 @@ class _AmbulanceSettingsScreenState extends State<AmbulanceSettingsScreen> {
               children: [
                 Text(
                   title,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
-                    color: Colors.black87,
+                    color: _isNightMode ? Colors.white : Colors.black87,
                   ),
                 ),
                 const SizedBox(height: 2),
@@ -349,7 +416,7 @@ class _AmbulanceSettingsScreenState extends State<AmbulanceSettingsScreen> {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: _isNightMode ? const Color(0xFF1E1E1E) : Colors.white,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: const Color(0xFFEB5757), width: 1.8),
         boxShadow: [
@@ -372,10 +439,10 @@ class _AmbulanceSettingsScreenState extends State<AmbulanceSettingsScreen> {
                   const SizedBox(width: 8),
                   Text(
                     title,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
-                      color: Colors.black87,
+                      color: _isNightMode ? Colors.white : Colors.black87,
                     ),
                   ),
                 ],

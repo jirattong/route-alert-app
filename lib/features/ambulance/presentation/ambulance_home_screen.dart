@@ -11,6 +11,7 @@ import '../../../core/services/hospital_location_service.dart';
 import '../../../core/services/incident_service.dart';
 import '../../../core/services/location_service.dart';
 import '../../../core/services/osrm_routing_service.dart';
+import '../../../core/widgets/status_confirm_dialog.dart';
 
 class AmbulanceHomeScreen extends StatefulWidget {
   /// เรียกครั้งเดียวตอน initState เพื่อส่งฟังก์ชันเปิด Coach Mark ขึ้นไปให้
@@ -39,6 +40,11 @@ class _AmbulanceHomeScreenState extends State<AmbulanceHomeScreen> {
 
   // สถานะเปิด/ปิดส่งสัญญาณเตือนฉุกเฉิน
   bool _isNotificationAlert = true;
+
+  // แบนเนอร์เด่นชัดตอนเพิ่งได้รับมอบหมายเคสใหม่ — เดิมมีแค่เปลี่ยนสี badge เงียบๆ
+  // ไม่มีอะไรบอกชัดเจนเลยว่าได้รับเคสแล้ว auto-dismiss เองหลัง 6 วิ
+  IncidentReport? _newAssignmentBanner;
+  Timer? _newAssignmentBannerTimer;
 
   // โหมดทดสอบในห้อง: ข้ามการจับคู่เส้นทางถนนจริง (Route-Aware Corridor)
   // ใช้ตอนสาธิตในห้อง/ระยะใกล้ที่ไม่ได้เดินตามถนนจริงไปโรงพยาบาล/จุดเกิดเหตุ
@@ -261,6 +267,14 @@ class _AmbulanceHomeScreenState extends State<AmbulanceHomeScreen> {
       setState(() {
         if (isNowAssignedToThisUnit && !wasAssignedToThisUnit) {
           _isNotificationAlert = true;
+          // เพิ่งได้รับมอบหมายเคสใหม่ — เดิมแค่เปลี่ยนสี badge เงียบๆ มองไม่ทัน
+          // ว่าได้รับเคสแล้ว เพิ่ม haptic + แบนเนอร์เด่นชัด auto-dismiss เอง
+          HapticFeedback.heavyImpact();
+          _newAssignmentBanner = assigned;
+          _newAssignmentBannerTimer?.cancel();
+          _newAssignmentBannerTimer = Timer(const Duration(seconds: 6), () {
+            if (mounted) setState(() => _newAssignmentBanner = null);
+          });
         }
         _activeIncident = assigned;
         if (assigned != null) {
@@ -422,178 +436,13 @@ class _AmbulanceHomeScreenState extends State<AmbulanceHomeScreen> {
     );
   }
 
-  // --- Modal สำหรับโทรรายงานสัญญาณชีพและอาการคนไข้สู่ ER ---
-  void _showTeleReportDialog() {
-    final bpCtrl = TextEditingController(
-        text: _activeIncident?.vitalSigns ?? 'BP: 120/80, HR: 88, SpO2: 98%');
-    final condCtrl = TextEditingController(
-        text: _activeIncident?.patientCondition ??
-            'ผู้ป่วยรู้สึกตัวดี สัญญาณชีพคงที่');
-    final noteCtrl = TextEditingController(
-        text: _activeIncident?.medicalNotes ??
-            'ให้สารน้ำ IV และ On Oxygen Cannula 3 LPM');
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) {
-        return Container(
-          padding: EdgeInsets.only(
-            top: 20,
-            left: 20,
-            right: 20,
-            bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
-          ),
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Row(
-                    children: [
-                      Icon(Icons.phone_in_talk_rounded,
-                          color: Color(0xFF00A896), size: 24),
-                      SizedBox(width: 8),
-                      Text(
-                        '📞 รายงานอาการคนไข้สู่ห้องฉุกเฉิน (ER)',
-                        style: TextStyle(
-                            fontSize: 16, fontWeight: FontWeight.bold),
-                      ),
-                    ],
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.close),
-                    onPressed: () => Navigator.pop(ctx),
-                  ),
-                ],
-              ),
-              const Text(
-                'ข้อมูลจะแสดงขึ้นบนหน้าจอศูนย์สั่งการ รพ. แบบ Real-time',
-                style: TextStyle(fontSize: 11.5, color: Colors.grey),
-              ),
-              const SizedBox(height: 14),
-
-              // Quick Vital Signs Preset Chips
-              Wrap(
-                spacing: 8,
-                children: [
-                  ActionChip(
-                    label: const Text('🚨 วิกฤต (BP ต่ำ/SpO2 ตก)'),
-                    backgroundColor: const Color(0xFFFEE2E2),
-                    onPressed: () {
-                      bpCtrl.text = 'BP: 80/50, HR: 125, SpO2: 86%';
-                      condCtrl.text =
-                          'ผู้ป่วยหมดสติ ปลุกไม่ตื่น หายใจหอบเหนื่อย (On Mask 10L)';
-                    },
-                  ),
-                  ActionChip(
-                    label: const Text('⚠️ ปานกลาง (บาดเจ็บกระดูกหัก)'),
-                    backgroundColor: const Color(0xFFFEF3C7),
-                    onPressed: () {
-                      bpCtrl.text = 'BP: 130/85, HR: 95, SpO2: 97%';
-                      condCtrl.text =
-                          'ผู้ป่วยรู้สึกตัวดี สงสัยกระดูกขาขวาหัก ดาม Splint เรียบร้อย';
-                    },
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-
-              TextField(
-                controller: bpCtrl,
-                decoration: InputDecoration(
-                  labelText: 'สัญญาณชีพ (Vital Signs: BP, HR, SpO2, RR)',
-                  prefixIcon: const Icon(Icons.monitor_heart_rounded,
-                      color: Color(0xFF00A896)),
-                  border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(14)),
-                  contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                ),
-              ),
-              const SizedBox(height: 10),
-
-              TextField(
-                controller: condCtrl,
-                decoration: InputDecoration(
-                  labelText: 'ระดับความรู้สึกตัว / อาการสำคัญ',
-                  prefixIcon: const Icon(Icons.personal_injury_rounded,
-                      color: Color(0xFF00A896)),
-                  border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(14)),
-                  contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                ),
-              ),
-              const SizedBox(height: 10),
-
-              TextField(
-                controller: noteCtrl,
-                decoration: InputDecoration(
-                  labelText: 'การปฐมพยาบาลบนรถ / อุปกรณ์ที่ขอให้ ER เตรียม',
-                  prefixIcon: const Icon(Icons.medical_services_rounded,
-                      color: Color(0xFF00A896)),
-                  border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(14)),
-                  contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                ),
-              ),
-              const SizedBox(height: 16),
-
-              SizedBox(
-                width: double.infinity,
-                height: 48,
-                child: ElevatedButton.icon(
-                  onPressed: () async {
-                    if (_activeIncident != null) {
-                      await IncidentService().submitMedicalTeleReport(
-                        id: _activeIncident!.id,
-                        patientCondition: condCtrl.text.trim(),
-                        vitalSigns: bpCtrl.text.trim(),
-                        medicalNotes: noteCtrl.text.trim(),
-                        callActive: true,
-                      );
-                    }
-                    if (ctx.mounted) {
-                      Navigator.pop(ctx);
-                    }
-                  },
-                  icon: const Icon(Icons.send_rounded, color: Colors.white),
-                  label: const Text(
-                    'ส่งรายงาน & เปิดสายสื่อสารกับแพทย์ ER',
-                    style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF00A896),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16)),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
   @override
   void dispose() {
     _locationSub?.cancel();
     _incidentSub?.cancel();
     _hospitalSub?.cancel();
     _broadcastTimer?.cancel();
+    _newAssignmentBannerTimer?.cancel();
     _sheetController.dispose();
     _mapController.dispose();
     super.dispose();
@@ -624,6 +473,18 @@ class _AmbulanceHomeScreenState extends State<AmbulanceHomeScreen> {
                     left: 20,
                     right: 20,
                     child: _buildTargetHeaderBadge(step),
+                  ),
+
+                  // แบนเนอร์เด่นชัดตอนเพิ่งได้รับมอบหมายเคสใหม่ (auto-dismiss 6 วิ)
+                  AnimatedPositioned(
+                    duration: const Duration(milliseconds: 350),
+                    curve: Curves.easeOutBack,
+                    top: _newAssignmentBanner != null ? 14 : -160,
+                    left: 16,
+                    right: 16,
+                    child: _newAssignmentBanner != null
+                        ? _buildNewAssignmentBanner(_newAssignmentBanner!)
+                        : const SizedBox.shrink(),
                   ),
 
                   // Bottom Action Card — ทำเป็นแผ่นลากขึ้น/ย่อได้ (Draggable
@@ -726,6 +587,59 @@ class _AmbulanceHomeScreenState extends State<AmbulanceHomeScreen> {
     );
   }
 
+  // แบนเนอร์เด่นชัดตอนเพิ่งได้รับมอบหมายเคสใหม่ — ให้เห็นชัดว่าได้รับเคสแล้วและ
+  // เป็นเคสไหน (ประเภทเหตุ+ที่อยู่) ต่างจาก badge บนหัวจอที่แค่เปลี่ยนสีเงียบๆ
+  Widget _buildNewAssignmentBanner(IncidentReport incident) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFFEB5757), Color(0xFFC0392B)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white, width: 2),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFFEB5757).withValues(alpha: 0.5),
+            blurRadius: 16,
+            spreadRadius: 1,
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.local_shipping_rounded, color: Colors.white, size: 28),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  '🚨 ได้รับมอบหมายเคสใหม่!',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '${incident.type} • ${incident.address.isNotEmpty ? incident.address : incident.province}',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 12.5, color: Colors.white),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildTargetHeaderBadge(int step) {
     if (_activeIncident == null) {
       return Container(
@@ -788,14 +702,6 @@ class _AmbulanceHomeScreenState extends State<AmbulanceHomeScreen> {
                   const TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold),
               overflow: TextOverflow.ellipsis,
             ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.phone_in_talk_rounded,
-                color: Color(0xFF00A896), size: 20),
-            tooltip: 'รายงานอาการคนไข้สู่ ER',
-            onPressed: _showTeleReportDialog,
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(),
           ),
         ],
       ),
@@ -1070,14 +976,30 @@ class _AmbulanceHomeScreenState extends State<AmbulanceHomeScreen> {
                             width: double.infinity,
                             height: 44,
                             child: ElevatedButton.icon(
-                              onPressed: () async {
-                                if (_activeIncident != null) {
-                                  await IncidentService()
-                                      .reportAmbulanceAtScene(
-                                          _activeIncident!.id);
-                                  HapticFeedback.heavyImpact();
-                                }
-                              },
+                              // ปุ่มด่วนบนหน้าหลัก — เดิมกดครั้งเดียวทำงานทันที ไม่มี
+                              // การยืนยัน ต่างจากหน้ารายละเอียดเคสที่มีคูลดาวน์กัน
+                              // เผลอกด เพิ่มกล่องยืนยันชุดเดียวกันตรงนี้ด้วย
+                              onPressed: () => showStatusConfirmDialog(
+                                context: context,
+                                nextTitle: 'ถึงจุดเกิดเหตุแล้ว',
+                                nextDesc: 'กำลังปฐมพยาบาลและประเมินผู้ป่วย',
+                                onConfirmed: () async {
+                                  if (_activeIncident != null) {
+                                    final ok = await IncidentService()
+                                        .reportAmbulanceAtScene(
+                                            _activeIncident!.id);
+                                    HapticFeedback.heavyImpact();
+                                    if (mounted && !ok) {
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(const SnackBar(
+                                        content: Text(
+                                            '⚠️ อัปเดตสถานะไม่สำเร็จ เช็คสัญญาณอินเทอร์เน็ตแล้วลองใหม่'),
+                                        backgroundColor: Color(0xFFDC2626),
+                                      ));
+                                    }
+                                  }
+                                },
+                              ),
                               icon: const Icon(Icons.place_rounded,
                                   color: Colors.white, size: 20),
                               label: const Text(
@@ -1099,14 +1021,27 @@ class _AmbulanceHomeScreenState extends State<AmbulanceHomeScreen> {
                             width: double.infinity,
                             height: 44,
                             child: ElevatedButton.icon(
-                              onPressed: () async {
-                                if (_activeIncident != null) {
-                                  await IncidentService()
-                                      .reportAmbulanceTransporting(
-                                          _activeIncident!.id);
-                                  HapticFeedback.heavyImpact();
-                                }
-                              },
+                              onPressed: () => showStatusConfirmDialog(
+                                context: context,
+                                nextTitle: 'รับผู้ป่วยแล้ว - กำลังส่ง รพ.',
+                                nextDesc: 'นำทางและแจ้งห้อง ER เตรียมรับสาย',
+                                onConfirmed: () async {
+                                  if (_activeIncident != null) {
+                                    final ok = await IncidentService()
+                                        .reportAmbulanceTransporting(
+                                            _activeIncident!.id);
+                                    HapticFeedback.heavyImpact();
+                                    if (mounted && !ok) {
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(const SnackBar(
+                                        content: Text(
+                                            '⚠️ อัปเดตสถานะไม่สำเร็จ เช็คสัญญาณอินเทอร์เน็ตแล้วลองใหม่'),
+                                        backgroundColor: Color(0xFFDC2626),
+                                      ));
+                                    }
+                                  }
+                                },
+                              ),
                               icon: const Icon(Icons.local_hospital_rounded,
                                   color: Colors.white, size: 20),
                               label: const Text(
@@ -1124,56 +1059,45 @@ class _AmbulanceHomeScreenState extends State<AmbulanceHomeScreen> {
                             ),
                           )
                         else if (step >= 3 && step < 5)
-                          Row(
-                            children: [
-                              Expanded(
-                                child: ElevatedButton.icon(
-                                  onPressed: _showTeleReportDialog,
-                                  icon: const Icon(Icons.phone_in_talk_rounded,
-                                      color: Colors.white, size: 18),
-                                  label: const Text(
-                                    '📞 โทรรายงาน ER',
-                                    style: TextStyle(
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.white),
-                                  ),
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: const Color(0xFF0284C7),
-                                    shape: RoundedRectangleBorder(
-                                        borderRadius:
-                                            BorderRadius.circular(14)),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: ElevatedButton.icon(
-                                  onPressed: () async {
-                                    if (_activeIncident != null) {
-                                      await IncidentService()
-                                          .resolveIncident(_activeIncident!.id);
-                                      HapticFeedback.heavyImpact();
+                          SizedBox(
+                            width: double.infinity,
+                            height: 44,
+                            child: ElevatedButton.icon(
+                              onPressed: () => showStatusConfirmDialog(
+                                context: context,
+                                nextTitle: 'ถึงโรงพยาบาล (เสร็จสิ้น)',
+                                nextDesc: 'ส่งมอบผู้ป่วยและปิดภารกิจ',
+                                onConfirmed: () async {
+                                  if (_activeIncident != null) {
+                                    final ok = await IncidentService()
+                                        .resolveIncident(_activeIncident!.id);
+                                    HapticFeedback.heavyImpact();
+                                    if (mounted && !ok) {
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(const SnackBar(
+                                        content: Text(
+                                            '⚠️ อัปเดตสถานะไม่สำเร็จ เช็คสัญญาณอินเทอร์เน็ตแล้วลองใหม่'),
+                                        backgroundColor: Color(0xFFDC2626),
+                                      ));
                                     }
-                                  },
-                                  icon: const Icon(Icons.check_circle_rounded,
-                                      color: Colors.white, size: 18),
-                                  label: const Text(
-                                    '🏁 ถึง รพ. เรียบร้อย',
-                                    style: TextStyle(
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.white),
-                                  ),
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: const Color(0xFF10B981),
-                                    shape: RoundedRectangleBorder(
-                                        borderRadius:
-                                            BorderRadius.circular(14)),
-                                  ),
-                                ),
+                                  }
+                                },
                               ),
-                            ],
+                              icon: const Icon(Icons.check_circle_rounded,
+                                  color: Colors.white, size: 20),
+                              label: const Text(
+                                '🏁 ถึง รพ. เรียบร้อย',
+                                style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.white),
+                              ),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF10B981),
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(14)),
+                              ),
+                            ),
                           )
                         else
                           Container(

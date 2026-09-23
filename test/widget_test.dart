@@ -223,18 +223,12 @@ void main() {
       expect(atScene.status, equals('at_scene'));
       expect(atScene.statusStep, equals(2));
 
-      // Step 3: Transporting + Medical Tele-Report (Vital Signs)
+      // Step 3: Transporting
       final transporting = atScene.copyWith(
         status: 'transporting',
         statusStep: 3,
-        patientCondition: 'ผู้ป่วยหมดสติ ปลุกไม่ตื่น SpO2 88%',
-        vitalSigns: 'BP: 85/55, HR: 120, SpO2: 88%',
-        medicalNotes: 'On Oxygen Mask with Bag 10 LPM',
-        callSessionActive: true,
       );
       expect(transporting.status, equals('transporting'));
-      expect(transporting.vitalSigns, contains('BP: 85/55'));
-      expect(transporting.callSessionActive, isTrue);
 
       // Step 4: Approaching ER (< 1.5 km)
       final approaching = transporting.copyWith(
@@ -248,7 +242,6 @@ void main() {
       final resolved = approaching.copyWith(
         status: 'resolved',
         statusStep: 5,
-        callSessionActive: false,
       );
       expect(resolved.status, equals('resolved'));
       expect(resolved.statusStep, equals(5));
@@ -257,7 +250,6 @@ void main() {
       final jsonStr = resolved.toJson();
       final parsed = IncidentReport.fromJson(jsonStr);
       expect(parsed.id, equals('INC-2026-001'));
-      expect(parsed.vitalSigns, equals('BP: 85/55, HR: 120, SpO2: 88%'));
       expect(parsed.hospitalLatitude, equals(19.0284));
     });
   });

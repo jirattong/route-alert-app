@@ -636,3 +636,223 @@ final connMessage = MqttConnectMessage()
 **หมายเหตุ:** ไม่ได้ใช้ภาพ/asset จากคลิปต้นฉบับโดยตรง (ดึงจากวิดีโอที่บีบอัดมาจะได้คุณภาพต่ำ) แต่วาดรูปทรงมือขึ้นมาเองทั้งหมดด้วยโค้ด (`CustomPainter`) ให้ได้สัดส่วน/ท่าทางตรงกับที่สังเกตจากเฟรมคลิปจริง ไม่มีปัญหาลิขสิทธิ์และไม่ผูกกับไฟล์ภาพภายนอก
 
 **ยืนยันด้วย `flutter analyze` (0 errors ใหม่, เหลือแค่ 6 info เดิมที่ไม่เกี่ยวข้อง) และ `flutter test` (27/27 ผ่าน)**
+
+## 19. มาสคอตหน้าล็อกอิน/สมัครสมาชิก — ลองไฟล์ Rive จริงแล้วสุดท้ายกลับไปใช้เป็ดวาดเอง
+
+**ไฟล์คงเหลือ:** `lib/features/auth_face_login/presentation/widgets/login_duck_mascot.dart`
+**ไฟล์ที่แก้:** `lib/features/auth_face_login/presentation/face_login_screen.dart`
+**ไฟล์ที่ลองใช้แล้วลบทิ้ง:** `assets/rive/login_teddy.riv`, `lib/features/auth_face_login/presentation/widgets/rive_login_mascot.dart`, dependency `rive` ใน `pubspec.yaml`
+
+ผู้ใช้ส่งคลิปตัวอย่างมา (`login.MP4`) เป็นคลิปสอน Rive+Flutter — หมีการ์ตูนอยู่เหนือฟอร์ม email/password คอยดูตอนพิมพ์อีเมล แล้วยกอุ้งเท้าทั้งสองข้างขึ้นปิดตาสนิทตอนโฟกัสช่องรหัสผ่าน เส้นทางที่ลองมา:
+
+1. **รอบแรก**: ทำเวอร์ชันเป็ดที่วาดเองด้วย `CustomPainter` (เพราะสร้างไฟล์ `.riv` เองไม่ได้ ต้องใช้ Rive Editor ซึ่งเป็นเครื่องมือ GUI)
+2. **ผู้ใช้อยากได้ไฟล์ Rive จริงมากกว่า** — ค้นพบว่าหมีในคลิปต้นฉบับ ("RiveBear Login" โดย Ruksar) เป็นของขาย แต่มีไฟล์ฟรีลิขสิทธิ์ CC BY ที่คอนเซปต์ตรงกัน ("Animated Login Character" โดย JcToon บน Rive Community) ผู้ใช้ดาวน์โหลดมาเองแล้วส่งให้ (`2244-7248-animated-login-character.riv`)
+3. **ตรวจสอบไฟล์จริงก่อนเขียนโค้ด** — รัน `strings` บนไฟล์ `.riv` (เป็นไบนารี) พบ state machine ชื่อ `"Login Machine"` มี input จริง 5 ตัว: `isChecking`/`numLook`/`isHandsUp`/`trigSuccess`/`trigFail` — และตรวจพบว่า `flutter pub add rive` เวอร์ชันล่าสุด (`0.14.x`) เปลี่ยนสถาปัตยกรรมทั้งหมดเป็นเอนจิน `rive_native` ใหม่ ไม่มี `RiveAnimation`/`StateMachineController`/`SMIBool` แบบเดิมที่ตรงกับไฟล์นี้ (สร้างด้วย Rive Editor รุ่นเก่า) จึง pin เป็น `rive: 0.13.20` แทน สร้าง `RiveLoginMascot` ผูก `isHandsUp` กับสถานะโฟกัสช่อง Password จริง
+4. **ปัญหาที่เจอตอนใช้งานจริงบนเครื่อง** — ผู้ใช้รายงาน 2 จุด: (ก) มีกรอบ/พื้นหลังไม่สวยล้อมรอบตัวหมี ทั้งที่อยากได้แค่ตัวละครลอยๆ (ข) กดปุ่มดูรหัสผ่านแล้วมือไม่ขยับเลย ไม่ลืมตามาดูเหมือนในคลิป — ตรวจโค้ด renderer ของ `rive` package แล้วพบว่าไม่ได้วาดพื้นหลังทึบเพิ่มเองเลย (ไม่มี `drawRect`/fill สีในซอร์สส่วนนั้น) แปลว่ากรอบที่เห็นน่าจะเป็นรูปทรงที่ติดมากับไฟล์ `.riv` เอง (ไฟล์ที่ยืมมาจากคนอื่น อาจมีพื้นหลัง/กรอบที่ผู้ออกแบบวาดไว้ตอนพรีวิวบนเว็บ Rive ไม่ได้ลบก่อนแชร์) ซึ่งแก้ไม่ได้ในโค้ด ต้องเปิดไฟล์ด้วย Rive Editor เท่านั้น — ส่วนปัญหามือไม่ขยับแก้ได้จริง (`isHandsUp` เดิมผูกกับแค่ "โฟกัสช่อง" อย่างเดียว ไม่ได้ดูว่ารหัสกำลังซ่อนหรือโชว์อยู่ ทำให้ค้างเป็น "มือขึ้น" ตลอดไม่ว่าจะกดปุ่มตาหรือไม่ แก้เป็นดูทั้งสองเงื่อนไข: โฟกัส+ซ่อนอยู่ → ยกมือ, โฟกัส+โชว์แล้ว → เอามือลง)
+5. **ผู้ใช้ตัดสินใจ**: แทนที่จะพยายาม crop/ซ่อนกรอบที่ติดมากับไฟล์คนอื่น (ไม่ชัวร์ว่าจะสวย) เลือกเลิกใช้ไฟล์ Rive นี้ กลับไปใช้เป็ด `CustomPainter` เดิมที่คุมรูปลักษณ์ได้ 100% แทน — ลบ `assets/rive/`, `rive_login_mascot.dart`, dependency `rive` ออกทั้งหมด คืนโค้ด `face_login_screen.dart` ให้ใช้ `LoginDuckMascot` เหมือนก่อนหน้า
+
+**บทเรียนที่ได้**: ไฟล์ Rive ที่ยืมมาจาก community ฟรี แม้ concept จะตรงและ state machine input จะใช้งานได้จริง แต่เนื้อหาภาพ (รวมถึงพื้นหลัง/กรอบที่ผู้ออกแบบต้นฉบับวาดไว้) แก้ไขไม่ได้เลยถ้าไม่มี Rive Editor — ต่างจากวาดเองด้วย `CustomPainter` ที่ควบคุมได้ทุกพิกเซล ไม่มีความเสี่ยงแบบนี้
+
+**ยืนยันด้วย `flutter analyze` (0 errors ใหม่, เหลือแค่ 6 info เดิมที่ไม่เกี่ยวข้อง) และ `flutter test` (27/27 ผ่าน)**
+
+## 20. แก้ 2 จุดหลัง build จริง — คลื่น Onboarding มองไม่เห็น + เป็ดนิ่งเกินไป
+
+**ไฟล์ที่แก้:** `lib/features/onboarding/presentation/onboarding_screen.dart`, `lib/features/auth_face_login/presentation/widgets/login_duck_mascot.dart`
+
+ผู้ใช้ build ลงเครื่องจริงแล้วรายงาน 2 จุด:
+
+1. **Onboarding ไม่เห็นคลื่น liquid swipe ตอนลากเปลี่ยนหน้า** สีเปลี่ยนแบบกลืนกับหน้าเดิมจนไม่รู้ว่ากำลังเปลี่ยนหน้า — ต้นเหตุจริงคือทั้ง 3 หน้าย่อยของแต่ละ role ใช้สีพื้นหลัง**เดียวกัน**มาตั้งแต่ต้น (ตั้งใจให้ illustration/สีเหมือนกันตลอด 3 หน้า ต่างแค่หัวข้อ/คำอธิบาย) — คลื่น liquid reveal ของ `liquid_swipe` ทำงานถูกต้องอยู่แล้ว แต่มองไม่เห็นเพราะไม่มีสีให้ morph ระหว่างหน้าเก่ากับหน้าใหม่เลย (ไม่ใช่เพราะขาด "กรอบ" ตามที่ผู้ใช้เดา) แก้โดยย้าย `color` จากระดับ role (`_RoleOnboardingData`) ลงมาเป็นของแต่ละหน้า (`_PageData`) แล้วให้ทั้ง 3 หน้าในแต่ละ role ไล่โทนสีต่างกันจริง (เช่น driver: น้ำเงิน→ม่วง→ฟ้าอมเขียว) ยังคงอยู่ในกลุ่มโทนเดียวกันของ role นั้นเพื่อความกลมกลืน แต่ต่างพอให้เห็นคลื่นชัดเจนตอนลาก — ตรวจสอบด้วย widget test แคปภาพจริงยืนยันว่าตอนนี้ 2 หน้าที่ต่อกันมีสีต่างกันจริงในโครงสร้าง widget tree (ที่ `liquid_swipe` เรนเดอร์ไว้พร้อมกันสำหรับเอฟเฟกต์คลื่น)
+2. **เป็ดนิ่งเกินไปตอนไม่ได้โฟกัสช่องรหัสผ่าน + ท่าทางขยับดูไม่ลื่น** — เพิ่ม `AnimationController` ตัวที่สอง (`_idleController`) ที่หมุนวนตลอดเวลา (`repeat(reverse: true)`, 1.7 วินาทีต่อรอบครึ่ง) ทำให้ตัวเป็ดลอยขึ้นลงเบาๆ (~±3.5px) พร้อมเอียงตัวเล็กน้อย (~±1.4°) ตลอดเวลาแม้ไม่มีการโต้ตอบใดๆ ให้ดูมีชีวิตไม่นิ่งสนิท ส่วนจังหวะยกปีก/ลดปีกตอนโฟกัสช่องรหัสผ่าน เปลี่ยน curve จาก `easeOutBack` (มีจังหวะเด้งเกินตัว) เป็น `easeInOutCubic` (นุ่มนวล ไม่เด้ง) ยืดเวลาขึ้นเล็กน้อย (380ms → 460ms) และให้ปีกซ้าย/ขวาเริ่ม-จบไม่พร้อมกันเป๊ะๆ (หน่วงกันเล็กน้อยผ่าน `_wingProgress()`) ให้ดูเป็นธรรมชาติแทนกลไกขยับพร้อมกันทื่อๆ — ระหว่างตรวจพบเพิ่มว่าลำตัวเป็ดเดิมสูงเกิน canvas ที่ประกาศไว้ (132×132) จริงๆ ประมาณ 7% ทำให้ส่วนล่างของลำตัวโดนตัดขาดหายไป (เห็นได้จากภาพแคปที่ไม่มีลำตัวเลย) แก้โดยขยาย canvas เป็น 132×148 และรวมหน่วยอ้างอิงสัดส่วนทั้งหมดให้ยึดความกว้าง (`w`) เดียวเท่านั้นแทนที่จะปนกับความสูง (`h`) ป้องกันปัญหาสัดส่วนเพี้ยน/ตัดขอบแบบนี้อีกในอนาคต
+
+**ยืนยันด้วย `flutter analyze` (0 errors ใหม่, เหลือแค่ 6 info เดิมที่ไม่เกี่ยวข้อง), `flutter test` (27/27 ผ่าน) และ widget test แคปภาพจริงยืนยันทั้งสีที่ต่างกันจริงและลำตัวเป็ดที่ไม่โดนตัดขอบแล้ว**
+
+## 21. เลิกใช้มาสคอตเป็ด + Onboarding ไม่โชว์ซ้ำหลัง logout + บั๊กเคส SOS รั่วข้ามบัญชี
+
+**ไฟล์ที่แก้:** `lib/features/auth_face_login/presentation/face_login_screen.dart`, `lib/core/services/onboarding_service.dart`, `lib/features/auth_face_login/data/services/face_auth_repository.dart`, `lib/features/driver_radar/presentation/driver_home_screen.dart`, `lib/features/driver_radar/presentation/incident_list_screen.dart`
+**ไฟล์ที่ลบ:** `lib/features/auth_face_login/presentation/widgets/login_duck_mascot.dart`
+
+ผู้ใช้แจ้ง 3 เรื่องหลัง build ทดสอบจริง:
+
+1. **เลิกใช้มาสคอตเป็ดในหน้าล็อกอินไปเลย** (เปลี่ยนใจ ไม่อยากได้แล้ว) — ลบ `LoginDuckMascot`/`login_duck_mascot.dart` ออกทั้งหมด รวมถึง scaffolding ที่มีไว้รองรับมันโดยเฉพาะ (FocusNode 3 ตัวของ email/password/re-password, getter `_isPasswordFieldActive`/`_isActivePasswordRevealed`, listener `_onMascotRelevantFocusChanged`, พารามิเตอร์ `focusNode` ใน `_buildTextField()`) คืนหน้าล็อกอินกลับไปเป็นฟอร์มเดิมล้วนๆ ก่อนที่จะเริ่มทำฟีเจอร์นี้
+2. **Onboarding ไม่โชว์ซ้ำหลัง logout แล้ว login ใหม่** — ตรงข้ามกับที่ตั้งใจไว้ตอนออกแบบ (ดูหัวข้อ 16: ควร "logout แล้ว login ใหม่ = โชว์ Onboarding อีกครั้ง แต่แค่ปิดแอปเฉยๆ ไม่ logout = ไม่โชว์ซ้ำ") ต้นเหตุคือ `OnboardingService` เก็บสถานะ "เคยดูแล้ว" ถาวรใน SharedPreferences โดยที่ `FaceAuthRepository.logout()` ไม่เคยล้างค่านี้เลย เพิ่ม `OnboardingService.clearOnboardingSeen(roleKey)` แล้วเรียกจาก `logout()` (ดึง role ของผู้ใช้ปัจจุบันมาก่อนลบ current-user key) ตรวจสอบแล้วว่าปุ่ม "ออกจากระบบ" ทั้ง 3 role + `user_type_screen.dart` เรียก `FaceAuthRepository.logout()` ตรงกันหมด ทำให้แก้จุดเดียวครอบคลุมทุกทาง
+3. **บั๊กเคส SOS รั่วข้ามบัญชี (ร้ายแรง)**: สลับบัญชี driver บนเครื่องเดียวกัน (เช่น logout จาก `admin_1` แล้ว login เข้าบัญชีที่สร้างเอง) ยังเห็นเคส SOS ของบัญชีก่อนหน้าค้างอยู่ ให้ agent สืบสาเหตุก่อนแก้ พบ 2 จุดที่ไม่กรอง `reporterEmail` เลย:
+   - `driver_home_screen.dart` (Active SOS Tracking Banner ป้าย "🚨 เหตุฉุกเฉินที่คุณแจ้ง"): หยิบเคส active (ไม่ resolved/cancelled) ตัวแรกสุดของทั้งระบบมาโชว์ตรงๆ ไม่เช็คว่าเป็นของผู้ใช้ปัจจุบันจริงไหม — เพิ่ม `_currentUserEmail` (โหลดจาก `FaceAuthRepository.getCurrentUser()` ใน `initState`) แล้วกรอง `i.reporterEmail == _currentUserEmail` เพิ่มในเงื่อนไข `where()`
+   - `incident_list_screen.dart` แท็บ "รายงานของฉัน (SOS)": โค้ดเดิม `if (_selectedTab == 1) { return true; }` คืนค่า `true` ให้ทุกเคสที่ไม่ถูกยกเลิกจากทุกคน ทั้งที่แท็บถัดไป (พื้นที่ใกล้เคียง) กรองด้วย `_currentUserEmail` อยู่แล้ว — แก้เป็น `return item.reporterEmail == _currentUserEmail;` ให้กรองเหมือนกัน
+
+**ยืนยันด้วย `flutter analyze` (0 errors ใหม่, เหลือแค่ 6 info เดิมที่ไม่เกี่ยวข้อง) และ `flutter test` (27/27 ผ่าน)**
+
+## 22. Onboarding คลื่นดูกระตุก/ไม่ลื่น — เพิ่ม RepaintBoundary กันเงาวาดซ้ำทุกเฟรม
+
+**ไฟล์ที่แก้:** `lib/features/onboarding/presentation/onboarding_screen.dart`
+
+ผู้ใช้รายงานว่าคลื่น liquid swipe ตอนลากเปลี่ยนหน้ารู้สึกกระตุก ไม่ลื่นไหลตามนิ้ว ไม่สมูธ — วงกลมภาพประกอบในแต่ละหน้ามี `BoxShadow` (เบลอ) อยู่ 2 จุด ซึ่งเป็นการวาดที่กินแรงประมวลผลกว่าปกติ ตอนลากคลื่น `liquid_swipe` จะหมุน/บีบ/clip ทั้งหน้ารวมถึงส่วนนี้ทุกเฟรม ถ้าไม่กันไว้ Flutter จะ rasterize เงาใหม่ทุกเฟรมที่ลาก ทำให้เฟรมเรตตกได้ — ห่อวงกลมภาพประกอบทั้งชุดด้วย `RepaintBoundary` ให้ cache เป็นภาพนิ่งไว้ครั้งเดียว แล้วแค่ขยับ/clip ภาพนั้นระหว่างลาก ไม่ต้องวาดเงาใหม่ทุกเฟรม
+
+**สิ่งสำคัญที่ต้องแจ้งผู้ใช้ด้วย**: build ที่ทดสอบทั้งหมดในเซสชันนี้รันผ่านปุ่ม Run ปกติของ Xcode ซึ่งเป็น **Debug build** โดยดีฟอลต์ — Flutter ในโหมด Debug ทำอนิเมชันแบบ custom clip/transform (เช่นคลื่น liquid swipe) ได้ไม่ลื่นเท่า **Release build** เลยโดยธรรมชาติ (ไม่เกี่ยวกับโค้ดของแอปเองเลย) เป็นไปได้สูงที่ความกระตุกส่วนใหญ่ที่เจอมาจากตรงนี้ ไม่ใช่บั๊ก — แนะนำให้ทดสอบด้วย Release build เทียบดูก่อนตัดสินว่ายังกระตุกอยู่ไหม
+
+**ยืนยันด้วย `flutter analyze` (0 errors ใหม่) และ `flutter test` (27/27 ผ่าน)**
+
+## 23. Onboarding คลื่นดูแข็ง/เป็นเส้นตรง ไม่ใช่บั๊กเฟรมตก แต่เป็น WaveType ผิด
+
+**ไฟล์ที่แก้:** `lib/features/onboarding/presentation/onboarding_screen.dart`
+
+ผู้ใช้ยืนยันชัดเจนว่าปัญหาคลื่น "แข็งๆ" **ไม่เกี่ยวกับการกระตุก/เฟรมตกของเครื่องเลย** (แก้ต่างหากจากหัวข้อ 22) แต่เป็นเรื่องรูปทรงคลื่นเองที่ดูไม่ลื่นไหลเหมือนของเหลวจริงๆ — ตรวจสอบโดยจำลองการลากนิ้วจริงผ่าน widget test (`tester.startGesture`+`moveBy`) แล้วแคปภาพระหว่างลากจริง (ไม่ใช่เดา) พบว่า:
+
+1. **อ่านซอร์สโค้ด `liquid_swipe` package โดยตรง** (`WaveLayer.dart`) พบว่า `WaveType.liquidReveal` ที่ใช้อยู่ **ไม่ได้ทำให้คลื่นตามตำแหน่งแนวตั้งของนิ้วที่ลากเลย** — จุดยึดแนวตั้งของคลื่น (`verticalReveal`) มาจากค่าคงที่ `positionSlideIcon` (ดีฟอลต์ 0.8 = ยึดที่ 80% ของความสูงจอเสมอ) ไม่ใช่ตำแหน่งนิ้วสัมผัสจริง แล้ว`waveVertRadius` จะพุ่งไปแตะ 90% ของความสูงจอทันทีที่ลากผ่านแค่ 40% ของระยะทาง ในขณะที่ `waveHorRadius` (แนวนอน) เล็กกว่ามาก ทำให้เกิดวงรีที่ผอมสุดขั้ว (eccentric) จนส่วนโค้งที่มองเห็นในจอแบนราบจนดูเหมือนเส้นตรงทแยงมุม แทนที่จะเป็นคลื่นโค้งมนแบบของเหลว — ยืนยันด้วยภาพแคปจริงที่ตำแหน่งลาก 160px/240px เห็นขอบเป็นเส้นทแยงเกือบตรงชัดเจน
+2. **ลอง `WaveType.circularReveal` แทน** (อีกตัวเลือกเดียวที่ package นี้มีให้) — ใช้วงกลมขยายจริงจากไอคอนลากแทนสมการวงรีผอมของ `liquidReveal` — แคปภาพเปรียบเทียบที่ตำแหน่งลากเดียวกันทุกจุด เห็นความต่างชัดเจนมาก: ขอบคลื่นเป็นส่วนโค้งวงกลมจริงๆ นูนเข้าไปในหน้าถัดไปแบบเห็นความโค้งชัดตลอดการลาก ไม่ใช่เส้นตรงเลย — เปลี่ยน `waveType: WaveType.liquidReveal` เป็น `WaveType.circularReveal` ในโค้ด
+
+**ยืนยันด้วย `flutter analyze` (0 errors ใหม่) `flutter test` (27/27 ผ่าน) และ widget test จำลองลากนิ้วจริงเปรียบเทียบภาพก่อน/หลังยืนยันว่าโค้งขึ้นจริง**
+
+## 24. ขัดเกลาคลื่น Onboarding เพิ่มอีก 3 จุดตามที่ผู้ใช้ขอ
+
+**ไฟล์ที่แก้:** `lib/features/onboarding/presentation/onboarding_screen.dart`
+
+ต่อจากหัวข้อ 23 ผู้ใช้ขอให้ปรับเพิ่มอีก 3 จุดที่แนะนำไว้ (ทั้งหมดตรวจด้วย widget test จำลองลากนิ้วจริงแคปภาพเปรียบเทียบก่อน/หลังเหมือนหัวข้อ 23):
+
+1. **`fullTransitionValue`**: ลดจาก `400` เป็น `280` — ต้องลากนิ้วน้อยลงกว่าเดิมถึงจะเปลี่ยนหน้าสำเร็จ รู้สึกไว/เฟี๊ยวขึ้นตามที่ขอ
+2. **`positionSlideIcon`**: เพิ่มพารามิเตอร์นี้เข้าไป (เดิมไม่ได้ตั้งเลย ใช้ค่าดีฟอลต์ของ package คือ `0.8` ซึ่งยึดจุดขยายวงกลมไว้ต่ำเกินไปที่ 80% ของความสูงจอ) ปรับเป็น `0.5` ให้จุดขยายอยู่กึ่งกลางจอ บาลานซ์สายตากว่า
+3. **`slideIconWidget`**: เดิมเป็นแค่ `Icon` ลูกศรสีเทาเปล่าๆ ไม่มีพื้นหลัง เปลี่ยนเป็นวงกลมพื้นขาว+เงาเบาๆ+ไอคอนลูกศรสีตามธีมของหน้าปัจจุบัน (`pages[_currentPage].color`) ให้ดูตั้งใจออกแบบและเข้ากับสีพื้นหลังทุกหน้าที่ต่างกัน (ตรวจสอบด้วยภาพแคปจริงแล้วว่าสีไอคอนเปลี่ยนตามหน้าปัจจุบันถูกต้อง)
+
+**ยืนยันด้วย `flutter analyze` (0 errors ใหม่, เหลือแค่ 6 info เดิมที่ไม่เกี่ยวข้อง) และ `flutter test` (27/27 ผ่าน)**
+
+## 25. Onboarding: haptic feedback + ปุ่มสุดท้าย fade ตามจังหวะลากจริง (เจอ+แก้บั๊ก setState ระหว่าง build ไปด้วย)
+
+**ไฟล์ที่แก้:** `lib/features/onboarding/presentation/onboarding_screen.dart`
+
+ผู้ใช้ขอเพิ่มอีก 2 จุดจากที่แนะนำไว้ (หัวข้อ 24): haptic feedback ตอนเปลี่ยนหน้า และให้ปุ่ม "เริ่มต้นใช้งาน" fade เข้า/ออกตามจังหวะการลากนิ้วจริงแทนโผล่ตัดทันทีตอนเปลี่ยนหน้าเสร็จ
+
+1. **Haptic feedback**: เพิ่ม `HapticFeedback.lightImpact()` ใน `onPageChangeCallback` ตอนเปลี่ยนหน้าสำเร็จ
+2. **ปุ่ม "เริ่มต้นใช้งาน" + จุด pagination ขยับตามจังหวะลากจริง**: `liquid_swipe` มี `slidePercentCallback(horizontal, vertical)` รายงานความคืบหน้าการลากสดๆ (ไม่ใช่แค่ตอนเปลี่ยนหน้าเสร็จแบบ `onPageChangeCallback`) — เพิ่ม state `_lastPageProximity` (0..1) คำนวณจาก callback นี้ (ตอนอยู่หน้าสุดท้ายแล้วลากออก = `1-h`, ตอนอยู่หน้าก่อนสุดท้ายแล้วลากเข้า = `h`, หน้าอื่นๆ = `0`) แล้วเปลี่ยนปุ่มจาก `AnimatedOpacity`/`AnimatedScale` ที่ผูกกับ `isLastPage` (bool, กระโดดตัดทันที) มาใช้ `Opacity`/`Transform.scale` ที่ผูกกับ `_lastPageProximity` ตรงๆ (ค่าที่ไหลลื่นอยู่แล้วจากการลากจริง ไม่ต้องซ้อน animation ทับอีกชั้น) จุด pagination ก็ขยับตำแหน่ง `bottom` ตามค่าเดียวกันให้ไปด้วยกันลื่นๆ ไม่ใช่แค่ปุ่มอย่างเดียว
+3. **บั๊กที่เจอระหว่างตรวจด้วย widget test จำลองลากนิ้วจริง (ไม่ใช่แค่ทฤษฎี)**: เรียก `setState()` ตรงๆ ใน `slidePercentCallback`/`onPageChangeCallback` ทำให้แอป **crash จริง** ด้วย assertion "setState() or markNeedsBuild() called during build" เพราะ `liquid_swipe` เรียก callback ทั้งสองจากข้างใน build cycle ของ `Consumer<LiquidProvider>` ของมันเองได้ — แก้ด้วยการเลื่อน `setState` ไปทำหลังเฟรมปัจจุบันจบเสมอผ่าน `WidgetsBinding.instance.addPostFrameCallback` (ห่อเป็นเมธอด `_scheduleSetState()` ใช้ร่วมกันทั้ง 2 callback) ดีเลย์แค่ ~1 เฟรมมองไม่ทันสายตา แต่ปลอดภัยจาก crash แน่นอน
+
+**ยืนยันด้วย `flutter analyze` (0 errors ใหม่, เหลือแค่ 6 info เดิมที่ไม่เกี่ยวข้อง), `flutter test` (27/27 ผ่าน) และ widget test จำลองลากนิ้วจริงข้ามหน้า ยืนยันทั้งว่าไม่ crash แล้วและปุ่ม/จุด fade เข้าแบบต่อเนื่องตามจังหวะลากจริงก่อนเปลี่ยนหน้าเสร็จด้วยซ้ำ**
+
+## 26. วงจรชีวิตเคส + ฝั่ง Agency + ฝั่ง Ambulance — แก้ 7 กลุ่มตามที่ผู้ใช้ทดสอบจริงแล้วแจ้ง
+
+ผู้ใช้ทดสอบแอปจริงแล้วแจ้งปัญหา/ขอฟีเจอร์เพิ่มพร้อมกันหลายจุด ครอบคลุมทั้ง 3 role — ใช้ Explore agent 3 ตัวคู่ขนานสืบสาเหตุแต่ละจุดก่อน (ยืนยันด้วยการอ่านโค้ดจริงเองอีกชั้นในจุดที่ซับซ้อน) แล้ววางแผนเป็น 7 กลุ่มก่อนลงมือแก้ (ผ่าน Plan Mode ให้ผู้ใช้อนุมัติก่อน)
+
+**ไฟล์ที่แก้:** `lib/features/driver_radar/presentation/incident_list_screen.dart`, `lib/features/ambulance/presentation/ambulance_incident_list_screen.dart`, `lib/features/ambulance/presentation/ambulance_home_screen.dart`, `lib/features/ambulance/presentation/ambulance_incident_detail_screen.dart`, `lib/features/agency/presentation/agency_incident_list_screen.dart`, `lib/features/agency/presentation/agency_home_screen.dart`, `lib/features/agency/presentation/agency_incident_detail_screen.dart`, `lib/core/services/incident_service.dart`, `lib/core/models/incident_report.dart`, `test/widget_test.dart`
+**ไฟล์ใหม่:** `lib/core/widgets/status_confirm_dialog.dart`
+
+1. **ซ่อนเคส resolved ออกจากหน้าจอ active** (เก็บใน Firestore ตามเดิมสำหรับอนาคต — `delete: if false` บล็อกการลบไว้อยู่แล้วโดยไม่ต้องแก้ rule เพิ่ม): เพิ่มเงื่อนไข `status != 'resolved'` คู่กับ `!= 'cancelled'` ที่มีอยู่แล้วใน 3 จุดที่ยังกรองไม่ครบ — `incident_list_screen.dart` (driver), `ambulance_incident_list_screen.dart`, `agency_incident_list_screen.dart`
+2. **บังคับรถพยาบาล 1 คัน = 1 เคส active**: เพิ่ม `IncidentService.getBusyAmbulanceIds()` แล้วเช็คทั้ง 2 เส้นทางที่เคยไม่มี guard เลย — agency auto-dispatch (`agency_incident_detail_screen.dart:_handleDispatchCase`) กรองรถที่ไม่ว่างออกก่อนหาคันใกล้สุด, ambulance self-accept (`ambulance_incident_list_screen.dart`) เช็คก่อนให้กดรับเคสใหม่ถ้ามีเคสค้างอยู่
+3. **ลบฟีเจอร์สัญญาณชีพ/tele-report ทั้งหมด**: ต้นเหตุจริงคือ `callSessionActive` ไม่เคยถูกรีเซ็ตเป็น false เลย ทำให้การ์ดค้างจอถาวรฝั่ง agency โดยไม่มีปุ่มปิด — ผู้ใช้เลือกตัดทิ้งทั้งฟีเจอร์แทนการแก้บั๊ก ลบฟิลด์ออกจาก `IncidentReport` (`vitalSigns`/`patientCondition`/`medicalNotes`/`callSessionActive`), ลบ `submitMedicalTeleReport()`, ลบ dialog+ปุ่มฝั่งรถพยาบาล, ลบการ์ดแสดงผลฝั่ง agency ทั้งในหน้าหลักและหน้ารายละเอียด — อัปเดต test ที่อ้างฟิลด์เหล่านี้ใน `test/widget_test.dart` ให้ตรงด้วย
+4. **Agency: ปุ่มยืนยันเตียง ER ไม่มี feedback + แบนเนอร์เคสใหม่บังหน้าจอ**: เพิ่ม SnackBar ยืนยันหลังกด (`agency_incident_list_screen.dart`) ให้ตรงสไตล์ปุ่มอื่นที่ทำถูกอยู่แล้ว; แบนเนอร์เคสใหม่ (`agency_home_screen.dart`) เพิ่มปุ่มปิด (X) + เก็บ `_dismissedBannerIds` (ปิดแล้วไม่โผล่ซ้ำ แต่ยังจัดการจากรายการได้ปกติ ไม่ได้ถูกบล็อก) และกัน overflow ข้อความยาวด้วย `maxLines`
+5. **Ambulance: ป้องกันกดปุ่มอัปเดตสถานะพลาดบนหน้าหลัก**: ปุ่มด่วนใน `_buildAmbulanceStatusCard` มีอยู่แล้วแต่ไม่มีการยืนยันเลย (ตรงข้ามกับที่คิดไว้ตอนแรก) — สกัด dialog ยืนยัน+คูลดาวน์ 3 วิที่มีอยู่แล้วในหน้ารายละเอียดออกมาเป็น `showStatusConfirmDialog()` ใช้ร่วมกัน ลดโค้ดซ้ำและปิดช่องโหว่พร้อมกัน
+6. **Ambulance: ปักเคสของตัวเองไว้บนสุด + ไฮไลต์**: `ambulance_incident_list_screen.dart` แยกเคสที่ `assignedAmbulanceId` ตรงกับหน่วยตัวเองไว้กลุ่มแรกเสมอ (ไม่สนลำดับ `createdAt`) พร้อมขอบสีน้ำเงินเข้ม+ป้าย "เคสของคุณ • กำลังดำเนินการ" แยกจากกรอบเขียว "accepted" ทั่วไปที่อาจเป็นเคสของหน่วยอื่น
+7. **Ambulance: แจ้งเตือนชัดเจนตอนได้รับมอบหมายเคสใหม่**: เดิมแค่เปลี่ยนสี badge เงียบๆ เพิ่ม `HapticFeedback.heavyImpact()` + แบนเนอร์เด่นชัด (ไล่เฉดแดง ขอบขาว บอกประเภทเหตุ+ที่อยู่) เลื่อนลงมาจากบนสุดจอ auto-dismiss เอง 6 วิ
+
+**ยืนยันด้วย `flutter analyze` (0 errors ใหม่, เหลือแค่ 6 info เดิมที่ไม่เกี่ยวข้อง) และ `flutter test` (27/27 ผ่าน) หลังแก้ครบทั้ง 7 กลุ่ม — จุดที่ 2 (บังคับ 1 คัน 1 เคส) ต้องทดสอบบนเครื่องจริงกับรถพยาบาลหลายคันออนไลน์พร้อมกันถึงจะเห็นผลชัดเจน**
+
+## 27. Agency: บั๊กเคส resolved ค้างจอ + เพิ่มปุ่มลบเคสออกจากหน้าจอเอง / Onboarding: กลับไปใช้ liquidReveal ตัวจริง
+
+**ไฟล์ที่แก้:** `lib/features/agency/presentation/agency_incident_list_screen.dart`, `lib/core/services/agency_storage_service.dart`, `lib/features/onboarding/presentation/onboarding_screen.dart`
+
+1. **บั๊กจริง: เคสที่ resolved แล้วยังค้างอยู่ในหน้า "เคสที่กำลังมุ่งหน้ามา" ของ agency** — ต้นเหตุคือ `agency_incident_list_screen.dart` กรองแค่ `status != 'cancelled'` จุดเดียว ไม่เคยกรอง `resolved` เลย (ต่างจาก 3 จุดที่แก้ไปแล้วในหัวข้อ 26 ข้อ 1 ซึ่งไม่ครอบคลุมไฟล์นี้ในบรรทัดที่ถูกจุด) ทำให้เคสที่ "ทุกอย่างติ๊กถูกทำจบแล้ว" ยังไม่หายไปจากจอ — เพิ่มกรอง `!= 'resolved'` เข้าไปด้วย
+2. **เพิ่มปุ่มลบเคสออกจากหน้าจอเอง (ไม่แตะข้อมูลใน database)**: ผู้ใช้ขอให้มีทางลบเคสออกจากมุมมอง agency ได้เองแม้เคสจะยังไม่ resolved (เผื่อกรณีอยากเคลียร์จอ) โดยข้อมูลต้องเก็บไว้ครบสำหรับ heatmap/เว็บดูย้อนหลังในอนาคต — เพิ่ม `AgencyStorageService.loadDismissedIncidentIds()`/`setDismissedIncidentIds()` (เก็บแค่ id ใน SharedPreferences เครื่องนั้นๆ ไม่ยุ่งกับ Firestore เลย) และปุ่ม "×" จางๆ มุมขวาบนของการ์ดแต่ละใบ กดแล้วซ่อนทันที+โชว์ SnackBar พร้อมปุ่ม "เลิกทำ"
+3. **Onboarding: คลื่นยังไม่เหมือนวิดีโออ้างอิงเลย — สาเหตุคือแก้ผิดทางไปตั้งแต่หัวข้อ 23** — ผู้ใช้แท็กวิดีโอเดิมมาเทียบอีกครั้ง ครั้งนี้ตัดเฟรมจากวิดีโอออกมาดูจริง (`ffmpeg` ตัดเฟรมช่วงที่มีการลากเปลี่ยนหน้า) แล้วเทียบกับโค้ด `liquid_swipe` เห็นชัดว่ารูปทรงคลื่นในวิดีโอเป็นเส้นโค้งแบบ S (cubic bezier หลายจุด โป่ง-ยุบสลับกัน) ไม่ใช่วงกลมล้วนแบบที่ `WaveType.circularReveal` วาด — ตอนหัวข้อ 23 สรุปว่า `liquidReveal` "แข็ง/เป็นวงรีเบี้ยว" นั้นวินิจฉัยผิด สาเหตุจริงที่แข็งตอนนั้นคือสีพื้นหลังซ้ำกันทุกหน้า (แก้แยกไปแล้วในหัวข้อ 20) ไม่เกี่ยวกับ wave type เลย — กลับไปใช้ `WaveType.liquidReveal` และคืนค่า `positionSlideIcon` เป็นดีฟอลต์ของ package (0.8 แทน 0.5 ที่เคยลดไว้ตอนใช้ circularReveal) เพราะสูตรเส้นโค้งของ liquidReveal ถูกปรับแต่งมาคู่กับค่านี้ ยืนยันด้วย widget test จำลองลากจริง 2 แบบ (ลากจากค่อนล่างจอ และลากจากใกล้ขอบบนจอ) แคปภาพเทียบกัน พบว่าจุดหักโค้งของคลื่นขยับตามตำแหน่งแนวตั้งที่ลากจริง (ลากใกล้ขอบบนจะเห็นแค่เสี้ยวของเส้นโค้งเพราะช่วงคลื่นทั้งหมดสูงถึง ~90% ของจอ ส่วนลากกลางๆ/ค่อนล่างจะเห็นเส้นโค้ง S เต็มรูปแบบ — เป็นพฤติกรรมที่ถูกต้องตามการออกแบบของ package ไม่ใช่บั๊ก)
+4. **Onboarding: เอาไอคอนลูกศรในวงกลมออก** — ผู้ใช้ขอให้เอาปุ่มวงกลม+ลูกศรที่ดูเป็นปุ่มกดออก เปลี่ยนเป็นสัญลักษณ์ ">>>" (ไอคอน chevron 3 ตัวซ้อนกันแบบจางๆ opacity 0.55 ไม่มีพื้นหลัง) บอกใบ้ทิศทางที่ควรลากแทน
+
+**ยืนยันด้วย widget test จำลองลากนิ้วจริงบน `OnboardingScreen` (แคปภาพ `RepaintBoundary` ระหว่างลากหลายจุด ต้องห่อการแคปด้วย `tester.runAsync()` ไม่งั้น `toImage()`/เขียนไฟล์จะค้างจนเทสต์ timeout — จุดนี้พลาดไปรอบแรกแล้วแก้ทัน), `flutter analyze` (0 errors ใหม่) และ `flutter test` (27/27 ผ่าน)**
+
+## 28. Onboarding: เพิ่มระลอกคลื่นน้ำจางๆ ที่ยังเคลื่อนไหวต่อเนื่องแม้นิ้วหยุดนิ่ง (ไม่ใช่แค่คลื่นหลักที่ยึดตำแหน่งนิ้วเฉยๆ)
+
+ผู้ใช้ต้องการให้การลากรู้สึกเหมือนน้ำจริงมากขึ้นไปอีก: "ถ้าหยุดลากมันก็ยังมีคลื่นน้ำจางๆ เคลื่อนที่อยู่ในทิศทางนั้น แต่คลื่นน้ำใหญ่มันจะกดที่นิ้วที่กดนิ่ง" — คือคลื่นหลัก (wave การเปลี่ยนหน้าของ `liquid_swipe`) ให้ยึดตำแหน่งนิ้วตามเดิมทุกประการ แต่ต้องมีคลื่นเล็กๆ ที่ "มีชีวิต" เคลื่อนไหวเองต่อเนื่องด้วยเวลาจริง ไม่ใช่หยุดนิ่งสนิททันทีที่นิ้วหยุดขยับ — สิ่งนี้ `liquid_swipe` ไม่มีให้ในตัว (รูปทรง wave ของมันเป็นฟังก์ชันของ drag percent + ตำแหน่งนิ้วล้วนๆ ไม่มีอะไรขับเคลื่อนด้วยเวลาเลย หยุดขยับนิ้วปุ๊บสูตรก็หยุดนิ่งปุ๊บ) จึงต้องเพิ่มชั้นตกแต่งเองแยกต่างหาก
+
+**ไฟล์ที่แก้:** `lib/features/onboarding/presentation/onboarding_screen.dart`
+
+- เพิ่ม `Listener` (behavior: translucent) ครอบ `LiquidSwipe` ทั้งก้อน ดักจับตำแหน่งนิ้วดิบจริงเอง (`onPointerDown/Move/Up/Cancel`) เก็บใน `ValueNotifier<Offset?>` — ไม่ใช้ `setState` เพราะเรียกถี่มากตอนลาก ใช้ `ValueNotifier` + `AnimatedBuilder` แทนเพื่อ repaint เฉพาะจุดนี้ ไม่รีบิลด์ทั้งจอ (`Listener` ไม่แย่ง gesture arena กับ `GestureDetector` ภายในของ `liquid_swipe` เอง อยู่ร่วมกันได้ปกติ)
+- เพิ่ม `AnimationController` วนซ้ำต่อเนื่อง (`repeat()`) เริ่มตอนนิ้วแตะจอ (`onPointerDown`) หยุดตอนนิ้วยก (`onPointerUp`/`onPointerCancel`) — ตราบใดที่นิ้วยังแตะค้างอยู่ (ไม่ว่าจะขยับหรือนิ่ง) ตัวนี้หมุนต่อเนื่องตลอด
+- วาดระลอกคลื่น 3 วงซ้อนกัน (`_RippleWavePainter`) ที่ตำแหน่งนิ้วปัจจุบัน แต่ละวงมีเฟสต่างกัน (offset 1/3 รอบ) ขยายรัศมี+จางความทึบไปพร้อมกันตามเวลา ขอบวงใส่ noise แบบ sine (`sin(angle*5 + t*2π)`) แทนวงกลมเรียบเป๊ะ ให้ดูเป็นผิวน้ำมากกว่ารูปทรงเรขาคณิต ห่อด้วย `IgnorePointer` กันไม่ให้ไปบังการลากจริง
+
+**ยืนยันด้วย widget test 2 ชุด**: (1) กดนิ้วค้างที่จุดเดียวไม่ขยับเลย แล้วปล่อยเวลาผ่านไปเรื่อยๆ (300ms ทีละสเต็ป) แคปภาพเทียบ — เห็นชัดว่าวงคลื่นขยาย/จางไปตามเวลาจริงแม้นิ้วไม่ขยับแม้แต่พิกเซลเดียว (ถ้าไม่ผูกกับเวลาจริง ภาพทุกเฟรมจะเหมือนกันเป๊ะ ซึ่งไม่ใช่ผลที่ได้) และปล่อยนิ้วแล้วระลอกหายทันที; (2) ลากขยับนิ้วจริงข้ามหน้า แคปภาพระหว่างทาง — ยืนยันว่าคลื่นหลัก (S-curve เปลี่ยนหน้า) กับระลอกตกแต่งทำงานพร้อมกันได้ไม่ชนกัน และระลอกขยับตามตำแหน่งนิ้วที่เคลื่อนที่จริงด้วย ทั้งหมดยืนยันด้วยภาพที่แคปได้จริง ไม่ใช่แค่อ่านโค้ดแล้วเดา — ปิดท้ายด้วย `flutter analyze` (0 errors ใหม่) และ `flutter test` (27/27 ผ่าน)
+
+## 29. รอบตรวจสุขภาพแอปทั้งหมด (3 agent คู่ขนาน) — พบบั๊กจริงร้ายแรง: Firestore เขียนล้มเหลวแต่แอปบอกว่าสำเร็จเสมอ + API key รั่วลง log
+
+ผู้ใช้ขอให้ตรวจทั้งแอปว่ามีอะไรควรแก้/เพิ่มให้ดีที่สุด ใช้ Explore agent 3 ตัวคู่ขนานตรวจ 3 มุม (error handling/ความปลอดภัย, ความสม่ำเสมอของฟีเจอร์ 3 role + dead code, ความพร้อมของเอกสาร/setup) แล้วตรวจซ้ำเองอีกชั้นในจุดที่ร้ายแรงที่สุดก่อนลงมือแก้
+
+**[แก้แล้ว] บั๊กร้ายแรง: ทุกเมธอดเขียน Firestore ใน `incident_service.dart` (createIncident, setErPrepared, addScenePhoto, dispatchIncidentByHospital, updateIncidentProgressStep) ดัก error แล้วทิ้งเงียบๆ จากนั้นคืนค่า `success: true`/`true` เสมอไม่ว่า Firestore จะเขียนสำเร็จจริงหรือไม่** — ระบบนี้ทั้ง 3 role อยู่คนละเครื่องกัน สื่อสารกันผ่าน Firestore เท่านั้น ถ้าเน็ตหลุดตอนกด SOS/มอบหมายเคส/อัปเดตสถานะ ผู้ใช้จะเห็นข้อความ "สำเร็จแล้ว" ทั้งที่อีกฝั่งไม่มีทางรู้เรื่องเลย ยืนยันโดยอ่านโค้ดจริงตรงจุดที่ agent ระบุก่อนแก้ (ไม่เชื่อ agent เฉยๆ) แก้โดยให้ทุกเมธอดคืนค่าจริงตามผล Firestore แล้วอัปเดต UI ทุกจุดที่เรียกให้แจ้งเตือน/ย้อนสถานะเมื่อไม่สำเร็จแทนนิ่งเงียบ:
+- `lib/features/agency/presentation/agency_incident_detail_screen.dart` — ปุ่มมอบหมายเคส (เพิ่ม SnackBar แจ้งล้มเหลว) และปุ่มยืนยันเตียง ER (ย้อน UI + แจ้งเตือนเมื่อล้มเหลว)
+- `lib/features/agency/presentation/agency_incident_list_screen.dart` — ปุ่มยืนยันเตียง ER ในรายการ (แจ้งเตือนตามผลจริง)
+- `lib/features/ambulance/presentation/ambulance_incident_detail_screen.dart` — ถ่ายรูปหน้างาน (แจ้งเตือนเมื่อส่งไม่สำเร็จ) และปุ่มอัปเดตสถานะในหน้ารายละเอียด (ย้อนสถานะ+แจ้งเตือนเมื่อล้มเหลว)
+- `lib/features/ambulance/presentation/ambulance_home_screen.dart` — ปุ่มอัปเดตสถานะด่วนทั้ง 3 ปุ่มบนหน้าหลัก (แจ้งเตือนเมื่อล้มเหลว)
+- `lib/features/ambulance/presentation/ambulance_incident_list_screen.dart` — ปุ่มยืนยันรับเคส (แจ้งเตือนตามผลจริงแทนบอกสำเร็จเสมอ)
+- `lib/features/driver_radar/presentation/sos_report_screen.dart` — ไม่ต้องแก้ เพราะมี branch แจ้งเตือนความล้มเหลวไว้ถูกต้องอยู่แล้ว (แค่ไม่เคยถูกเรียกใช้จริงเพราะ `createIncident` เดิมคืนค่า `success: true` เสมอ)
+
+**[แก้แล้ว] Gemini API key รั่วลง log เครื่องได้ (รวม release build)**: `ai_vision_triage_service.dart` เดิมแปะ `?key=$apiKey` ไว้ใน URL ตรงๆ ตอน request ล้มเหลว (เน็ตหลุด/timeout) ข้อความ exception ที่ debugPrint ไว้จะมี URL เต็มรวม key อยู่ด้วย ย้ายไปส่งผ่าน header `x-goog-api-key` แทน (Gemini API รองรับทั้ง 2 แบบ) ตัด key ออกจาก URL ไปเลย
+
+**พบแต่ยังไม่แก้ (รอผู้ใช้เลือกว่าจะทำแค่ไหน)**: README.md ล้าสมัยมาก (ยังบอกว่าเป็น UI Only ทั้งที่ setup instructions ตัดจบไม่ครบด้วย), bundle ID ยังเป็นค่า default `com.example.*` ทั้ง Android/iOS, `pubspec.yaml` description/version ไม่เคยอัปเดต, Dark mode มีแค่ฝั่ง Driver ทั้งที่ `ThemeSettingsService` เขียนคอมเมนต์ไว้ว่าเป็น "unified ทุกหน้าจอ", การตั้งค่าเสียง/แจ้งเตือนฝั่ง Agency บันทึกได้แต่ไม่มีอะไรอ่านไปใช้จริงเลย, หน้าตั้งค่าฝั่ง Ambulance ไม่มีการบันทึกค่าเลยสักตัว (ปิดแอปแล้วรีเซ็ตทุกครั้ง), มีไฟล์ orphaned 4 ไฟล์ (`ai_acoustic_siren_service.dart` เป็น placeholder ที่ประกาศไว้ในคอมเมนต์ตัวเองว่ายังไม่ได้ต่อกับหน้าไหนเลย, `user_type_screen.dart`, `face_scan_settings_service.dart`, `app_settings.dart`) และ dependency ที่ไม่ได้ใช้ 3 ตัวใน `pubspec.yaml` (`provider`, `just_audio`, `firebase_auth`)
+
+**ยืนยันด้วย `flutter analyze`** (0 error ใหม่ เหลือแค่ info เดิม + 3 info ใหม่ประเภทเดียวกับที่มีอยู่แล้วในโปรเจกต์ `use_build_context_synchronously` ซึ่งเป็นรูปแบบที่ยอมรับอยู่แล้วทั้งโปรเจกต์) **และ `flutter test` (27/27 ผ่าน)**
+
+## 30. ผู้ใช้ขอ "แก้ทั้งหมดเลย" — จัดการรายการที่เหลือจากรอบตรวจสุขภาพแอป (หัวข้อ 29)
+
+**[แก้แล้ว] Dead code cleanup**: ตรวจซ้ำเองก่อนลบ (ไม่เชื่อผล agent เฉยๆ) พบว่า `face_scan_settings_service.dart` จริงๆ แล้วมี test ใช้งานจริงอยู่ 3 เทสต์ใน `test/widget_test.dart` (agent ตรวจแค่ `lib/` ไม่ได้ตรวจ `test/`) จึง**ไม่ลบไฟล์นี้** — ลบแค่ 3 ไฟล์ที่ยืนยันแล้วว่าไม่มีใครอ้างถึงเลยทั้ง `lib/` และ `test/`: `ai_acoustic_siren_service.dart`, `user_type_screen.dart`, `app_settings.dart` และลบ 3 dependency ที่ไม่มีการ import ใช้เลย (`provider`, `just_audio`, `firebase_auth`) ออกจาก `pubspec.yaml`
+
+**[แก้แล้ว] Ambulance: หน้าตั้งค่าไม่บันทึกอะไรเลยสักตัว**: เพิ่ม `saveSettings()`/`loadSettings()`/`settingsNotifier` ใน `ambulance_storage_service.dart` (รูปแบบเดียวกับ `AgencyStorageService`) แล้วผูกเข้ากับทั้ง 5 การตั้งค่าใน `ambulance_settings_screen.dart` (หน้าจอเปิดตลอด, โหมดทางหลวง, GPS ความละเอียดสูง, แจ้งเตือน ER อัตโนมัติ, ระยะส่งสัญญาณ) — Slider ใช้ `onChangeEnd` บันทึกแทน `onChanged` กันเขียนดิสก์รัวๆ ระหว่างลาก
+
+**[แก้แล้ว] Agency: การตั้งค่าเสียง/หน้าจอกะพริบเป็นแค่ของประดับ**: เพิ่มการตรวจจับ "เคสใหม่ที่เพิ่งโผล่มา" ใน `agency_home_screen.dart` (เทียบ id เคสปัจจุบันกับที่เคยเห็นแล้ว ไม่นับเคสที่มีอยู่แล้วตอนเปิดแอปครั้งแรกเป็นเคสใหม่) เมื่อเจอเคสใหม่จะเรียก `VoiceAlertService().speakNewIncidentAlert()` (เมธอดใหม่) ถ้า `voiceAnnouncement` เปิดอยู่ และเล่นเอฟเฟกต์จอกะพริบแดงจางๆ ผ่าน `AnimationController` ถ้า `screenFlashAlert` เปิดอยู่ — ทั้งสองอ่านค่าจริงจาก `AgencyStorageService.settingsNotifier` ที่มีอยู่แล้ว
+
+**[แก้แล้ว] Dark Mode มีแค่ฝั่ง Driver**: เพิ่มสวิตช์ "โหมดกลางคืน" ในหน้าตั้งค่าของทั้ง Ambulance และ Agency ผูกกับ `ThemeSettingsService.isNightMode` (global ValueNotifier ตัวเดียวกับที่ Driver ใช้อยู่แล้ว ไม่ต้องสร้างใหม่) แล้วปรับสีพื้นหลัง/หัวข้อ/การ์ดในหน้าตั้งค่าของทั้ง 2 role ให้ตอบสนองจริง — **ขอบเขตที่ทำ**: ครอบคลุมเต็มรูปแบบเฉพาะหน้าตั้งค่า (Settings) ของ Ambulance/Agency เท่านั้น ไม่ได้ไล่แก้ทุกสีในหน้า Profile/Home ของทั้ง 2 role ให้ลึกเท่าฝั่ง Driver (ซึ่งมีจุดอ้างอิง `isNightMode` มากถึง 130 จุดกระจายอยู่ 5 ไฟล์) เพราะการทำแค่บางส่วน (เช่น เปลี่ยนแค่ Scaffold/header แต่ตัวเนื้อหายังขาวอยู่) จะทำให้หน้าจอดูเหมือนบั๊กสีไม่ครบมากกว่าดูเป็นฟีเจอร์ที่ตั้งใจทำ — บันทึกไว้ตรงนี้เพื่อให้ชัดเจนว่ายังไม่ใช่ parity ระดับเดียวกับ Driver 100%
+
+**[แก้แล้ว] README.md ล้าสมัย + pubspec description**: เขียนใหม่ทั้งหมดให้ตรงสถานะจริงของแอป (ระบบเชื่อมต่อ Firestore/MQTT/Gemini ครบแล้ว ไม่ใช่ UI Only) พร้อมขั้นตอน setup ที่ครบจริง (`flutter pub get` → คัดลอก `.env.example` → `flutter run`) และหัวข้อ "ข้อจำกัดที่รู้อยู่แล้ว" อธิบายตรงๆ ว่าโปรเจกต์นี้เป็นงานวิทยานิพนธ์มีข้อจำกัดอะไรบ้าง — เพิ่ม `GEMINI_API_KEY` ที่ขาดหายไปใน `.env.example` ด้วย (มีใช้จริงในโค้ดแต่ไม่เคยอยู่ใน template) — แก้ `pubspec.yaml` บรรทัด `description` จาก "A new Flutter project." เป็นคำอธิบายจริงของแอป
+
+**[ตั้งใจไม่แก้] Bundle ID ยังเป็น `com.example.*`**: ไม่เปลี่ยนให้ เพราะความเสี่ยงสูงกว่าประโยชน์ที่ได้ในสถานการณ์นี้ — (1) `google-services.json`/`GoogleService-Info.plist` ผูกกับ bundle ID เดิมไว้ในฝั่ง Firebase console แล้ว เปลี่ยน bundle ID โดยไม่ไปสร้างแอปใหม่ในนั้นก่อนจะทำให้ Firebase เชื่อมต่อไม่ได้เลยทันที (2) เพิ่งเจอปัญหา "application-identifier entitlement mismatch" ตอนติดตั้งแอปไปหมาดๆ ในเซสชันนี้ (ต้องลบแอปออกจากเครื่องแล้วลงใหม่) เปลี่ยน bundle ID จะเจอปัญหาเดียวกันซ้ำอีกทันทีเพราะกลายเป็น "แอปคนละตัว" ในสายตา iOS — ถ้าต้องการแก้จริงต้องทำเองที่ Firebase Console ก่อน (สร้าง app entry ใหม่ด้วย bundle ID ใหม่ แล้วโหลดไฟล์ config ชุดใหม่มาแทน) จึงปล่อยเรื่องนี้ไว้ให้ผู้ใช้ตัดสินใจเอง ไม่ลงมือทำเองแบบเงียบๆ
+
+**ยืนยันด้วย `flutter analyze` (0 error ใหม่ เหลือ 9 info เดิม/รูปแบบเดิม) และ `flutter test` (27/27 ผ่าน) หลังแก้ครบทุกจุดที่ตัดสินใจแก้**
+
+## 31. เว็บแดชบอร์ด Agency/โรงพยาบาล (Flutter Web) — v1 ดูข้อมูลอย่างเดียว
+
+ผู้ใช้ขอเว็บแดชบอร์ดให้โรงพยาบาลเปิดดูภาพรวมเคส+ตำแหน่งรถพยาบาลบนคอมได้ (ข้าม push notification/FCM ไปก่อนเพราะต้องใช้ Firebase Blaze plan) วางแผนผ่าน Plan Mode (Explore agent 2 ตัวคู่ขนานตรวจความเป็นไปได้ก่อน) พบจุดติดขัดสำคัญ: ตำแหน่งรถพยาบาลแบบสดส่งผ่าน MQTT (`EmergencyMqttService` ใช้ TCP socket ตรง) ซึ่งเบราว์เซอร์เชื่อมต่อแบบนี้ไม่ได้เลย (ข้อจำกัดแซนด์บ็อกซ์เบราว์เซอร์) แก้โดยให้ฝั่งมือถือเขียนตำแหน่งสะท้อนลง Firestore เพิ่มด้วย (หน่วง 4 วิ/ครั้ง) แล้วให้เว็บอ่านจาก Firestore แทน
+
+**ไฟล์ใหม่**: `lib/main_web.dart` (entry point แยกจาก `lib/main.dart` เดิม 100% ไม่แตะมือถือเลย), `lib/web_dashboard/presentation/web_dashboard_screen.dart` (แผนที่ + sidebar รายการเคส เลย์เอาต์กว้างสำหรับจอคอม), `lib/core/services/emergency_fleet_web_service.dart` (อ่าน collection `emergency_fleet` จาก Firestore แปลงเป็น `EmergencyVehicleData` เดิม ไม่สร้างโมเดลใหม่)
+
+**ไฟล์ที่แก้**: `firestore.rules` (เปิด `emergency_fleet` จาก `read/write: false` ที่ไม่เคยใช้จริง เป็น `allow read: if true` + เช็คพิกัดเป็นตัวเลขตอนเขียน), `lib/core/services/emergency_mqtt_service.dart` (เพิ่ม `_mirrorToFirestore()` เขียนคู่ขนานกับ MQTT ทุก broadcast แบบ throttle 4 วิ/คัน ปิดสัญญาณลบทิ้งทันทีไม่รอ throttle — ไม่กระทบ path MQTT เดิมเลย เป็นการเพิ่มเท่านั้น)
+
+**ขอบเขต v1 ที่ตั้งใจจำกัดไว้**: ดูข้อมูลอย่างเดียว ไม่มีปุ่มมอบหมายเคส/ยืนยันเตียง ER จากเว็บ (ยังไม่มีระบบล็อกอินเว็บ ทำ action จากเว็บตอนนี้จะไม่รู้ว่าใครกด), ไม่มีระบบล็อกอิน (สอดคล้องกับ security model เดิมทั้งแอปที่ไม่มี Firebase Auth จริงอยู่แล้ว), single-hospital (`HOSP-01` เหมือนทั้งแอป ไม่ใช่ multi-tenant ใหม่)
+
+**ยืนยันด้วย `flutter build web -t lib/main_web.dart` (build จริงผ่าน ไม่ใช่แค่ `flutter analyze`) `flutter analyze` (0 error ใหม่) และ `flutter test` (27/27 ผ่าน — ยืนยันว่าการเพิ่มโค้ดฝั่งเว็บไม่กระทบแอปมือถือเดิมเลย)
+
+## 32. เพิ่มล็อกอินให้เว็บ Agency Dashboard + ฟิลด์ `archived` สำหรับเว็บ "Data" ที่กำลังจะสร้าง
+
+ผู้ใช้ขอย้อนกลับไปเพิ่มระบบล็อกอินให้เว็บ Agency (หัวข้อ 31) โดยใช้บัญชี role "agency" เดียวกับแอปมือถือ ไม่สร้างรหัสผ่านแยกใหม่
+
+**[บั๊กจริงที่เจอระหว่างทำ ยืนยันด้วย `flutter build web` ไม่ใช่แค่เดา]**: ตอนแรกวางแผนจะเรียก `FaceAuthRepository.authenticateWithPassword()` ตรงๆ (มีอยู่แล้ว ดูสมเหตุสมผลที่จะ reuse) แต่ build web จริงแล้วพัง — `FaceAuthRepository` import `face_recognition_service.dart` ซึ่งลาก `tflite_flutter` → `dart:ffi` ตามมาด้วย (เรียก native library ผ่าน FFI) ไลบรารีนี้ไม่มีบนเว็บเลย ทำให้ compile พังทันทีแค่เพราะ import ไฟล์นี้ ต่อให้ไม่เคยเรียกเมธอดเกี่ยวกับใบหน้าจริงๆ เลยก็ตาม (Dart ต้อง resolve ทั้งไฟล์ตอน compile) แก้โดยสร้าง **ไฟล์ใหม่** `lib/web_dashboard/data/web_auth_service.dart` — copy เฉพาะ logic เช็ครหัสผ่าน (Firestore collection `users` + รูปแบบ hash `salt:sha256Hash` เดียวกันเป๊ะ) มาไว้แยกต่างหาก ไม่ import อะไรที่เกี่ยวกับ ML/กล้องเลย
+
+**ไฟล์ใหม่อื่นๆ**: `lib/web_dashboard/presentation/web_login_screen.dart` (ฟอร์มอีเมล/รหัสผ่าน เรียก `WebAuthService.loginAsAgency()` เช็ค role ต้องเป็น agency เท่านั้น)
+**ไฟล์ที่แก้**: `lib/main_web.dart` (เปลี่ยนหน้าเริ่มต้นเป็น `WebLoginScreen`)
+
+**เตรียมฟิลด์ `archived` ให้ `IncidentReport` model** (`lib/core/models/incident_report.dart`) — สำหรับเว็บ "Data" (เครื่องมือแอดมินจัดการฐานข้อมูล กำลังจะสร้างต่อ ดูหัวข้อ 33) ใช้เป็น soft-delete/เก็บเข้าคลัง กู้คืนได้ ต่างจากลบถาวรจริง เพิ่ม field ครบทุกจุด (constructor/toMap/fromMap/copyWith) และกรองออกจาก heatmap ของ agency ด้วย (`agency_home_screen.dart:_buildHotspotCircles()`) เหมือน cancelled (resolved ยังนับรวมตามเดิม ไม่แตะ)
+
+**เปิด `firestore.rules` ให้ลบ `incident_reports` ถาวรได้จริง** (`allow delete: if true` เดิม `if false`) — ผู้ใช้ตัดสินใจและรับทราบความเสี่ยงแล้ว (ลบแล้วกู้คืนไม่ได้ + ระบบไม่มี auth จริงแยกแยะ client ได้ เปิดกว้างให้ client ไหนก็ลบได้ในทางเทคนิค ไม่ใช่แค่เว็บ Data) เพื่อรองรับปุ่ม "ลบถาวร" ในเว็บ Data ที่กำลังจะสร้าง
+
+**ยืนยันด้วย `flutter build web -t lib/main_web.dart` (ผ่านหลังแก้ปัญหา dart:ffi), `flutter analyze` (0 error ใหม่) และ `flutter test` (27/27 ผ่าน)
+
+## 33. สร้างเว็บ "Data" — เครื่องมือแอดมินจัดการฐานข้อมูลเคสเต็มรูปแบบ (โปรเจกต์แยกต่างหาก)
+
+**ตำแหน่ง**: `~/Developer/rount alert/route-alert-data-web/` — sibling ของ `route-alert-app/` แยกโปรเจกต์กันเด็ดขาดตามที่ผู้ใช้ขอ ไม่ใช่ Flutter (HTML/CSS/JavaScript ธรรมดา + Firebase JS SDK ผ่าน CDN ไม่มี build step) สไตล์กระดาษใบเสร็จขอบฉีกขาด/ฟอนต์พิมพ์ดีด ตามภาพอ้างอิงที่ผู้ใช้ส่งมา รายละเอียดทั้งหมด (วิธีรัน, คำเตือนความปลอดภัย) อยู่ใน README ของโปรเจกต์นั้นเอง
+
+**ฟีเจอร์**: ดูรายการเคสแบบเรียลไทม์ (`onSnapshot`), ค้นหา/กรองตามสถานะ/ความรุนแรง/จังหวัด, สร้างเคสใหม่, แก้ไขทุก field (ยกเว้น id/createdAt), เก็บเข้าคลัง (soft-delete ผ่าน field `archived` กู้คืนได้) และลบถาวรจริง (ต้องพิมพ์ยืนยันคำว่า "ลบ" ก่อน) — ตัดสินใจเรื่องนี้ร่วมกับผู้ใช้ผ่าน Plan Mode ก่อนลงมือ (ดูหัวข้อ 32 สำหรับฝั่ง Firestore rules ที่ต้องเปิดรองรับ)
+
+**ไม่มีระบบล็อกอิน** ตามที่ผู้ใช้ตัดสินใจไว้ชัดเจน (ต่างจากเว็บ Agency ที่เพิ่งเพิ่ม login ไปในหัวข้อ 32) — บันทึกคำเตือนไว้ใน README ของโปรเจกต์นั้นชัดเจนว่าห้าม deploy ขึ้นสาธารณะแล้วแชร์ URL
+
+**การยืนยันที่ทำได้จริงในสภาพแวดล้อมนี้ (ไม่มี Flutter test suite ให้ช่วยเหมือนฝั่งแอป)**:ตรวจ syntax ของทุกไฟล์ JS (`node --check`), เทียบ DOM id ทุกตัวที่ JS อ้างอิงกับที่ประกาศจริงใน `index.html` (ตรงกันครบ), เทียบ CSS class ทุกตัวที่ใช้ใน JS/HTML กับที่นิยามใน `style.css` (ครบ), ยืนยัน URL ของ Firebase SDK บน CDN ใช้งานได้จริง (HTTP 200), รัน local static server แล้วเปิดผ่าน headless Chrome ยืนยันว่าเชื่อมต่อ Firestore ไปถึง project จริง (`route-alert-ccf91`) สำเร็จ (เห็น session/channel ของ Firestore Listen API ในระดับ network log) — **แต่ไม่สามารถแคปภาพหน้าจอที่โหลดข้อมูลจริงมาแสดงผลได้** เพราะ headless Chrome's virtual-time ไม่รองรับ connection แบบ long-polling ของ Firestore ได้ดีในสภาพแวดล้อมนี้ (ข้อจำกัดของเครื่องมือทดสอบ ไม่ใช่ของแอป) เจอบั๊กจริง 1 จุดระหว่างตรวจโค้ดเอง (จังหวะ animation ตอนกด archive/delete เร็วเกินไปอาจชนกับ animation ตอนเข้าจอ) แก้แล้วก่อนส่งมอบ — **แนะนำให้ผู้ใช้เปิด `index.html` ในเบราว์เซอร์จริงเองอีกครั้งเพื่อยืนยันขั้นสุดท้าย**
+
+## 34. แยกเว็บ Agency Dashboard เป็นโปรเจกต์ต่างหาก (3 โฟลเดอร์แล้ว) + เพิ่มฟีเจอร์ทั้ง 2 เว็บตามที่ขอ
+
+ผู้ใช้ขอ 2 เรื่องพร้อมกัน: (1) แยกเว็บ Agency Dashboard ออกจาก `route-alert-app` เป็นโปรเจกต์ของตัวเอง เพื่อให้ commit ลง git แยกกันชัดเจนเหมือนเว็บ Data (2) แก้ gap ที่เคยแจ้งไว้ทั้ง 2 เว็บ — วางแผนผ่าน Plan Mode โดย**ตรวจความเป็นไปได้จริงก่อนเขียนแผน** (สร้างโปรเจกต์ทดลอง + path dependency กลับไปที่ `route-alert-app` แล้วรัน `flutter build web` จริง ผ่านสำเร็จ ก่อนค่อยลงมือจริง)
+
+**Part A — ย้ายไปโปรเจกต์ใหม่**: `~/Developer/rount alert/route-alert-agency-web/` (sibling ของ `route-alert-app` และ `route-alert-data-web` — ตอนนี้มี 3 โฟลเดอร์แล้วตามที่ขอ) ใช้ path dependency ใน `pubspec.yaml` กลับไปที่ `../route-alert-app` เพื่อ reuse `IncidentReport`/`IncidentService`/`HospitalLocationService`/`EmergencyVehicleData`/`EmergencyMqttService` (แค่ static method คำนวณระยะทาง) โดยไม่ต้อง copy โค้ดซ้ำ — ย้าย `web_login_screen.dart`/`web_dashboard_screen.dart`/`web_auth_service.dart` ไปทั้งหมด ลบ `route-alert-app/lib/main_web.dart` และโฟลเดอร์ `lib/web_dashboard/` ทิ้ง (ย้ายออกไปหมดแล้ว) ลบไฟล์ template test เดิม (`test/widget_test.dart` ของ `flutter create` ที่อ้าง `MyApp` ซึ่งไม่มีอยู่จริงในโปรเจกต์นี้) เพิ่ม README อธิบาย path dependency + วิธีรัน
+
+**Part B — ฟีเจอร์เว็บ Agency**:
+- **Session persist ข้าม refresh**: เก็บอีเมลไว้ใน SharedPreferences (localStorage บนเว็บ) ตอนเปิดแอปเช็ค session ค้าง ยืนยัน role agency ซ้ำกับ Firestore ทุกครั้งก่อนเข้า dashboard (กันบัญชีถูกเปลี่ยน role/ลบไปแล้วแต่ session ยังค้างอยู่)
+- **Action จริงจากเว็บ**: ปุ่ม "มอบหมายเคส" (หาเรือใกล้ที่สุดจาก fleet ที่แสดงอยู่แล้ว เรียก `IncidentService.dispatchIncidentByHospital`) และ "ยืนยัน/ยกเลิกเตียง ER" (`IncidentService.setErPrepared`) โผล่ในการ์ดที่กดเลือกอยู่ พร้อมปุ่ม logout ที่ header
+- **ลดหน่วงตำแหน่งรถพยาบาล**: `emergency_mqtt_service.dart` ลด `_firestoreMirrorInterval` จาก 4 วิ → 2 วิ (ฝั่งมือถือ ส่งผลถึงเว็บ Agency โดยตรง)
+
+**Part C — ฟีเจอร์เว็บ Data**:
+- **ดูรูปภาพหน้างาน**: โมดัลแก้ไขเคสแสดง thumbnail ของ `photosBase64`/`scenePhotosBase64` กดดูขยายเต็มจอผ่าน lightbox ใหม่
+- **Bulk action**: checkbox ที่แต่ละการ์ด + แถบเครื่องมือลอยด้านล่างเมื่อเลือกไว้ ≥1 รายการ (เก็บเข้าคลัง/กู้คืน/ลบถาวรพร้อมกันหลายเคส ปุ่ม archive สลับข้อความอัตโนมัติตามแท็บที่อยู่ — เจอ+แก้บั๊กเรื่องข้อความปุ่มไม่ตรงกับการกระทำจริงตอนอยู่แท็บคลัง)
+- **Pagination**: แสดงทีละ 30 รายการ ปุ่ม "โหลดเพิ่ม" ต่อท้ายลิสต์ รีเซ็ตกลับหน้าแรกเมื่อเปลี่ยนแท็บ/ตัวกรอง
+
+**ไม่ทำในรอบนี้ (แจ้งเหตุผลไว้ในแผนแล้ว)**: Multi-hospital (เลิก hardcode `HOSP-01`) — เป็นการเปลี่ยนสถาปัตยกรรมข้ามทั้งระบบ (มือถือ 3 role ทั้งหมด ไม่ใช่แค่เว็บ) ต้องวางแผนแยกต่างหาก
+
+**ยืนยันด้วย `flutter build web` ผ่านทั้ง `route-alert-agency-web` (โปรเจกต์ใหม่) และ `route-alert-app` (มือถือไม่กระทบ), `flutter analyze`/`flutter test` (27/27) ผ่านฝั่ง `route-alert-app`, และตรวจเว็บ Data ซ้ำแบบเดียวกับรอบก่อน (syntax + DOM id + CSS class ครบ) หลังเพิ่มฟีเจอร์ใหม่ทั้ง 3 อย่าง

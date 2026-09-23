@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:latlong2/latlong.dart';
 import 'package:mqtt_client/mqtt_client.dart';
@@ -149,6 +150,15 @@ class EmergencyMqttService {
   static const Duration _staleTimeout = Duration(seconds: 12);
   Timer? _staleCheckTimer;
 
+  // สะท้อนตำแหน่งไป Firestore ('emergency_fleet') คู่ขนานกับ MQTT — เฉพาะไว้ให้
+  // เว็บแดชบอร์ด Agency อ่าน (เบราว์เซอร์ต่อ MQTT ตรงไม่ได้) หน่วง 2 วิ/คัน
+  // (ลดจาก 4 วิเดิมตามที่ผู้ใช้ขอให้ตำแหน่งดูสดขึ้น) กันเขียน Firestore ถี่เกิน
+  // จำเป็น (MQTT broadcast ถี่กว่านี้มากสำหรับใช้นำทางจริงบนมือถือ แต่แดชบอร์ด
+  // เป็นแค่ภาพรวม ไม่ต้องละเอียดระดับนั้น) — ไม่ใช่เรียลไทม์เป๊ะแบบ MQTT เพราะ
+  // เบราว์เซอร์เชื่อม MQTT ตรงไม่ได้ (ข้อจำกัดแซนด์บ็อกซ์เบราว์เซอร์เอง)
+  static const Duration _firestoreMirrorInterval = Duration(seconds: 2);
+  final Map<String, DateTime> _lastFirestoreMirrorAt = {};
+
   Stream<EmergencyVehicleData> get emergencyStream =>
       _emergencyStreamController.stream;
 
@@ -294,6 +304,7 @@ class EmergencyMqttService {
     }
     _emergencyStreamController.add(data);
     _fleetStreamController.add(_activeFleet.values.toList());
+    _mirrorToFirestore(data);
 
     if (!_isConnected || _client == null) {
       return;
@@ -315,6 +326,37 @@ class EmergencyMqttService {
         builder.payload!,
       );
     } catch (_) {}
+  }
+
+  // เขียนพิกัดล่าสุดลง Firestore แบบหน่วงเวลา (ดูคอมเมนต์ที่ _firestoreMirrorInterval)
+  // ปิดสัญญาณ (sirenActive:false) ต้องลบทิ้งทันทีไม่รอ throttle ไม่งั้นเว็บแดชบอร์ด
+  // จะยังเห็นรถคันนี้ "กำลังวิ่ง" ค้างอยู่นานถึง 4 วิหลังจากที่จริงหยุดไปแล้ว
+  void _mirrorToFirestore(EmergencyVehicleData data) {
+    final now = DateTime.now();
+    final lastMirror = _lastFirestoreMirrorAt[data.id];
+    final forceImmediate = !data.sirenActive;
+    if (!forceImmediate &&
+        lastMirror != null &&
+        now.difference(lastMirror) < _firestoreMirrorInterval) {
+      return;
+    }
+    _lastFirestoreMirrorAt[data.id] = now;
+
+    final doc =
+        FirebaseFirestore.instance.collection('emergency_fleet').doc(data.id);
+    if (data.sirenActive) {
+      doc.set({
+        ...data.toMap(),
+        'updatedAt': now.toIso8601String(),
+      }, SetOptions(merge: true)).catchError((e) {
+        debugPrint('[EmergencyMqttService] Firestore mirror write failed: $e');
+      });
+    } else {
+      _lastFirestoreMirrorAt.remove(data.id);
+      doc.delete().catchError((e) {
+        debugPrint('[EmergencyMqttService] Firestore mirror delete failed: $e');
+      });
+    }
   }
 
   /// Seed initial simulated active ambulances for testing when offline

@@ -17,6 +17,7 @@ import '../../../core/services/hospital_location_service.dart';
 import '../../../core/services/ai_trajectory_service.dart';
 import '../../../core/services/theme_settings_service.dart';
 import '../../../core/models/emergency_proximity_tier.dart';
+import '../../auth_face_login/data/services/face_auth_repository.dart';
 import 'incident_detail_screen.dart';
 
 /// แถบ debug สถานะ MQTT ชั่วคราว — เปิดไว้ตอนไล่บั๊กเชื่อมต่อ 2 เครื่อง ตอนนี้บั๊กที่
@@ -119,6 +120,11 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
   // Ambulance/Agency ใช้ข้อมูลชุดเดียวกันนี้อยู่แล้ว ทำให้ผู้ใช้งงว่าทำไมเห็นแค่
   // รถพยาบาลแต่ไม่เห็นโรงพยาบาลปลายทางบนแผนที่ของตัวเอง
   late LatLng _hospitalLocation;
+
+  // อีเมลผู้ใช้จริงที่ล็อกอินอยู่ ใช้เช็คว่า "เคสฉุกเฉินที่คุณแจ้ง" แบนเนอร์ด้านล่าง
+  // เป็นเคสของเราจริงหรือไม่ (เดิมไม่เช็คเลย หยิบเคส active ล่าสุดของทั้งระบบมาโชว์
+  // ตรงๆ ทำให้สลับบัญชีในเครื่องเดียวกันแล้วยังเห็นเคสของบัญชีก่อนหน้าค้างอยู่)
+  String? _currentUserEmail;
   StreamSubscription<HospitalProfile>? _hospitalSub;
 
   // รีเฟรชแถบ debug เป็นระยะ (ตัวนับข้อความ MQTT ที่ได้รับ อัปเดตอยู่ในตัว service
@@ -137,6 +143,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
     _ambulanceLocation = null;
     _hospitalLocation = HospitalLocationService().hospitalLocation;
     _initHospitalSync();
+    _loadCurrentUserEmail();
 
     _pulseController = AnimationController(
       vsync: this,
@@ -167,6 +174,13 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
     // ส่งฟังก์ชันเปิด Coach Mark ขึ้นไปให้ DriverMainScreen เก็บไว้ — ไม่โชว์เองอัตโนมัติ
     // อีกต่อไป (ย้ายไปเป็นปุ่ม "สอนการใช้งานปุ่มต่างๆ" ในหน้าตั้งค่าแทน ตามที่ผู้ใช้ขอ)
     widget.onCoachMarkReady?.call(_showCoachMark);
+  }
+
+  Future<void> _loadCurrentUserEmail() async {
+    final user = await FaceAuthRepository.getCurrentUser();
+    if (mounted && user != null && user.id != 'guest') {
+      setState(() => _currentUserEmail = user.email);
+    }
   }
 
   // แสดงคำแนะนำปุ่มแบบชี้ตำแหน่งจริง (Coach Mark) — เรียกได้ตลอดเวลาจากปุ่ม
@@ -915,8 +929,14 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                           stream: IncidentService().incidentsStream,
                           builder: (context, snapshot) {
                             final list = snapshot.data ?? [];
+                            // เดิมไม่กรอง reporterEmail เลย เอาเคส active ล่าสุดของ
+                            // ทั้งระบบมาโชว์เป็น "เคสฉุกเฉินที่คุณแจ้ง" ตรงๆ ทำให้
+                            // สลับบัญชีในเครื่องเดียวกันแล้วยังเห็นเคสของคนอื่นค้างอยู่
                             final activeReports = list.where(
-                              (i) => i.status != 'resolved' && i.status != 'cancelled',
+                              (i) =>
+                                  i.status != 'resolved' &&
+                                  i.status != 'cancelled' &&
+                                  i.reporterEmail == _currentUserEmail,
                             ).toList();
                             if (activeReports.isEmpty) return const SizedBox.shrink();
                             final top = activeReports.first;

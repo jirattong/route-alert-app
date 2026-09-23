@@ -10,8 +10,17 @@ service cloud.firestore {
     // (เช่น Anonymous Auth + Cloud Function ตรวจสอบ role) ในอนาคตถึงจะปิดสนิท
 
     // 1. Incident Reports — เปิดอ่านสาธารณะ (ทุก role ต้องเห็นเคสร่วมกัน),
-    // สร้างได้เฉพาะที่มี field ครบตามที่ต้องการ, แก้ไขได้แต่ห้ามสลับ id ของเคส,
-    // ห้ามลบเด็ดขาด (กันข้อมูลเคสฉุกเฉินถูกทำลาย)
+    // สร้างได้เฉพาะที่มี field ครบตามที่ต้องการ, แก้ไขได้แต่ห้ามสลับ id ของเคส
+    //
+    // ⚠️ allow delete เดิมเป็น `if false` (ห้ามลบเด็ดขาด) เพื่อเก็บข้อมูลไว้ทำ
+    // heatmap/สถิติในอนาคต — เปลี่ยนเป็น `if true` ตามคำขอผู้ใช้เพื่อให้เว็บ
+    // "Data" (เครื่องมือแอดมินจัดการฐานข้อมูลโดยตรง) ลบเคสถาวรได้จริง ผู้ใช้
+    // รับทราบแล้วว่า: (1) ลบแล้วกู้คืนไม่ได้ (2) เพราะระบบไม่มี Firebase Auth
+    // จริงแยกแยะ client ได้ การเปิดนี้เปิดกว้างให้ client ไหนก็เรียกลบได้ ไม่ใช่
+    // แค่เว็บ Data เท่านั้น — ไม่ใช่ช่องโหว่ใหม่ในเชิงหลักการเมื่อเทียบกับ
+    // /users ที่เปิด delete:true อยู่แล้วเช่นกันด้วยเหตุผลเดียวกัน (ดูด้านล่าง)
+    // สำหรับการ "ลบแบบนุ่มนวล/กู้คืนได้" ใช้ field `archived` ผ่าน update แทน
+    // (allow update ด้านล่างอนุญาตอยู่แล้ว ไม่ต้องแก้อะไรเพิ่ม)
     match /incident_reports/{incidentId} {
       allow read: if true;
 
@@ -22,7 +31,7 @@ service cloud.firestore {
 
       allow update: if request.resource.data.id == resource.data.id;
 
-      allow delete: if false;
+      allow delete: if true;
     }
 
     // 2. User Profiles & Face Biometrics — จุดอ่อนไหวที่สุด (เก็บรหัสผ่าน
@@ -51,10 +60,18 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // 4. Emergency Fleet — ประกาศไว้แต่ไม่ได้ใช้จริงในแอป (ตำแหน่งรถพยาบาลส่ง
-    // ผ่าน MQTT ไม่ใช่ Firestore) ปิดไว้ทั้งหมดกันสับสน/กันเป็นช่องโหว่เปล่าประโยชน์
+    // 4. Emergency Fleet — เดิมประกาศไว้เฉยๆ ไม่ได้ใช้จริง (ตำแหน่งรถพยาบาลส่ง
+    // ผ่าน MQTT ล้วน ซึ่งเว็บแดชบอร์ดต่อ MQTT ตรงจากเบราว์เซอร์ไม่ได้ — ข้อจำกัด
+    // ของแซนด์บ็อกซ์เบราว์เซอร์เอง ไม่ใช่ข้อจำกัดของ MQTT) ตอนนี้ใช้เป็นตัวสะท้อน
+    // ตำแหน่งแบบหน่วงเวลา (~4 วิ) ให้เว็บแดชบอร์อ่านแทน MQTT โดยเฉพาะ อ่านสาธารณะ
+    // ได้เหมือน collection อื่น เขียนได้เฉพาะที่มีพิกัดจริงเป็นตัวเลข
     match /emergency_fleet/{vehicleId} {
-      allow read, write: if false;
+      allow read: if true;
+
+      allow create, update: if request.resource.data.latitude is number
+                            && request.resource.data.longitude is number;
+
+      allow delete: if false;
     }
 
     // ปิดกั้น collection อื่นๆ ที่ไม่รู้จักทั้งหมดโดย default (Firestore rules

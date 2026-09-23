@@ -113,7 +113,12 @@ class IncidentService {
       _activeCooldownDuration = _defaultCooldown;
       _lastReportSubmissionTime = DateTime.now();
 
-      // 3. Sync with Cloud Firestore
+      // 3. Sync with Cloud Firestore — เดิมสลับกินข้อผิดพลาดตรงนี้ทิ้งแล้วรายงาน
+      // 'success': true เสมอ ทั้งที่ Firestore คือช่องทางเดียวที่ทำให้ฝั่งรถพยาบาล/
+      // agency (คนละเครื่องกัน) เห็นเคสนี้ได้ — ถ้า sync ล้มเหลวจริง (เน็ตหลุด/
+      // Firestore ล่ม) เคสจะค้างอยู่แค่ในเครื่องผู้แจ้งเท่านั้น ไม่มีใครรับรู้เลย แต่
+      // ผู้แจ้งเห็นข้อความ "ส่งเรียบร้อยแล้ว" ทำให้เข้าใจผิดว่าปลอดภัยแล้ว
+      bool firestoreSynced = true;
       try {
         await FirebaseFirestore.instance
             .collection(_collectionName)
@@ -121,11 +126,15 @@ class IncidentService {
             .set(newIncident.toMap());
       } catch (firestoreError) {
         debugPrint('Firestore sync incident error: $firestoreError');
+        firestoreSynced = false;
       }
 
       return {
-        'success': true,
-        'message': 'ส่งรายงานเหตุฉุกเฉินเรียบร้อยแล้ว',
+        'success': firestoreSynced,
+        'message': firestoreSynced
+            ? 'ส่งรายงานเหตุฉุกเฉินเรียบร้อยแล้ว'
+            : '⚠️ บันทึกในเครื่องแล้ว แต่ส่งไปยังศูนย์ไม่สำเร็จ (เช็คสัญญาณอินเทอร์เน็ต) '
+                'เคสนี้จะยังไม่ถูกส่งต่อจนกว่าจะลองส่งใหม่ หากเร่งด่วนกรุณาโทร 1669',
       };
     } catch (e) {
       debugPrint('createIncident error: $e');
@@ -154,9 +163,11 @@ class IncidentService {
             .collection(_collectionName)
             .doc(id)
             .update({'isErPrepared': isPrepared});
-      } catch (_) {}
-
-      return true;
+        return true;
+      } catch (e) {
+        debugPrint('setErPrepared Firestore error: $e');
+        return false;
+      }
     } catch (e) {
       debugPrint('setErPrepared error: $e');
       return false;
@@ -183,9 +194,11 @@ class IncidentService {
             .collection(_collectionName)
             .doc(id)
             .update({'scenePhotosBase64': updatedPhotos});
-      } catch (_) {}
-
-      return true;
+        return true;
+      } catch (e) {
+        debugPrint('addScenePhoto Firestore error: $e');
+        return false;
+      }
     } catch (e) {
       debugPrint('addScenePhoto error: $e');
       return false;
@@ -236,9 +249,11 @@ class IncidentService {
           if (hospitalLatitude != null) 'hospitalLatitude': hospitalLatitude,
           if (hospitalLongitude != null) 'hospitalLongitude': hospitalLongitude,
         });
-      } catch (_) {}
-
-      return true;
+        return true;
+      } catch (e) {
+        debugPrint('dispatchIncidentByHospital Firestore error: $e');
+        return false;
+      }
     } catch (e) {
       debugPrint('dispatchIncidentByHospital error: $e');
       return false;
@@ -273,48 +288,6 @@ class IncidentService {
   }
 
   /// Ambulance role: Submit Medical Tele-Report (Vital Signs & Condition)
-  Future<bool> submitMedicalTeleReport({
-    required String id,
-    required String patientCondition,
-    required String vitalSigns,
-    String? medicalNotes,
-    bool callActive = true,
-  }) async {
-    try {
-      final local = await getLocalIncidents();
-      final idx = local.indexWhere((i) => i.id == id);
-      if (idx != -1) {
-        local[idx] = local[idx].copyWith(
-          patientCondition: patientCondition,
-          vitalSigns: vitalSigns,
-          medicalNotes: medicalNotes,
-          callSessionActive: callActive,
-        );
-        await _saveToLocalCache(local);
-        if (!_incidentsController.isClosed) {
-          _incidentsController.add(local);
-        }
-      }
-
-      try {
-        await FirebaseFirestore.instance
-            .collection(_collectionName)
-            .doc(id)
-            .update({
-          'patientCondition': patientCondition,
-          'vitalSigns': vitalSigns,
-          if (medicalNotes != null) 'medicalNotes': medicalNotes,
-          'callSessionActive': callActive,
-        });
-      } catch (_) {}
-
-      return true;
-    } catch (e) {
-      debugPrint('submitMedicalTeleReport error: $e');
-      return false;
-    }
-  }
-
   /// Ambulance / Hospital role: Mission completed (Step 5 - Resolved)
   Future<bool> resolveIncident(String id) async {
     return updateIncidentProgressStep(
@@ -366,9 +339,11 @@ class IncidentService {
           'status': status,
           'statusStep': step,
         });
-      } catch (_) {}
-
-      return true;
+        return true;
+      } catch (e) {
+        debugPrint('updateIncidentProgressStep Firestore error: $e');
+        return false;
+      }
     } catch (e) {
       debugPrint('updateIncidentProgressStep error: $e');
       return false;
@@ -423,6 +398,20 @@ class IncidentService {
       debugPrint('cancelIncident error: $e');
       return false;
     }
+  }
+
+  /// คืนชุด ID รถพยาบาลที่กำลังมีเคส active อยู่ (ยังไม่ resolved/cancelled) —
+  /// ใช้กันไม่ให้รถพยาบาลคันเดียวรับ 2 เคสพร้อมกันได้ ทั้งฝั่ง agency (auto-dispatch)
+  /// และฝั่งรถพยาบาลเอง (self-accept) เรียกจุดนี้จุดเดียว ไม่ต้องเปิด stream ใหม่
+  /// เพราะ local cache นี้ sync ตาม Firestore อยู่แล้วทุกครั้งที่มีการเปลี่ยนแปลง
+  Future<Set<String>> getBusyAmbulanceIds() async {
+    final list = await getLocalIncidents();
+    return list
+        .where((i) => i.status != 'resolved' && i.status != 'cancelled')
+        .map((i) => i.assignedAmbulanceId)
+        .whereType<String>()
+        .where((id) => id.isNotEmpty)
+        .toSet();
   }
 
   /// Get incidents from local cache

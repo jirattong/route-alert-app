@@ -28,11 +28,11 @@ class IncidentReport {
   final double? hospitalLatitude;
   final double? hospitalLongitude;
   final double? hospitalDistanceKm; // ระยะทางจากจุดเกิดเหตุถึง รพ. (กม.)
-  final String? patientCondition; // อาการคนไข้เบื้องต้น
-  final String? vitalSigns; // e.g. "BP: 120/80, HR: 88, SpO2: 98%"
-  final String? medicalNotes; // บันทึกการรักษาบนรถ
-  final bool callSessionActive; // กำลังคุยสายด่วนรายงานอาการกับ ER
   final DateTime createdAt;
+  // เก็บเข้าคลังแบบนุ่มนวล (soft-delete) จากเว็บ "Data" เครื่องมือแอดมิน —
+  // ต่างจากการลบถาวรจริง (deleteDoc) ตรงที่ยังอยู่ครบใน Firestore กู้คืนได้
+  // เสมอ แค่ซ่อนจาก heatmap/สถิติของฝั่ง agency เท่านั้น
+  final bool archived;
 
   IncidentReport({
     required this.id,
@@ -61,11 +61,8 @@ class IncidentReport {
     this.hospitalLatitude,
     this.hospitalLongitude,
     this.hospitalDistanceKm,
-    this.patientCondition,
-    this.vitalSigns,
-    this.medicalNotes,
-    this.callSessionActive = false,
     required this.createdAt,
+    this.archived = false,
   });
 
   bool get canBeCancelled => status == 'pending' && statusStep == 0;
@@ -140,11 +137,8 @@ class IncidentReport {
       'hospitalLatitude': hospitalLatitude,
       'hospitalLongitude': hospitalLongitude,
       'hospitalDistanceKm': hospitalDistanceKm,
-      'patientCondition': patientCondition,
-      'vitalSigns': vitalSigns,
-      'medicalNotes': medicalNotes,
-      'callSessionActive': callSessionActive,
       'createdAt': createdAt.toIso8601String(),
+      'archived': archived,
     };
   }
 
@@ -184,13 +178,10 @@ class IncidentReport {
       hospitalLatitude: (map['hospitalLatitude'] as num?)?.toDouble(),
       hospitalLongitude: (map['hospitalLongitude'] as num?)?.toDouble(),
       hospitalDistanceKm: (map['hospitalDistanceKm'] as num?)?.toDouble(),
-      patientCondition: map['patientCondition'],
-      vitalSigns: map['vitalSigns'],
-      medicalNotes: map['medicalNotes'],
-      callSessionActive: map['callSessionActive'] == true,
       createdAt: map['createdAt'] != null
           ? DateTime.tryParse(map['createdAt'].toString()) ?? DateTime.now()
           : DateTime.now(),
+      archived: map['archived'] == true,
     );
   }
 
@@ -225,11 +216,8 @@ class IncidentReport {
     double? hospitalLatitude,
     double? hospitalLongitude,
     double? hospitalDistanceKm,
-    String? patientCondition,
-    String? vitalSigns,
-    String? medicalNotes,
-    bool? callSessionActive,
     DateTime? createdAt,
+    bool? archived,
   }) {
     return IncidentReport(
       id: id ?? this.id,
@@ -260,11 +248,8 @@ class IncidentReport {
       hospitalLatitude: hospitalLatitude ?? this.hospitalLatitude,
       hospitalLongitude: hospitalLongitude ?? this.hospitalLongitude,
       hospitalDistanceKm: hospitalDistanceKm ?? this.hospitalDistanceKm,
-      patientCondition: patientCondition ?? this.patientCondition,
-      vitalSigns: vitalSigns ?? this.vitalSigns,
-      medicalNotes: medicalNotes ?? this.medicalNotes,
-      callSessionActive: callSessionActive ?? this.callSessionActive,
       createdAt: createdAt ?? this.createdAt,
+      archived: archived ?? this.archived,
     );
   }
 }

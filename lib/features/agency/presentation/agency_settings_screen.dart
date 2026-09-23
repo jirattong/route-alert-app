@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../core/services/agency_storage_service.dart';
+import '../../../core/services/theme_settings_service.dart';
 import '../../onboarding/presentation/onboarding_screen.dart';
 
 class AgencySettingsScreen extends StatefulWidget {
@@ -25,10 +26,29 @@ class _AgencySettingsScreenState extends State<AgencySettingsScreen> {
   bool _voiceAnnouncement = true; // เตือนด้วยเสียงพูด (TTS)
   bool _screenFlashAlert = true; // กะพริบหน้าจอ
 
+  // Dark mode — เดิมมีแค่ฝั่ง Driver ทั้งที่ ThemeSettingsService เป็น service
+  // กลางใช้ร่วมกันได้ทุก role อยู่แล้ว แค่ไม่มีหน้าไหนของ Agency/Ambulance อ่านค่า
+  // นี้ไปใช้เลย
+  bool _isNightMode = false;
+
   @override
   void initState() {
     super.initState();
     _loadSettings();
+    _isNightMode = ThemeSettingsService.isNightMode.value;
+    ThemeSettingsService.isNightMode.addListener(_onNightModeChanged);
+  }
+
+  @override
+  void dispose() {
+    ThemeSettingsService.isNightMode.removeListener(_onNightModeChanged);
+    super.dispose();
+  }
+
+  void _onNightModeChanged() {
+    if (mounted) {
+      setState(() => _isNightMode = ThemeSettingsService.isNightMode.value);
+    }
   }
 
   Future<void> _loadSettings() async {
@@ -58,8 +78,10 @@ class _AgencySettingsScreenState extends State<AgencySettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final bgColor = _isNightMode ? const Color(0xFF121212) : Colors.white;
+    final primaryTextColor = _isNightMode ? Colors.white : Colors.black87;
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: bgColor,
       body: SafeArea(
         child: Column(
           children: [
@@ -72,6 +94,15 @@ class _AgencySettingsScreenState extends State<AgencySettingsScreen> {
                 padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
                 child: Column(
                   children: [
+                    // การ์ด 0: โหมดกลางคืน (Dark Mode) — เดิมมีแค่ฝั่ง Driver
+                    _buildGreenSwitchCard(
+                      title: 'โหมดกลางคืน',
+                      subtitle: '(Dark Mode)',
+                      value: _isNightMode,
+                      onChanged: (val) => ThemeSettingsService.setNightMode(val),
+                    ),
+                    const SizedBox(height: 16),
+
                     // การ์ด 1: ทำงานเบื้องหลัง (Background)
                     _buildGreenSwitchCard(
                       title: 'ทำงานเบื้องหลัง',
@@ -125,17 +156,21 @@ class _AgencySettingsScreenState extends State<AgencySettingsScreen> {
                     ),
                     
                     const SizedBox(height: 32),
-                    const Divider(thickness: 1.5, color: Color(0xFFEEEEEE)),
+                    Divider(
+                        thickness: 1.5,
+                        color: _isNightMode
+                            ? Colors.white24
+                            : const Color(0xFFEEEEEE)),
                     const SizedBox(height: 20),
-                    
-                    const Align(
+
+                    Align(
                       alignment: Alignment.centerLeft,
                       child: Text(
                         'การตั้งค่าเฉพาะหน่วยงาน (ER / Dispatcher)',
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
-                          color: Colors.black87,
+                          color: primaryTextColor,
                         ),
                       ),
                     ),
@@ -293,7 +328,7 @@ class _AgencySettingsScreenState extends State<AgencySettingsScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: _isNightMode ? const Color(0xFF1E1E1E) : Colors.white,
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.06),
@@ -321,7 +356,11 @@ class _AgencySettingsScreenState extends State<AgencySettingsScreen> {
             ),
           ),
           const SizedBox(width: 12),
-          const Text('RouteAlert', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.black87)),
+          Text('RouteAlert',
+              style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: _isNightMode ? Colors.white : Colors.black87)),
         ],
       ),
     );
@@ -337,7 +376,7 @@ class _AgencySettingsScreenState extends State<AgencySettingsScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: _isNightMode ? const Color(0xFF1E1E1E) : Colors.white,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: const Color(0xFF69F0AE), width: 2), // ขอบสีเขียวสว่าง
         boxShadow: [
@@ -358,10 +397,10 @@ class _AgencySettingsScreenState extends State<AgencySettingsScreen> {
               children: [
                 Text(
                   title,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
-                    color: Colors.black87,
+                    color: _isNightMode ? Colors.white : Colors.black87,
                   ),
                 ),
                 const SizedBox(height: 2),
@@ -403,7 +442,7 @@ class _AgencySettingsScreenState extends State<AgencySettingsScreen> {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: _isNightMode ? const Color(0xFF1E1E1E) : Colors.white,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: const Color(0xFF69F0AE), width: 2),
         boxShadow: [
@@ -425,10 +464,10 @@ class _AgencySettingsScreenState extends State<AgencySettingsScreen> {
                 children: [
                   Text(
                     title,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
-                      color: Colors.black87,
+                      color: _isNightMode ? Colors.white : Colors.black87,
                     ),
                   ),
                   const SizedBox(width: 8),

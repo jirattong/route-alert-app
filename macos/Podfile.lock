@@ -1428,6 +1428,10 @@ PODS:
   - PromisesObjC (2.4.1)
   - PromisesSwift (2.4.1):
     - PromisesObjC (= 2.4.1)
+  - record_macos (2.0.0):
+    - FlutterMacOS
+  - rive_common (0.0.1):
+    - FlutterMacOS
   - shared_preferences_foundation (0.0.1):
     - Flutter
     - FlutterMacOS
@@ -1447,6 +1451,8 @@ DEPENDENCIES:
   - google_sign_in_ios (from `Flutter/ephemeral/.symlinks/plugins/google_sign_in_ios/darwin`)
   - just_audio (from `Flutter/ephemeral/.symlinks/plugins/just_audio/darwin`)
   - path_provider_foundation (from `Flutter/ephemeral/.symlinks/plugins/path_provider_foundation/darwin`)
+  - record_macos (from `Flutter/ephemeral/.symlinks/plugins/record_macos/macos`)
+  - rive_common (from `Flutter/ephemeral/.symlinks/plugins/rive_common/macos`)
   - shared_preferences_foundation (from `Flutter/ephemeral/.symlinks/plugins/shared_preferences_foundation/darwin`)
   - tflite_flutter (from `Flutter/ephemeral/.symlinks/plugins/tflite_flutter/macos`)
 
@@ -1502,6 +1508,10 @@ EXTERNAL SOURCES:
     :path: Flutter/ephemeral/.symlinks/plugins/just_audio/darwin
   path_provider_foundation:
     :path: Flutter/ephemeral/.symlinks/plugins/path_provider_foundation/darwin
+  record_macos:
+    :path: Flutter/ephemeral/.symlinks/plugins/record_macos/macos
+  rive_common:
+    :path: Flutter/ephemeral/.symlinks/plugins/rive_common/macos
   shared_preferences_foundation:
     :path: Flutter/ephemeral/.symlinks/plugins/shared_preferences_foundation/darwin
   tflite_flutter:
@@ -1544,6 +1554,8 @@ SPEC CHECKSUMS:
   path_provider_foundation: 080d55be775b7414fd5a5ef3ac137b97b097e564
   PromisesObjC: 752c3227f599e3467650e47ea36f433eeb10c273
   PromisesSwift: 217dea0fd5d2ad65222a109c48698add13cc1c5b
+  record_macos: 2e43c16b84ce188b8137754ee648322a2dcdf7fa
+  rive_common: ea79040f86acf053a2d5a75a2506175ee39796a5
   shared_preferences_foundation: 9e1978ff2562383bd5676f64ec4e9aa8fa06a6f7
   tflite_flutter: d1496f2e968aa5a142fb282da8f5d754fcee5613
 

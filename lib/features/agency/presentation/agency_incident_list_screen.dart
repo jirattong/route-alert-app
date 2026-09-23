@@ -17,6 +17,11 @@ class _AgencyIncidentListScreenState extends State<AgencyIncidentListScreen> {
   bool _criticalOnly = false;
   double _alertDistanceKm = 15.0;
 
+  // เคสที่ agency กด "ลบออกจากหน้าจอ" เอง (ซ่อนแค่ฝั่ง UI เครื่องนี้ ข้อมูลจริงยัง
+  // อยู่ครบใน Firestore) — โหลดจาก SharedPreferences ตอนเปิดหน้าเพื่อให้จำค่าไว้
+  // แม้ปิดแอปแล้วเปิดใหม่
+  Set<String> _dismissedIds = {};
+
   @override
   void initState() {
     super.initState();
@@ -24,6 +29,34 @@ class _AgencyIncidentListScreenState extends State<AgencyIncidentListScreen> {
     AgencyStorageService.loadSettings();
     _applySettings(AgencyStorageService.settingsNotifier.value);
     AgencyStorageService.settingsNotifier.addListener(_onSettingsChanged);
+    _loadDismissedIds();
+  }
+
+  Future<void> _loadDismissedIds() async {
+    final ids = await AgencyStorageService.loadDismissedIncidentIds();
+    if (mounted) setState(() => _dismissedIds = ids);
+  }
+
+  Future<void> _dismissIncident(IncidentReport item) async {
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
+    final next = {..._dismissedIds, item.id};
+    setState(() => _dismissedIds = next);
+    await AgencyStorageService.setDismissedIncidentIds(next);
+    scaffoldMessenger.showSnackBar(
+      SnackBar(
+        content: const Text('ซ่อนเคสนี้จากหน้าจอแล้ว (ข้อมูลยังเก็บไว้ในระบบครบ)'),
+        backgroundColor: Colors.grey.shade800,
+        action: SnackBarAction(
+          label: 'เลิกทำ',
+          textColor: Colors.white,
+          onPressed: () async {
+            final undo = {..._dismissedIds}..remove(item.id);
+            setState(() => _dismissedIds = undo);
+            await AgencyStorageService.setDismissedIncidentIds(undo);
+          },
+        ),
+      ),
+    );
   }
 
   @override
@@ -76,8 +109,16 @@ class _AgencyIncidentListScreenState extends State<AgencyIncidentListScreen> {
                   }
 
                   final rawList = snapshot.data ?? [];
-                  final activeList =
-                      rawList.where((i) => i.status != 'cancelled').toList();
+                  // เดิมกรองแค่ cancelled ทำให้เคสที่ resolved (นำส่งถึง รพ. แล้ว)
+                  // ยังค้างโชว์อยู่ในลิสต์นี้ตลอด ทั้งที่ทุกอย่างเสร็จสิ้นแล้ว —
+                  // เพิ่มกรอง resolved ออกด้วย และเพิ่มกรองเคสที่ agency กดลบออกจาก
+                  // หน้าจอเองผ่าน _dismissedIds (ข้อมูลจริงยังอยู่ครบใน Firestore)
+                  final activeList = rawList
+                      .where((i) =>
+                          i.status != 'cancelled' &&
+                          i.status != 'resolved' &&
+                          !_dismissedIds.contains(i.id))
+                      .toList();
 
                   // กรองตามการตั้งค่าจริงของหน่วยงาน (เดิมตั้งค่า criticalOnly /
                   // alertDistanceKm ไม่มีผลกับรายการนี้เลย):
@@ -209,7 +250,24 @@ class _AgencyIncidentListScreenState extends State<AgencyIncidentListScreen> {
                   height: 42,
                   child: ElevatedButton(
                     onPressed: () async {
-                      await IncidentService().setErPrepared(item.id, !isPrepared);
+                      final newValue = !isPrepared;
+                      final scaffoldMessenger = ScaffoldMessenger.of(context);
+                      final ok =
+                          await IncidentService().setErPrepared(item.id, newValue);
+                      scaffoldMessenger.showSnackBar(
+                        SnackBar(
+                          content: Text(!ok
+                              ? '⚠️ บันทึกไม่สำเร็จ เช็คสัญญาณอินเทอร์เน็ตแล้วลองใหม่'
+                              : newValue
+                                  ? '✅ ยืนยันเตียง ER เรียบร้อยแล้ว'
+                                  : 'ยกเลิกการยืนยันเตียง ER แล้ว'),
+                          backgroundColor: !ok
+                              ? const Color(0xFFDC2626)
+                              : newValue
+                                  ? const Color(0xFF00A896)
+                                  : Colors.grey.shade700,
+                        ),
+                      );
                     },
                     style: ElevatedButton.styleFrom(
                       backgroundColor: isPrepared ? Colors.grey.shade300 : const Color(0xFF69F0AE),
@@ -246,6 +304,22 @@ class _AgencyIncidentListScreenState extends State<AgencyIncidentListScreen> {
                 );
               },
               child: const Icon(Icons.chevron_right_rounded, color: Colors.black54, size: 36),
+            ),
+          ),
+
+          // ปุ่มลบเคสนี้ออกจากหน้าจอ (ซ่อนแค่ฝั่งนี้ ข้อมูลใน database ไม่หาย) —
+          // ตอบโจทย์เคสที่ agency ต้องการเคลียร์การ์ดที่ไม่อยากเห็นแล้วออกจากลิสต์เอง
+          Positioned(
+            right: 0,
+            top: -4,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(20),
+              onTap: () => _dismissIncident(item),
+              child: Padding(
+                padding: const EdgeInsets.all(6),
+                child: Icon(Icons.close_rounded,
+                    color: Colors.grey.shade400, size: 20),
+              ),
             ),
           ),
         ],

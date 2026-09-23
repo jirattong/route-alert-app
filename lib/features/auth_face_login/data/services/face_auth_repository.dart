@@ -5,6 +5,7 @@ import 'package:crypto/crypto.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../core/ml/face_recognition_service.dart';
+import '../../../../core/services/onboarding_service.dart';
 import '../models/user_face_profile.dart';
 
 class FaceAuthMatchResult {
@@ -498,9 +499,16 @@ class FaceAuthRepository {
     return _hashPassword(inputPassword, salt) == expectedHash;
   }
 
-  /// Logs out current user
+  /// Logs out current user — ล้างสถานะ "เคยดู Onboarding แล้ว" ของ role ผู้ใช้
+  /// คนนี้ไปด้วย (ดู [OnboardingService.clearOnboardingSeen]) เพื่อให้ login ใหม่
+  /// ครั้งถัดไปเห็น Onboarding อีกครั้งเสมอ ตามที่ตั้งใจไว้ (แค่ปิดแอปเฉยๆ ไม่ logout
+  /// จะไม่ล้าง เพราะ session ยังอยู่ ไม่ควรโชว์ซ้ำ)
   static Future<void> logout() async {
     final prefs = await SharedPreferences.getInstance();
+    final current = await getCurrentUser();
     await prefs.remove(_currentUserKey);
+    if (current != null) {
+      await OnboardingService.clearOnboardingSeen(current.role);
+    }
   }
 }

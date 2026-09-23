@@ -10,6 +10,7 @@ class AgencyStorageService {
   static const String _keyCriticalOnly = 'agency_critical_only';
   static const String _keyVoiceAnnouncement = 'agency_voice_announcement';
   static const String _keyScreenFlashAlert = 'agency_screen_flash_alert';
+  static const String _keyDismissedIncidentIds = 'agency_dismissed_incident_ids';
 
   static final ValueNotifier<Map<String, dynamic>> settingsNotifier =
       ValueNotifier<Map<String, dynamic>>({
@@ -59,5 +60,19 @@ class AgencyStorageService {
     };
     settingsNotifier.value = settings;
     return settings;
+  }
+
+  /// เคสที่ Agency กด "ลบออกจากหน้าจอ" ด้วยตัวเอง (เก็บแค่ id ไว้ในเครื่อง ไม่แตะ
+  /// ข้อมูลใน Firestore เลย) — สำหรับซ่อนเคสที่ยังไม่ resolved ออกจากรายการเมื่อ
+  /// agency ไม่ต้องการเห็นแล้ว ข้อมูลจริงยังอยู่ครบใน database เผื่อใช้กับ heatmap/
+  /// เว็บดูข้อมูลย้อนหลังในอนาคต
+  static Future<Set<String>> loadDismissedIncidentIds() async {
+    final prefs = await SharedPreferences.getInstance();
+    return (prefs.getStringList(_keyDismissedIncidentIds) ?? const []).toSet();
+  }
+
+  static Future<void> setDismissedIncidentIds(Set<String> ids) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_keyDismissedIncidentIds, ids.toList());
   }
 }

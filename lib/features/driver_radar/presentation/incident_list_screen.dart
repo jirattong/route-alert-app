@@ -199,13 +199,21 @@ class _IncidentListScreenState extends State<IncidentListScreen> {
                       }
 
                       final allList = snapshot.data ?? [];
-                      // กรองเคสที่ถูกยกเลิก (cancelled) ออก ไม่ให้ขึ้นมากวนใจ
+                      // กรองเคสที่ถูกยกเลิก (cancelled) หรือจบแล้ว (resolved — ส่งถึง
+                      // รพ. แล้ว) ออก ไม่ให้ขึ้นมากวนใจ — ข้อมูลยังอยู่ใน Firestore
+                      // ตามเดิมสำหรับใช้งานในอนาคต (เช่นเว็บดูสถิติ) แค่ไม่โชว์ในนี้
                       final filtered = allList.where((item) {
-                        if (item.status == 'cancelled') return false;
+                        if (item.status == 'cancelled' ||
+                            item.status == 'resolved') {
+                          return false;
+                        }
 
                         if (_selectedTab == 1) {
-                          // My SOS reports
-                          return true;
+                          // My SOS reports — เดิม return true ตรงๆ ทำให้เห็นเคส
+                          // ของผู้ใช้อื่นทุกคนด้วย (บั๊ก: สลับบัญชีในเครื่องเดียวกัน
+                          // แล้วยังเห็นเคสของบัญชีก่อนหน้า) ต้องกรองด้วยอีเมลจริง
+                          // เหมือนแท็บอื่นด้านล่าง
+                          return item.reporterEmail == _currentUserEmail;
                         } else {
                           // เคสที่ผู้ใช้แจ้งเอง จะแสดงเสมอไม่ถูกซ่อนตามรัศมี
                           final isMyReport =

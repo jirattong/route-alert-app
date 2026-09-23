@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -9,6 +8,7 @@ import '../../../core/models/incident_report.dart';
 import '../../../core/services/ambulance_storage_service.dart';
 import '../../../core/services/incident_service.dart';
 import '../../../core/services/location_service.dart';
+import '../../../core/widgets/status_confirm_dialog.dart';
 
 class AmbulanceIncidentDetailScreen extends StatefulWidget {
   final IncidentReport? incident;
@@ -124,6 +124,13 @@ class _AmbulanceIncidentDetailScreenState
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('📸 บันทึกรูปภาพหน้างานส่งไปยังห้อง ER เรียบร้อยแล้ว')),
         );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('⚠️ ส่งรูปไม่สำเร็จ (เช็คสัญญาณอินเทอร์เน็ต) กรุณาลองถ่ายใหม่'),
+            backgroundColor: Color(0xFFDC2626),
+          ),
+        );
       }
     } catch (e) {
       if (!mounted) return;
@@ -133,7 +140,9 @@ class _AmbulanceIncidentDetailScreenState
     }
   }
 
-  // ⏳ หน้าต่างยืนยันเปลี่ยนสถานะ พร้อมคูลดาวน์นับถอยหลัง 3 วินาที
+  // ⏳ หน้าต่างยืนยันเปลี่ยนสถานะ พร้อมคูลดาวน์นับถอยหลัง — ดึงกล่องยืนยันออกไปเป็น
+  // ฟังก์ชันกลาง (showStatusConfirmDialog) ใช้ร่วมกับปุ่มอัปเดตด่วนบนหน้าหลักด้วย
+  // (ambulance_home_screen.dart) แทนเขียนโค้ด Dialog+Timer ซ้ำสองที่
   void _showNextStatusConfirmDialog() {
     if (_currentStep >= _statusSteps.length - 1) return;
     // Defense-in-depth: กันเรียกฟังก์ชันนี้ตรงๆ ข้ามการเช็คที่ปุ่มด้านนอก
@@ -143,165 +152,43 @@ class _AmbulanceIncidentDetailScreenState
     }
 
     final nextStepInfo = _statusSteps[_currentStep + 1];
-    int cooldownSec = 3;
 
-    showDialog(
+    showStatusConfirmDialog(
       context: context,
-      barrierDismissible: false,
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            Timer? timer;
-            if (cooldownSec > 0) {
-              timer = Timer.periodic(const Duration(seconds: 1), (t) {
-                if (cooldownSec > 0) {
-                  setModalState(() {
-                    cooldownSec--;
-                  });
-                } else {
-                  t.cancel();
-                }
-              });
-            }
+      nextTitle: nextStepInfo['title']!,
+      nextDesc: nextStepInfo['desc']!,
+      onConfirmed: () async {
+        final previousStep = _currentStep;
+        final newStep = _currentStep + 1;
+        setState(() => _currentStep = newStep);
 
-            return Dialog(
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(28),
-                side: const BorderSide(color: Color(0xFFEB5757), width: 2),
-              ),
-              backgroundColor: Colors.white,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: const BoxDecoration(
-                        color: Color(0xFFFFEAEA),
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(
-                        Icons.published_with_changes_rounded,
-                        size: 44,
-                        color: Color(0xFFEB5757),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    const Text(
-                      'ยืนยันเปลี่ยนสถานะ ?',
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.black87,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'เปลี่ยนเป็น: "${nextStepInfo['title']}"',
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFFEB5757),
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '(${nextStepInfo['desc']})',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: Colors.grey.shade600,
-                      ),
-                    ),
-                    const SizedBox(height: 24),
+        final scaffoldMessenger = ScaffoldMessenger.of(context);
+        final caseId = widget.incident?.id ?? widget.incidentData?['id'] ?? '';
+        bool ok = caseId.isNotEmpty;
+        if (caseId.isNotEmpty) {
+          ok = await IncidentService().updateIncidentProgressStep(
+            id: caseId,
+            step: newStep,
+            status: _statusSteps[newStep]['status']!,
+          );
+        }
 
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: () {
-                              timer?.cancel();
-                              Navigator.pop(ctx);
-                            },
-                            style: OutlinedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                              side: BorderSide(color: Colors.grey.shade400),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(20),
-                              ),
-                            ),
-                            child: Text(
-                              'ยกเลิก',
-                              style: TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.grey.shade700,
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: ElevatedButton(
-                            onPressed: cooldownSec == 0
-                                ? () async {
-                                    timer?.cancel();
-                                    Navigator.pop(ctx);
-                                    final newStep = _currentStep + 1;
-                                    setState(() {
-                                      _currentStep = newStep;
-                                    });
+        if (!mounted) return;
+        if (!ok) {
+          // Firestore ไม่ยอมรับการอัปเดต — ย้อนสถานะกลับ ไม่งั้นหน้าจอเครื่องนี้
+          // จะค้างว่า "ถึงจุดเกิดเหตุแล้ว" ทั้งที่ agency/driver ไม่เห็นการเปลี่ยนแปลง
+          // นี้เลยสักนิดเดียว (สื่อสารผ่าน Firestore เท่านั้น)
+          setState(() => _currentStep = previousStep);
+        }
 
-                                    final scaffoldMessenger = ScaffoldMessenger.of(context);
-                                    final caseId = widget.incident?.id ?? widget.incidentData?['id'] ?? '';
-                                    if (caseId.isNotEmpty) {
-                                      await IncidentService().updateIncidentProgressStep(
-                                        id: caseId,
-                                        step: newStep,
-                                        status: _statusSteps[newStep]['status']!,
-                                      );
-                                    }
-
-                                    scaffoldMessenger.showSnackBar(
-                                      SnackBar(
-                                        content: Text(
-                                            'อัปเดตสถานะเป็น "${_statusSteps[_currentStep]['title']}" เรียบร้อยแล้ว'),
-                                        backgroundColor: const Color(0xFFEB5757),
-                                      ),
-                                    );
-                                  }
-                                : null,
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFFEB5757),
-                              disabledBackgroundColor: Colors.grey.shade300,
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(20),
-                              ),
-                            ),
-                            child: Text(
-                              cooldownSec > 0
-                                  ? 'รอ ($cooldownSec วิ)'
-                                  : 'ยืนยันอัปเดต',
-                              style: TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.bold,
-                                color: cooldownSec > 0
-                                    ? Colors.grey.shade600
-                                    : Colors.white,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
+        scaffoldMessenger.showSnackBar(
+          SnackBar(
+            content: Text(!ok
+                ? '⚠️ อัปเดตสถานะไม่สำเร็จ (เช็คสัญญาณอินเทอร์เน็ต) กรุณาลองใหม่'
+                : 'อัปเดตสถานะเป็น "${_statusSteps[newStep]['title']}" เรียบร้อยแล้ว'),
+            backgroundColor:
+                !ok ? const Color(0xFFDC2626) : const Color(0xFFEB5757),
+          ),
         );
       },
     );
