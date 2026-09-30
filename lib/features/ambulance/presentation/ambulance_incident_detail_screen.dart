@@ -9,6 +9,7 @@ import '../../../core/services/ambulance_storage_service.dart';
 import '../../../core/services/incident_service.dart';
 import '../../../core/services/location_service.dart';
 import '../../../core/widgets/status_confirm_dialog.dart';
+import 'ambulance_case_actions.dart';
 
 class AmbulanceIncidentDetailScreen extends StatefulWidget {
   final IncidentReport? incident;
@@ -49,7 +50,9 @@ class _AmbulanceIncidentDetailScreenState
     // (ปลอดภัยกว่า) แทนการสมมติเอาเองว่าเป็นเคสของตัวเอง (bypass การ์ดป้องกัน)
     if (incident == null) return false;
     if (_ownAmbulanceId == null) return false; // ยังโหลดรหัสหน่วยตัวเองไม่เสร็จ
-    return incident.assignedAmbulanceId == _ownAmbulanceId;
+    // รถคันเดียวกัน (ทะเบียนเดียวกัน) แต่คนละบัญชี ก็เลื่อนสถานะได้
+    return incident.hasUnit(_ownAmbulanceId,
+        plate: AmbulanceStorageService.profileNotifier.value['plateNumber']);
   }
 
   // ลำดับขั้นตอนการปฏิบัติงาน (Forward-Only State)
@@ -70,6 +73,21 @@ class _AmbulanceIncidentDetailScreenState
     _photoList = List<String>.from(widget.incident?.scenePhotosBase64 ?? const []);
     _loadOwnAmbulanceId();
     _loadRealLocation();
+    AmbulanceStorageService.profileNotifier.addListener(_onProfileChanged);
+  }
+
+  @override
+  void dispose() {
+    AmbulanceStorageService.profileNotifier.removeListener(_onProfileChanged);
+    super.dispose();
+  }
+
+  // รหัสหน่วยอาจถูกเปลี่ยนเป็นของบัญชีหลังล็อกอิน (ล็อกอินบัญชีเดิมจากเครื่องใหม่)
+  void _onProfileChanged() {
+    final id = AmbulanceStorageService.profileNotifier.value['ambulanceId'] ?? '';
+    if (mounted && id.isNotEmpty && id != _ownAmbulanceId) {
+      setState(() => _ownAmbulanceId = id);
+    }
   }
 
   Future<void> _loadOwnAmbulanceId() async {
@@ -164,14 +182,16 @@ class _AmbulanceIncidentDetailScreenState
 
         final scaffoldMessenger = ScaffoldMessenger.of(context);
         final caseId = widget.incident?.id ?? widget.incidentData?['id'] ?? '';
-        bool ok = caseId.isNotEmpty;
+        String? problem = caseId.isEmpty ? 'ไม่พบรหัสเคส' : null;
         if (caseId.isNotEmpty) {
-          ok = await IncidentService().updateIncidentProgressStep(
-            id: caseId,
-            step: newStep,
-            status: _statusSteps[newStep]['status']!,
+          problem = AmbulanceCaseActions.progressProblem(
+            await IncidentService().advanceIncidentStatus(
+              id: caseId,
+              status: _statusSteps[newStep]['status']!,
+            ),
           );
         }
+        final ok = problem == null;
 
         if (!mounted) return;
         if (!ok) {
@@ -184,7 +204,7 @@ class _AmbulanceIncidentDetailScreenState
         scaffoldMessenger.showSnackBar(
           SnackBar(
             content: Text(!ok
-                ? '⚠️ อัปเดตสถานะไม่สำเร็จ (เช็คสัญญาณอินเทอร์เน็ต) กรุณาลองใหม่'
+                ? problem
                 : 'อัปเดตสถานะเป็น "${_statusSteps[newStep]['title']}" เรียบร้อยแล้ว'),
             backgroundColor:
                 !ok ? const Color(0xFFDC2626) : const Color(0xFFEB5757),
@@ -337,6 +357,15 @@ class _AmbulanceIncidentDetailScreenState
                             valueColor: const Color(0xFFEB5757),
                             isBold: true,
                           ),
+                          if (widget.incident != null)
+                            _buildDetailRow(
+                              labelTH: 'รถที่กำลังดำเนินเคส',
+                              labelEN: '(Vehicles on case)',
+                              value: widget.incident!.vehicleCount == 0
+                                  ? 'ยังไม่มีรถรับเคส'
+                                  : '${widget.incident!.vehicleCount} คัน · ${widget.incident!.vehiclesLabel}',
+                              isBold: true,
+                            ),
                           _buildDetailRow(
                             labelTH: 'ประเภทอุบัติเหตุ',
                             labelEN: '(Type of incident)',

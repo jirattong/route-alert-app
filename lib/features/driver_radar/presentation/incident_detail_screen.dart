@@ -6,12 +6,39 @@ import '../../../core/models/incident_report.dart';
 import '../../../core/services/incident_service.dart';
 import 'driver_main_screen.dart';
 
+/// หน้าติดตามสถานะเคส — อัปเดตสดจาก Firestore (เดิมแสดงข้อมูล ณ ตอนเปิดหน้าเท่านั้น
+/// สถานะไม่ขยับจนกว่าจะออกแล้วเข้าใหม่)
 class IncidentDetailScreen extends StatelessWidget {
   final IncidentReport? incident;
   final Map<String, dynamic>? incidentData;
 
   const IncidentDetailScreen({
     super.key,
+    this.incident,
+    this.incidentData,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final initial = incident;
+    if (initial == null) {
+      return _IncidentDetailBody(incident: null, incidentData: incidentData);
+    }
+    return StreamBuilder<List<IncidentReport>>(
+      stream: IncidentService().incidentsStream,
+      builder: (context, snapshot) {
+        final latest = snapshot.data?.where((i) => i.id == initial.id).firstOrNull;
+        return _IncidentDetailBody(incident: latest ?? initial, incidentData: incidentData);
+      },
+    );
+  }
+}
+
+class _IncidentDetailBody extends StatelessWidget {
+  final IncidentReport? incident;
+  final Map<String, dynamic>? incidentData;
+
+  const _IncidentDetailBody({
     this.incident,
     this.incidentData,
   });
@@ -134,7 +161,7 @@ class IncidentDetailScreen extends StatelessWidget {
                             } else {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
-                                  content: Text('⚠️ ไม่สามารถยกเลิกได้ เนื่องจากรถพยาบาลกำลังออกปฏิบัติการแล้ว'),
+                                  content: Text('⚠️ ยกเลิกไม่ได้ — มีรถพยาบาลรับเคสแล้ว หรือเชื่อมต่ออินเทอร์เน็ตไม่ได้'),
                                   backgroundColor: Color(0xFFDC2626),
                                 ),
                               );
@@ -175,7 +202,12 @@ class IncidentDetailScreen extends StatelessWidget {
     final List<String> photosBase64 = (incident?.photosBase64.isNotEmpty ?? false)
         ? incident!.photosBase64
         : (photoBase64 != null && photoBase64.isNotEmpty ? [photoBase64] : []);
-    final String carPlate = incident?.assignedAmbulancePlate ?? incidentData?['carPlate'] ?? 'รอศูนย์จ่ายงาน';
+    final live = incident;
+    final String carPlate = live != null && live.vehicleCount > 0
+        ? (live.vehicleCount > 1
+            ? '${live.vehicleCount} คัน · ${live.vehiclesLabel}'
+            : live.vehiclesLabel)
+        : (incidentData?['carPlate'] ?? 'รอศูนย์จ่ายงาน');
     final bool canCancel = incident?.canBeCancelled ?? false;
     final bool isCancelled = incident?.status == 'cancelled';
 

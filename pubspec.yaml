@@ -44,6 +44,10 @@ dependencies:
   # --- MQTT & Background Notification ---
   mqtt_client: ^10.2.0 # รับส่งข้อมูลเรียลไทม์
   flutter_local_notifications: ^17.0.0 # ยิงแจ้งเตือนด่วน
+  # แจ้งเตือนแบบ push จริง (ทำงานแม้แอปถูกปิดสนิทแล้ว) — เดิมไม่มี package นี้
+  # เลย มีแค่ flutter_local_notifications ซึ่งทำงานได้แค่ตอนแอปยังรันอยู่เท่านั้น
+  # ต้องคู่กับ Cloud Function ฝั่งเซิร์ฟเวอร์ (ดู functions/) เป็นตัวยิง push เข้ามา
+  firebase_messaging: ^15.1.3
 
   # --- Camera for Face Login ---
   camera: ^0.10.5+9 # เปิดกล้องสแกนใบหน้า
@@ -71,6 +75,9 @@ dev_dependencies:
 
   flutter_lints: ^3.0.0
   flutter_launcher_icons: ^0.14.3
+  # Firestore จำลองในหน่วยความจำ ใช้ทดสอบ IncidentService หลายผู้ใช้พร้อมกัน
+  # (3.x คู่กับ cloud_firestore 5.x — 4.x ต้องใช้ cloud_firestore 6)
+  fake_cloud_firestore: ^3.1.0
 
 flutter_launcher_icons:
   android: true

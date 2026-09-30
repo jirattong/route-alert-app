@@ -30,12 +30,30 @@ class _AgencyProfileScreenState extends State<AgencyProfileScreen> {
   StreamSubscription<List<IncidentReport>>? _incidentSub;
   StreamSubscription<HospitalProfile>? _hospitalSub;
 
+  // โรงพยาบาลของบัญชี agency ที่ล็อกอินอยู่ (เพิ่มตอนทำ multi-hospital) — null
+  // หมายถึงบัญชีเก่าที่ยังไม่มี hospitalId จะไม่กรองสถิติอะไรเลย (เห็นเหมือนเดิม)
+  String? _myHospitalId;
+
   @override
   void initState() {
     super.initState();
-    _loadUserData();
+    _initProfileScreen();
+  }
+
+  // ต้องรู้ hospitalId ของบัญชีที่ล็อกอินอยู่ก่อน ถึงจะโหลดสถิติ/โปรไฟล์
+  // โรงพยาบาลได้อย่างถูกต้อง — เดิมสามฟังก์ชันนี้เรียกพร้อมกันหมดตอน initState()
+  // แข่งกันเอง (เจอระหว่างแก้ไขรอบ multi-hospital) เรียงลำดับให้ชัดเจนแทน และ
+  // reuse _currentUser จาก _loadUserData() แทนที่จะดึงซ้ำ
+  Future<void> _initProfileScreen() async {
+    await _loadUserData();
+    _myHospitalId = _currentUser?.hospitalId;
     _loadIncidentStats();
     _loadHospitalProfile();
+  }
+
+  List<IncidentReport> _filterByMyHospital(List<IncidentReport> list) {
+    if (_myHospitalId == null) return list;
+    return list.where((i) => i.targetHospitalId == _myHospitalId).toList();
   }
 
   @override
@@ -48,7 +66,9 @@ class _AgencyProfileScreenState extends State<AgencyProfileScreen> {
   // โหลดข้อมูลหน่วยงาน/สถานะ ER จริงจาก HospitalLocationService (เดิม _isErAvailable
   // และ _hospitalName เป็นแค่ local state ที่ไม่เชื่อมกับ service จริงเลย)
   Future<void> _loadHospitalProfile() async {
-    await HospitalLocationService().initialize();
+    // เดิมเรียก initialize() ไม่ส่ง hospitalId เลย ได้ HOSP-01 เสมอไม่ว่าบัญชี
+    // agency ไหนจะล็อกอินอยู่ (เจอตอนวางแผน multi-hospital)
+    await HospitalLocationService().initialize(hospitalId: _myHospitalId);
     final profile = HospitalLocationService().currentProfile;
     if (mounted) {
       setState(() {
@@ -72,11 +92,13 @@ class _AgencyProfileScreenState extends State<AgencyProfileScreen> {
   // คำนวณสถิติจริงจากเคสในระบบ (เดิมเป็นเลข 154/92%/34 hardcode คงที่)
   Future<void> _loadIncidentStats() async {
     await IncidentService().initialize();
-    final initial = await IncidentService().getLocalIncidents();
+    // เดิมคำนวณสถิติจากเคสทุกโรงพยาบาลในระบบรวมกัน ไม่ใช่แค่ของโรงพยาบาลนี้
+    // (เจอตอนวางแผน multi-hospital)
+    final initial = _filterByMyHospital(await IncidentService().getLocalIncidents());
     if (mounted) _computeStats(initial);
 
     _incidentSub = IncidentService().incidentsStream.listen((list) {
-      if (mounted) _computeStats(list);
+      if (mounted) _computeStats(_filterByMyHospital(list));
     });
   }
 

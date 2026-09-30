@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import '../../../core/services/push_notification_service.dart';
 import '../../../core/utils/role_screen_resolver.dart';
 import '../../../core/utils/slide_from_right_route.dart';
 import '../data/models/user_face_profile.dart';
@@ -60,6 +63,14 @@ class _AppLoadingScreenState extends State<AppLoadingScreen>
     final destination = existingUser != null
         ? roleHomeScreenFor(existingUser.role)
         : const FaceLoginScreen();
+
+    // มี session ค้างอยู่ (cold-start ที่เคยล็อกอินไว้แล้ว) — ลงทะเบียน push
+    // notification ให้บัญชีนี้ทันที ไม่ต้องรอเปิดหน้าจอ role เฉพาะก่อน (เพิ่ม
+    // ตอนทำระบบแจ้งเตือนเบื้องหลัง) ไม่ await เพราะไม่ควรบล็อกการนำทางไปหน้า
+    // หลักรอผลขอสิทธิ์ notification
+    if (existingUser != null) {
+      unawaited(PushNotificationService().initialize(existingUser.email));
+    }
 
     Navigator.pushReplacement(context, slideFromRightRoute(destination));
   }

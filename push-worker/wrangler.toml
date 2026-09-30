@@ -1,0 +1,6 @@
+name = "route-alert-push"
+main = "src/index.js"
+compatibility_date = "2025-09-01"
+
+# service account ของ Firebase เก็บเป็น secret (ไม่อยู่ในไฟล์นี้):
+#   npx wrangler secret put FIREBASE_SERVICE_ACCOUNT

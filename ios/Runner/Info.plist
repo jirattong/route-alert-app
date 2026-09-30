@@ -49,6 +49,8 @@
 	<string>แอปต้องการเข้าถึงไมโครโฟนเพื่อตรวจจับเสียงไซเรนรถพยาบาลใกล้เคียง (ประมวลผลในเครื่องเท่านั้น ไม่มีการบันทึกหรือส่งเสียงออกจากอุปกรณ์)</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>RouteAlert requires photo library access to upload driver profile pictures and incident evidence.</string>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

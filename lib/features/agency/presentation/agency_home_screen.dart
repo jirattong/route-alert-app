@@ -5,11 +5,13 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:tutorial_coach_mark/tutorial_coach_mark.dart';
 import '../../../core/models/incident_report.dart';
+import '../../../core/widgets/my_location_button.dart';
 import '../../../core/services/agency_storage_service.dart';
 import '../../../core/services/emergency_mqtt_service.dart';
 import '../../../core/services/hospital_location_service.dart';
 import '../../../core/services/incident_service.dart';
 import '../../../core/services/voice_alert_service.dart';
+import '../../auth_face_login/data/services/face_auth_repository.dart';
 import 'agency_incident_detail_screen.dart';
 
 class AgencyHomeScreen extends StatefulWidget {
@@ -37,6 +39,13 @@ class _AgencyHomeScreenState extends State<AgencyHomeScreen>
   // Real-time Incidents list from Driver SOS
   List<IncidentReport> _incidents = [];
   bool _showHotspotHeatmap = false;
+
+  // โรงพยาบาลของบัญชี agency ที่ล็อกอินอยู่ (เพิ่มตอนทำ multi-hospital) — เดิม
+  // ทุกบัญชี agency ใช้ HospitalLocationService profile เดียวกันหมด (HOSP-01)
+  // เห็นเคสทุกเคสในระบบไม่ว่าจะเป็นของโรงพยาบาลไหน — null หมายถึงบัญชีเก่าที่
+  // สมัครไว้ก่อนมีฟีเจอร์นี้ (ยังไม่มี hospitalId) จะไม่กรองอะไรเลย (เห็นเหมือน
+  // เดิมทุกประการ) กันบัญชีเก่าอยู่ๆ ไม่เห็นเคสไหนเลย
+  String? _myHospitalId;
 
   // เคสที่ผู้ใช้กดปิดแบนเนอร์แจ้งเตือนไปแล้ว (ไม่ลบเคสออกจากระบบ แค่ไม่โผล่
   // แบนเนอร์เด่นซ้ำอีก ยังกดเข้าไปจัดการจากรายการเคสได้ตามปกติเสมอ — กันไม่ให้
@@ -70,12 +79,23 @@ class _AgencyHomeScreenState extends State<AgencyHomeScreen>
       duration: const Duration(milliseconds: 900),
     );
 
-    _initHospitalProfile();
-    _initLiveMqttFleet();
-    _initIncidentStream();
+    _initAgencyContext();
     // ส่งฟังก์ชันเปิด Coach Mark ขึ้นไปให้ AgencyMainScreen เก็บไว้ — ไม่โชว์เองอัตโนมัติ
     // อีกต่อไป (ย้ายไปเป็นปุ่ม "สอนการใช้งานปุ่มต่างๆ" ในหน้าตั้งค่าแทน ตามที่ผู้ใช้ขอ)
     widget.onCoachMarkReady?.call(_showCoachMark);
+  }
+
+  // ต้องรู้ hospitalId ของบัญชีที่ล็อกอินอยู่ก่อน ถึงจะเริ่ม _initHospitalProfile()/
+  // _initIncidentStream() ได้อย่างถูกต้อง — เดิมสามฟังก์ชันนี้เรียกพร้อมกันหมด
+  // ตอน initState() (แข่งกันเอง) ทำให้ _initIncidentStream() อาจกรองเคสด้วย
+  // _myHospitalId ที่ยังเป็น null อยู่ (ยังโหลดไม่เสร็จ) ได้แบบสุ่มๆ ไม่คงที่
+  // (เจอระหว่างแก้ไขรอบ multi-hospital) — เรียงลำดับให้ชัดเจนแทน
+  Future<void> _initAgencyContext() async {
+    final currentUser = await FaceAuthRepository.getCurrentUser();
+    _myHospitalId = currentUser?.hospitalId;
+    _initHospitalProfile();
+    _initLiveMqttFleet();
+    _initIncidentStream();
   }
 
   // แสดงคำแนะนำปุ่มแบบชี้ตำแหน่งจริง (Coach Mark) — เรียกได้ตลอดเวลาจากปุ่ม
@@ -145,7 +165,11 @@ class _AgencyHomeScreenState extends State<AgencyHomeScreen>
   }
 
   void _initHospitalProfile() async {
-    await HospitalLocationService().initialize();
+    // เดิมเรียก initialize() ไม่ส่ง hospitalId เลย ได้ HOSP-01 เสมอไม่ว่าบัญชี
+    // agency ไหนจะล็อกอินอยู่ — ตอนนี้ผูกกับ hospitalId จริงของบัญชีที่ล็อกอิน
+    // อยู่แทน (_myHospitalId ถูก set ไว้แล้วจาก _initAgencyContext() ก่อนเรียก
+    // ฟังก์ชันนี้เสมอ)
+    await HospitalLocationService().initialize(hospitalId: _myHospitalId);
     _profileSub = HospitalLocationService().profileStream.listen((profile) {
       if (!mounted) return;
       setState(() {
@@ -155,9 +179,16 @@ class _AgencyHomeScreenState extends State<AgencyHomeScreen>
     });
   }
 
+  // บัญชีเก่าที่ยังไม่มี hospitalId (สมัครไว้ก่อนมี multi-hospital) จะไม่กรอง
+  // อะไรเลย เห็นเหมือนเดิมทุกประการ — กันบัญชีเก่าอยู่ๆ ไม่เห็นเคสไหนเลย
+  List<IncidentReport> _filterByMyHospital(List<IncidentReport> list) {
+    if (_myHospitalId == null) return list;
+    return list.where((i) => i.targetHospitalId == _myHospitalId).toList();
+  }
+
   void _initIncidentStream() async {
     await IncidentService().initialize();
-    final initial = await IncidentService().getLocalIncidents();
+    final initial = _filterByMyHospital(await IncidentService().getLocalIncidents());
     // เคสที่มีอยู่แล้วตอนเปิดหน้าครั้งแรกไม่นับเป็น "เคสใหม่" (ไม่งั้นเปิดแอปทีไร
     // จะโดนแจ้งเตือนเสียง/กะพริบจอทุกเคสเก่าที่ค้างอยู่ในระบบทันที)
     _knownIncidentIds = initial.map((i) => i.id).toSet();
@@ -165,8 +196,9 @@ class _AgencyHomeScreenState extends State<AgencyHomeScreen>
     if (mounted) {
       setState(() => _incidents = initial);
     }
-    _incidentSub = IncidentService().incidentsStream.listen((list) {
+    _incidentSub = IncidentService().incidentsStream.listen((rawList) {
       if (!mounted) return;
+      final list = _filterByMyHospital(rawList);
       _handleNewIncidentAlerts(list);
       setState(() => _incidents = list);
     });
@@ -265,6 +297,7 @@ class _AgencyHomeScreenState extends State<AgencyHomeScreen>
   // --- Modal สำหรับปักหมุดเลือก/แก้ไขตำแหน่งโรงพยาบาล ---
   void _showHospitalPinPickerModal() {
     LatLng tempPin = _hospitalLocation;
+    final pinMapController = MapController();
     final nameCtrl = TextEditingController(text: _hospitalProfile.hospitalName);
     final phoneCtrl = TextEditingController(text: _hospitalProfile.erPhone);
     final addrCtrl = TextEditingController(text: _hospitalProfile.address);
@@ -330,6 +363,7 @@ class _AgencyHomeScreenState extends State<AgencyHomeScreen>
                       alignment: Alignment.center,
                       children: [
                         FlutterMap(
+                          mapController: pinMapController,
                           options: MapOptions(
                             initialCenter: tempPin,
                             initialZoom: 15.0,
@@ -378,6 +412,17 @@ class _AgencyHomeScreenState extends State<AgencyHomeScreen>
                                   color: Colors.white, fontSize: 12),
                               textAlign: TextAlign.center,
                             ),
+                          ),
+                        ),
+                        // โรงพยาบาลอยู่ไกลจากหมุดเดิมมาก — กดเพื่อย้ายแผนที่+หมุดมาที่ตำแหน่งตัวเอง
+                        Positioned(
+                          right: 16,
+                          bottom: 16,
+                          child: MyLocationButton(
+                            onLocated: (point) {
+                              setModalState(() => tempPin = point);
+                              pinMapController.move(point, 17);
+                            },
                           ),
                         ),
                       ],
@@ -799,7 +844,7 @@ class _AgencyHomeScreenState extends State<AgencyHomeScreen>
               final matchedIncident =
                   _incidents.cast<IncidentReport?>().firstWhere(
                 (i) =>
-                    i?.assignedAmbulanceId == amb['id'] &&
+                    (i?.hasUnit(amb['id']?.toString()) ?? false) &&
                     i?.status != 'resolved' &&
                     i?.status != 'cancelled',
                 orElse: () => null,
@@ -1199,7 +1244,7 @@ class _AgencyHomeScreenState extends State<AgencyHomeScreen>
                     final matchedIncident =
                         _incidents.cast<IncidentReport?>().firstWhere(
                       (i) =>
-                          i?.assignedAmbulanceId == amb['id'] &&
+                          (i?.hasUnit(amb['id']?.toString()) ?? false) &&
                           i?.status != 'resolved' &&
                           i?.status != 'cancelled',
                       orElse: () => null,

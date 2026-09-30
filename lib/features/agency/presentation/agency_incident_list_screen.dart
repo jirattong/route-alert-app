@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import '../../../core/models/incident_report.dart';
 import '../../../core/services/incident_service.dart';
 import '../../../core/services/agency_storage_service.dart';
+import '../../auth_face_login/data/services/face_auth_repository.dart';
 import 'agency_incident_detail_screen.dart';
+import '../../../core/services/agency_case_filter.dart';
 
 class AgencyIncidentListScreen extends StatefulWidget {
   const AgencyIncidentListScreen({super.key});
@@ -22,6 +24,10 @@ class _AgencyIncidentListScreenState extends State<AgencyIncidentListScreen> {
   // แม้ปิดแอปแล้วเปิดใหม่
   Set<String> _dismissedIds = {};
 
+  // โรงพยาบาลของบัญชี agency ที่ล็อกอินอยู่ (เพิ่มตอนทำ multi-hospital) — null
+  // หมายถึงบัญชีเก่าที่ยังไม่มี hospitalId จะไม่กรองอะไรเลย (เห็นเหมือนเดิม)
+  String? _myHospitalId;
+
   @override
   void initState() {
     super.initState();
@@ -30,11 +36,74 @@ class _AgencyIncidentListScreenState extends State<AgencyIncidentListScreen> {
     _applySettings(AgencyStorageService.settingsNotifier.value);
     AgencyStorageService.settingsNotifier.addListener(_onSettingsChanged);
     _loadDismissedIds();
+    _loadMyHospitalId();
+  }
+
+  Future<void> _loadMyHospitalId() async {
+    final currentUser = await FaceAuthRepository.getCurrentUser();
+    if (mounted) setState(() => _myHospitalId = currentUser?.hospitalId);
   }
 
   Future<void> _loadDismissedIds() async {
     final ids = await AgencyStorageService.loadDismissedIncidentIds();
     if (mounted) setState(() => _dismissedIds = ids);
+  }
+
+  // กด X บนเคส: ยืนยันก่อนเสมอ — ปิดเคสให้หายจากทุกฝั่ง หรือซ่อนเฉพาะเครื่องนี้
+  Future<void> _confirmRemoveIncident(IncidentReport item) async {
+    final hasAmbulance = item.vehicleCount > 0;
+    final choice = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: const Text('ปิดเคสนี้?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('${item.type} · ${item.address.isNotEmpty ? item.address : item.province}'),
+            const SizedBox(height: 10),
+            const Text('ปิดเคส = ยกเลิกเคสนี้ในระบบ โรงพยาบาลและรถพยาบาลทุกคันจะไม่เห็นเคสนี้อีก '
+                'ผู้แจ้งจะเห็นว่าเคสถูกยกเลิก'),
+            if (hasAmbulance) ...[
+              const SizedBox(height: 10),
+              Text(
+                '⚠️ มีรถพยาบาล ${item.vehicleCount} คัน (${item.vehiclesLabel}) กำลังรับเคสนี้อยู่ — '
+                'ปิดเคสแล้วรถทุกคันจะหยุดภารกิจนี้ทันที',
+                style: const TextStyle(color: Color(0xFFB45309), fontWeight: FontWeight.w600),
+              ),
+            ],
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('ยกเลิก')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'hide'),
+            child: const Text('ซ่อนเฉพาะเครื่องนี้'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, 'close'),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFDC2626), foregroundColor: Colors.white),
+            child: const Text('ปิดเคส (ทุกฝั่ง)'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    if (choice == 'hide') {
+      await _dismissIncident(item);
+    } else if (choice == 'close') {
+      final messenger = ScaffoldMessenger.of(context);
+      final ok = await IncidentService()
+          .closeIncidentByHospital(item.id, reason: 'โรงพยาบาลปิดเคส');
+      messenger.showSnackBar(SnackBar(
+        content: Text(ok
+            ? 'ปิดเคสแล้ว ทุกฝั่งจะไม่เห็นเคสนี้อีก'
+            : '⚠️ ปิดเคสไม่สำเร็จ (เช็คสัญญาณอินเทอร์เน็ต) กรุณาลองใหม่'),
+        backgroundColor: ok ? Colors.grey.shade800 : const Color(0xFFDC2626),
+      ));
+    }
   }
 
   Future<void> _dismissIncident(IncidentReport item) async {
@@ -109,33 +178,23 @@ class _AgencyIncidentListScreenState extends State<AgencyIncidentListScreen> {
                   }
 
                   final rawList = snapshot.data ?? [];
-                  // เดิมกรองแค่ cancelled ทำให้เคสที่ resolved (นำส่งถึง รพ. แล้ว)
-                  // ยังค้างโชว์อยู่ในลิสต์นี้ตลอด ทั้งที่ทุกอย่างเสร็จสิ้นแล้ว —
-                  // เพิ่มกรอง resolved ออกด้วย และเพิ่มกรองเคสที่ agency กดลบออกจาก
-                  // หน้าจอเองผ่าน _dismissedIds (ข้อมูลจริงยังอยู่ครบใน Firestore)
+                  // กรองเคสที่จบ/ยกเลิก/ซ่อนเอง, เฉพาะเคสของโรงพยาบาลนี้, ตัวกรองวิกฤต และระยะ
+                  // (ดู agencyCaseVisible — เคสที่ส่งมาที่ รพ. นี้ไม่ถูกซ่อนเพราะระยะ)
                   final activeList = rawList
                       .where((i) =>
-                          i.status != 'cancelled' &&
-                          i.status != 'resolved' &&
-                          !_dismissedIds.contains(i.id))
+                          !i.isClosed &&
+                          !_dismissedIds.contains(i.id) &&
+                          (_myHospitalId == null || i.targetHospitalId == _myHospitalId))
                       .toList();
-
-                  // กรองตามการตั้งค่าจริงของหน่วยงาน (เดิมตั้งค่า criticalOnly /
-                  // alertDistanceKm ไม่มีผลกับรายการนี้เลย):
-                  // - criticalOnly: โชว์เฉพาะเคสวิกฤต (Code Red)
-                  // - alertDistanceKm: ซ่อนเคสที่ไกลจาก รพ. เกินระยะที่ตั้งไว้
-                  final list = activeList.where((i) {
-                    if (_criticalOnly &&
-                        !(i.severity.contains('Code Red') ||
-                            i.severity.contains('วิกฤต'))) {
-                      return false;
-                    }
-                    final dist = i.hospitalDistanceKm;
-                    if (dist != null && dist > _alertDistanceKm) {
-                      return false;
-                    }
-                    return true;
-                  }).toList();
+                  final list = activeList
+                      .where((i) => agencyCaseVisible(
+                            i,
+                            myHospitalId: _myHospitalId,
+                            criticalOnly: _criticalOnly,
+                            alertDistanceKm: _alertDistanceKm,
+                            dismissedIds: _dismissedIds,
+                          ))
+                      .toList();
 
                   if (list.isEmpty) {
                     final hiddenByFilter = activeList.isNotEmpty;
@@ -218,10 +277,14 @@ class _AgencyIncidentListScreenState extends State<AgencyIncidentListScreen> {
                 style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500, color: Colors.black87),
               ),
               const SizedBox(height: 4),
-              if (item.assignedAmbulancePlate != null && item.assignedAmbulancePlate!.isNotEmpty)
+              if (item.vehicleCount > 0)
                 Text(
-                  'เลขรถรับเคส : ${item.assignedAmbulancePlate}',
-                  style: TextStyle(fontSize: 13.5, color: Colors.grey.shade700),
+                  '🚑 กำลังดำเนินเคส ${item.vehicleCount} คัน : ${item.vehiclesLabel}',
+                  style: TextStyle(
+                    fontSize: 13.5,
+                    color: item.vehicleCount > 1 ? const Color(0xFF1D4ED8) : Colors.grey.shade700,
+                    fontWeight: item.vehicleCount > 1 ? FontWeight.w600 : FontWeight.normal,
+                  ),
                 ),
               const SizedBox(height: 10),
 
@@ -314,7 +377,7 @@ class _AgencyIncidentListScreenState extends State<AgencyIncidentListScreen> {
             top: -4,
             child: InkWell(
               borderRadius: BorderRadius.circular(20),
-              onTap: () => _dismissIncident(item),
+              onTap: () => _confirmRemoveIncident(item),
               child: Padding(
                 padding: const EdgeInsets.all(6),
                 child: Icon(Icons.close_rounded,

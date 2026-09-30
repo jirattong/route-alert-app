@@ -1,6 +1,9 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/painting.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+
+import 'notification_intent.dart';
 
 class HeadsUpAlertEvent {
   final String title;
@@ -36,36 +39,71 @@ class CriticalNotificationService {
   static const String _channelName = '🚨 RouteAlert Emergency Siren Alert';
   static const String _channelDesc =
       'Heads-up banner alerts for approaching emergency vehicles';
+  static const String _updatesChannelId = 'route_alert_case_updates';
+  static const String _updatesChannelName = 'อัปเดตสถานะเคส';
+  static const String _trackingChannelId = 'route_alert_live_tracking';
+  static const String _trackingChannelName = 'ติดตามรถพยาบาลแบบสด';
 
-  Future<void> initialize() async {
-    if (_isInitialized) return;
+  // ชุดปุ่มบนแจ้งเตือนเคสใหม่ — iOS ต้องลงทะเบียนเป็น category ไว้ล่วงหน้า
+  static const String categoryNewAmbulance = 'RA_NEW_AMBULANCE';
+  static const String categoryNewAgency = 'RA_NEW_AGENCY';
+  static const Map<String, List<(String, String)>> incidentButtons = {
+    categoryNewAmbulance: [(PushAction.view, 'ดูเคส'), (PushAction.accept, 'รับเคส')],
+    categoryNewAgency: [(PushAction.view, 'ดูเคส'), (PushAction.dispatch, 'ส่งรถพยาบาล')],
+  };
 
+  Future<void>? _initFuture;
+  bool _permissionsRequested = false;
+  bool _launchDetailsConsumed = false;
+
+  /// [requestPermissions] = false ใน isolate เบื้องหลังของ FCM (ไม่มีหน้าจอให้ขอสิทธิ์)
+  Future<void> initialize({bool requestPermissions = true}) async {
+    await (_initFuture ??= _initPlugin());
+    if (requestPermissions && _isInitialized && !_permissionsRequested) {
+      _permissionsRequested = true;
+      await _requestPermissions();
+    }
+  }
+
+  Future<void> _initPlugin() async {
     const androidSettings =
         AndroidInitializationSettings('@mipmap/ic_launcher');
-    const darwinSettings = DarwinInitializationSettings(
-      requestAlertPermission: true,
-      requestBadgePermission: true,
-      requestSoundPermission: true,
-      requestCriticalPermission: true,
-    );
-
-    const initSettings = InitializationSettings(
-      android: androidSettings,
-      iOS: darwinSettings,
-      macOS: darwinSettings,
+    final darwinSettings = DarwinInitializationSettings(
+      requestAlertPermission: false,
+      requestBadgePermission: false,
+      requestSoundPermission: false,
+      notificationCategories: [
+        for (final entry in incidentButtons.entries)
+          DarwinNotificationCategory(
+            entry.key,
+            actions: [
+              for (final (id, label) in entry.value)
+                DarwinNotificationAction.plain(
+                  id,
+                  label,
+                  options: {DarwinNotificationActionOption.foreground},
+                ),
+            ],
+          ),
+      ],
     );
 
     try {
-      await _notificationsPlugin.initialize(initSettings);
+      await _notificationsPlugin.initialize(
+        InitializationSettings(
+          android: androidSettings,
+          iOS: darwinSettings,
+          macOS: darwinSettings,
+        ),
+        onDidReceiveNotificationResponse: _onNotificationResponse,
+      );
 
-      // Request permissions explicitly for Android 13+ (API 33+)
       final androidPlugin =
           _notificationsPlugin.resolvePlatformSpecificImplementation<
               AndroidFlutterLocalNotificationsPlugin>();
-      await androidPlugin?.requestNotificationsPermission();
 
       // Create Android High-Priority Heads-Up Channel
-      final androidChannel = AndroidNotificationChannel(
+      await androidPlugin?.createNotificationChannel(AndroidNotificationChannel(
         _channelId,
         _channelName,
         description: _channelDesc,
@@ -75,14 +113,195 @@ class CriticalNotificationService {
         showBadge: true,
         vibrationPattern: Int64List.fromList([0, 600, 200, 600, 200, 600]),
         audioAttributesUsage: AudioAttributesUsage.alarm,
-      );
-
-      await androidPlugin?.createNotificationChannel(androidChannel);
+      ));
+      await androidPlugin?.createNotificationChannel(
+          const AndroidNotificationChannel(
+        _updatesChannelId,
+        _updatesChannelName,
+        description: 'รถพยาบาลรับเคส ใกล้ถึง และเคสเสร็จสิ้น',
+        importance: Importance.high,
+      ));
+      // ช่องเงียบสำหรับแจ้งเตือนค้างที่อัปเดตระยะ/ETA ตลอด (Android 8+ ใช้ค่าเสียงของช่อง)
+      await androidPlugin?.createNotificationChannel(
+          const AndroidNotificationChannel(
+        _trackingChannelId,
+        _trackingChannelName,
+        description: 'ระยะและเวลาที่รถพยาบาลจะถึง ระหว่างรอรถ',
+        importance: Importance.low,
+        playSound: false,
+        enableVibration: false,
+        showBadge: false,
+      ));
 
       _isInitialized = true;
     } catch (e) {
+      _initFuture = null; // ให้ลองใหม่ได้ในการเรียกครั้งถัดไป
       debugPrint('CriticalNotificationService init error: $e');
     }
+  }
+
+  Future<void> _requestPermissions() async {
+    try {
+      await _notificationsPlugin
+          .resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin>()
+          ?.requestNotificationsPermission();
+      await _notificationsPlugin
+          .resolvePlatformSpecificImplementation<
+              IOSFlutterLocalNotificationsPlugin>()
+          ?.requestPermissions(
+              alert: true, badge: true, sound: true, critical: true);
+    } catch (e) {
+      debugPrint('CriticalNotificationService permission error: $e');
+    }
+  }
+
+  // แจ้งเตือนเรดาร์ (911/1669) ไม่มี payload จึงถูกข้ามเอง
+  void _onNotificationResponse(NotificationResponse response) {
+    NotificationIntentHub.dispatch(NotificationIntent.fromPayload(
+      response.payload,
+      actionId: response.actionId,
+    ));
+  }
+
+  /// แอปถูกเปิดขึ้นมาจากการกดแจ้งเตือนตอนปิดสนิท — ส่งต่อครั้งเดียวต่อการเปิดแอป
+  Future<void> consumeLaunchDetails() async {
+    if (_launchDetailsConsumed) return;
+    _launchDetailsConsumed = true;
+    try {
+      final details =
+          await _notificationsPlugin.getNotificationAppLaunchDetails();
+      final response = details?.notificationResponse;
+      if (details?.didNotificationLaunchApp == true && response != null) {
+        _onNotificationResponse(response);
+      }
+    } catch (e) {
+      debugPrint('consumeLaunchDetails error: $e');
+    }
+  }
+
+  /// แจ้งเตือนเคส 1 เคส = 1 แจ้งเตือน (id เดิมทับอันเก่า) — [emergency] ใช้ช่อง
+  /// เสียงไซเรน/เด้งเต็ม ส่วนอัปเดตสถานะใช้ช่องปกติ
+  Future<void> showIncidentNotification({
+    required int id,
+    required String title,
+    required String body,
+    required bool emergency,
+    required String payload,
+    required String threadId,
+    required Color color,
+    String? category,
+  }) async {
+    if (!_isInitialized) await initialize(requestPermissions: false);
+    final buttons = incidentButtons[category] ?? const [];
+
+    final androidDetails = AndroidNotificationDetails(
+      emergency ? _channelId : _updatesChannelId,
+      emergency ? _channelName : _updatesChannelName,
+      importance: emergency ? Importance.max : Importance.high,
+      priority: emergency ? Priority.max : Priority.high,
+      category: emergency
+          ? AndroidNotificationCategory.alarm
+          : AndroidNotificationCategory.status,
+      visibility: NotificationVisibility.public,
+      color: color,
+      ticker: title,
+      styleInformation: BigTextStyleInformation(body, contentTitle: title),
+      actions: [
+        for (final (actionId, label) in buttons)
+          AndroidNotificationAction(actionId, label,
+              showsUserInterface: true, cancelNotification: true),
+      ],
+    );
+    final darwinDetails = DarwinNotificationDetails(
+      presentAlert: true,
+      presentBanner: true,
+      presentList: true,
+      presentSound: true,
+      threadIdentifier: threadId,
+      categoryIdentifier: buttons.isEmpty ? null : category,
+      interruptionLevel:
+          emergency ? InterruptionLevel.timeSensitive : InterruptionLevel.active,
+    );
+
+    try {
+      await _notificationsPlugin.show(
+        id,
+        title,
+        body,
+        NotificationDetails(
+            android: androidDetails, iOS: darwinDetails, macOS: darwinDetails),
+        payload: payload,
+      );
+    } catch (e) {
+      debugPrint('showIncidentNotification error: $e');
+    }
+  }
+
+  /// แจ้งเตือนค้างติดตามรถพยาบาลของผู้แจ้งเหตุ (Android — เทียบเท่า Live Activity บน iOS)
+  /// ไม่มีเสียง อัปเดตทับที่เดิมเรื่อยๆ ปัดทิ้งไม่ได้จนเคสจบ
+  Future<void> showTrackingNotification({
+    required int id,
+    required String title,
+    required String body,
+    required int progressPercent,
+    required String payload,
+  }) async {
+    if (!_isInitialized) await initialize(requestPermissions: false);
+    try {
+      await _notificationsPlugin.show(
+        id,
+        title,
+        body,
+        NotificationDetails(
+          android: AndroidNotificationDetails(
+            _trackingChannelId,
+            _trackingChannelName,
+            importance: Importance.low,
+            priority: Priority.low,
+            ongoing: true,
+            autoCancel: false,
+            onlyAlertOnce: true,
+            playSound: false,
+            enableVibration: false,
+            showProgress: true,
+            maxProgress: 100,
+            progress: progressPercent.clamp(0, 100),
+            category: AndroidNotificationCategory.progress,
+            visibility: NotificationVisibility.public,
+            color: const Color(0xFF00A896),
+          ),
+        ),
+        payload: payload,
+      );
+    } catch (e) {
+      debugPrint('showTrackingNotification error: $e');
+    }
+  }
+
+  /// ลบแจ้งเตือนติดตามรถที่ค้างอยู่ (เช่นของเคสก่อนหน้า หรือแอปถูกปิดไประหว่างเคส)
+  Future<void> cancelTrackingNotifications({int? except}) async {
+    if (!_isInitialized) await initialize(requestPermissions: false);
+    try {
+      final android = _notificationsPlugin.resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>();
+      final active = await android?.getActiveNotifications() ?? const [];
+      for (final n in active) {
+        final id = n.id;
+        if (id != null && id >= 0x20000000 && id < 0x40000000 && id != except) {
+          await _notificationsPlugin.cancel(id);
+        }
+      }
+    } catch (e) {
+      debugPrint('cancelTrackingNotifications error: $e');
+    }
+  }
+
+  Future<void> cancelNotification(int id) async {
+    if (!_isInitialized) await initialize(requestPermissions: false);
+    try {
+      await _notificationsPlugin.cancel(id);
+    } catch (_) {}
   }
 
   /// Displays real-time OS Heads-Up floating drop-down notification banner
@@ -91,7 +310,8 @@ class CriticalNotificationService {
     required String body,
     bool isCritical = false,
   }) async {
-    if (!_isInitialized) await initialize();
+    // ตอนเปิดแอป main.dart เตรียมไว้แบบยังไม่ขอสิทธิ์ — ต้องขอตรงนี้ ไม่งั้นไม่เคยได้สิทธิ์
+    await initialize();
 
     // Broadcast to in-app drop-down banner listener as well
     if (!_headsUpStreamController.isClosed) {
@@ -160,7 +380,7 @@ class CriticalNotificationService {
     required bool isCritical,
     required double yieldProbability,
   }) async {
-    if (!_isInitialized) await initialize();
+    await initialize();
 
     final title = isCritical
         ? '🚨 แจ้งเตือนมีรถพยาบาล: $distanceMeters M'

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../../core/models/incident_report.dart';
 import '../../../core/services/ambulance_storage_service.dart';
 import '../../../core/services/incident_service.dart';
+import 'ambulance_case_actions.dart';
 import 'ambulance_incident_detail_screen.dart';
 
 class AmbulanceIncidentListScreen extends StatefulWidget {
@@ -31,7 +32,25 @@ class _AmbulanceIncidentListScreenState
     super.initState();
     IncidentService().initialize();
     _loadAmbulanceUnitId();
+    AmbulanceStorageService.profileNotifier.addListener(_onProfileChanged);
   }
+
+  @override
+  void dispose() {
+    AmbulanceStorageService.profileNotifier.removeListener(_onProfileChanged);
+    super.dispose();
+  }
+
+  // รหัสหน่วยอาจถูกเปลี่ยนเป็นของบัญชีหลังล็อกอิน (ล็อกอินบัญชีเดิมจากเครื่องใหม่)
+  void _onProfileChanged() {
+    final id = AmbulanceStorageService.profileNotifier.value['ambulanceId'] ?? '';
+    if (mounted && id.isNotEmpty && id != _ambulanceUnitId) {
+      setState(() => _ambulanceUnitId = id);
+    }
+  }
+
+  // ทะเบียนของรถเครื่องนี้ — อีกบัญชีบนรถคันเดียวกัน (ทะเบียนเดียวกัน) ก็นับเป็นเคสของเรา
+  String get _myPlate => AmbulanceStorageService.profileNotifier.value['plateNumber'] ?? '';
 
   Future<void> _loadAmbulanceUnitId() async {
     final profile = await AmbulanceStorageService.loadProfile();
@@ -88,7 +107,7 @@ class _AmbulanceIncidentListScreenState
                   // ถ่ายรูป/อัปเดตรายงานไม่เจอ ต้องไถหารายการยาวๆ
                   final myActiveCases = filteredList
                       .where((i) =>
-                          i.assignedAmbulanceId == _ambulanceUnitId &&
+                          i.hasUnit(_ambulanceUnitId, plate: _myPlate) &&
                           i.status != 'resolved' &&
                           i.status != 'cancelled')
                       .toList();
@@ -209,11 +228,14 @@ class _AmbulanceIncidentListScreenState
 
   Widget _buildAmbulanceIncidentCard(IncidentReport item) {
     bool isAccepted = item.status != 'pending';
+    final int vehicles = item.vehicleCount;
     // เคสของหน่วยเราเองที่กำลังดำเนินการอยู่ — ให้ขอบ/ป้ายเด่นกว่าปกติ แยกจาก
     // "accepted แล้ว" ทั่วไป (สีเขียว) ที่อาจเป็นเคสของหน่วยอื่นที่รับไปแล้วก็ได้
-    final bool isMine = item.assignedAmbulanceId == _ambulanceUnitId &&
+    final bool isMine = item.hasUnit(_ambulanceUnitId, plate: _myPlate) &&
         item.status != 'resolved' &&
         item.status != 'cancelled';
+    // เคสเดียวรับได้หลายคัน — มีรถแล้วแต่ยังไม่เริ่มนำส่ง กด "ร่วมรับเคส" ได้
+    final bool canJoin = !isMine && isAccepted && item.isJoinable;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 20),
@@ -289,10 +311,14 @@ class _AmbulanceIncidentListScreenState
               ),
               const SizedBox(height: 4),
               Text(
-                item.assignedAmbulancePlate != null && item.assignedAmbulancePlate!.isNotEmpty
-                    ? 'เลขรถที่รับเคส : ${item.assignedAmbulancePlate}'
+                vehicles > 0
+                    ? '🚑 กำลังดำเนินเคส $vehicles คัน : ${item.vehiclesLabel}'
                     : 'เลขรถที่รับเคส : ยังไม่มีรถรับหมาย',
-                style: TextStyle(fontSize: 13.5, color: Colors.grey.shade700),
+                style: TextStyle(
+                  fontSize: 13.5,
+                  color: vehicles > 1 ? const Color(0xFF1D4ED8) : Colors.grey.shade700,
+                  fontWeight: vehicles > 1 ? FontWeight.w600 : FontWeight.normal,
+                ),
               ),
               const SizedBox(height: 10),
 
@@ -317,61 +343,27 @@ class _AmbulanceIncidentListScreenState
               // ปุ่มกดรับเคส (ยืนยันรับหมาย)
               Center(
                 child: SizedBox(
-                  width: 170,
+                  width: canJoin ? 210 : 170,
                   height: 42,
                   child: ElevatedButton(
-                    onPressed: isAccepted
-                        ? null
-                        : () async {
-                            // รถพยาบาลคันเดียวรับได้ทีละ 1 เคส เช็คก่อนว่าตอนนี้
-                            // มีเคส active ค้างอยู่ไหมก่อนให้รับเคสใหม่
-                            final busyIds =
-                                await IncidentService().getBusyAmbulanceIds();
-                            if (busyIds.contains(_ambulanceUnitId)) {
-                              if (mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text(
-                                        '⚠️ คุณมีเคสที่กำลังดำเนินการอยู่แล้ว ต้องทำเคสปัจจุบันให้เสร็จก่อนถึงจะรับเคสใหม่ได้'),
-                                    backgroundColor: Color(0xFFF59E0B),
-                                    duration: Duration(seconds: 4),
-                                  ),
-                                );
-                              }
-                              return;
-                            }
-
-                            final profile =
-                                await AmbulanceStorageService.loadProfile();
-                            final ok = await IncidentService()
-                                .acceptIncidentByAmbulance(
-                              id: item.id,
-                              ambulancePlate: profile['plateNumber']!,
-                              ambulanceId: profile['ambulanceId']!,
-                            );
-                            if (mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text(ok
-                                      ? '🔴 ยืนยันรับเคสและบันทึกหมายเรียบร้อยแล้ว!'
-                                      : '⚠️ รับเคสไม่สำเร็จ (เช็คสัญญาณอินเทอร์เน็ต) กรุณาลองใหม่'),
-                                  backgroundColor: ok
-                                      ? const Color(0xFFEB5757)
-                                      : const Color(0xFFDC2626),
-                                ),
-                              );
-                            }
-                          },
+                    onPressed: (!isAccepted || canJoin)
+                        ? () => AmbulanceCaseActions.acceptCase(context, item)
+                        : null,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFEB5757),
+                      backgroundColor:
+                          canJoin ? const Color(0xFFF59E0B) : const Color(0xFFEB5757),
                       disabledBackgroundColor: const Color(0xFFA3A3A3),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(22),
                       ),
-                      elevation: isAccepted ? 0 : 3,
+                      elevation: (!isAccepted || canJoin) ? 3 : 0,
                     ),
                     child: Text(
-                      isAccepted ? 'ยืนยันรับเคสแล้ว' : 'ยืนยันรับเคส',
+                      isMine
+                          ? 'รถของคุณรับเคสนี้แล้ว'
+                          : canJoin
+                              ? 'ร่วมรับเคส (+1 คัน)'
+                              : (isAccepted ? 'ยืนยันรับเคสแล้ว' : 'ยืนยันรับเคส'),
                       style: const TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.bold,

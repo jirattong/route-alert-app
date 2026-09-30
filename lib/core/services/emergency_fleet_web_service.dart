@@ -21,7 +21,17 @@ class EmergencyFleetWebService {
   // ใช้ตรวจสอบฝั่งมือถือ ให้พฤติกรรมสอดคล้องกัน
   static const Duration _staleTimeout = Duration(seconds: 15);
 
+  // เดิมเช็ค staleness เฉพาะตอนมี snapshot ใหม่เข้ามาเท่านั้น (ต่างจาก
+  // EmergencyMqttService ฝั่งมือถือที่มี Timer.periodic คอยเช็คซ้ำเองอยู่แล้ว)
+  // ถ้ารถคันหนึ่งแอปพังไปเฉยๆ (ไม่ทันส่ง sirenActive:false) แล้วไม่มีรถคันอื่น
+  // อัปเดตอะไรอีกเลย เอกสารเก่านั้นจะค้างสถานะ "ออนไลน์" ตลอดไปไม่มีวันถูกกรอง
+  // ออก เสี่ยงมากเพราะเว็บ Agency ใช้ fleet นี้เลือกรถไปมอบหมายเคสจริง (เจอจาก
+  // code review) — เพิ่ม timer เช็คซ้ำเป็นระยะแทน โดยไม่ต้องรอ snapshot ใหม่
+  static const Duration _recheckInterval = Duration(seconds: 5);
+
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _sub;
+  Timer? _recheckTimer;
+  List<QueryDocumentSnapshot<Map<String, dynamic>>> _lastDocs = [];
   final StreamController<List<EmergencyVehicleData>> _controller =
       StreamController<List<EmergencyVehicleData>>.broadcast();
 
@@ -32,29 +42,41 @@ class EmergencyFleetWebService {
         .collection('emergency_fleet')
         .snapshots()
         .listen((snapshot) {
-      final now = DateTime.now();
-      final fleet = <EmergencyVehicleData>[];
-      for (final doc in snapshot.docs) {
-        final data = doc.data();
-        final updatedAtStr = data['updatedAt'] as String?;
-        final updatedAt =
-            updatedAtStr != null ? DateTime.tryParse(updatedAtStr) : null;
-        if (updatedAt != null && now.difference(updatedAt) > _staleTimeout) {
-          continue; // เอกสารเก่าเกินไป (ไม่ทันถูกลบ) ไม่นับว่าออนไลน์อยู่
-        }
-        try {
-          fleet.add(EmergencyVehicleData.fromMap(data));
-        } catch (_) {
-          // เอกสารรูปแบบผิดปกติ ข้ามไปเฉยๆ ไม่ให้ล้มทั้ง stream
-        }
-      }
-      _controller.add(fleet);
+      _lastDocs = snapshot.docs;
+      _rebuildAndEmit();
     });
+    _recheckTimer ??= Timer.periodic(_recheckInterval, (_) => _rebuildAndEmit());
+  }
+
+  void _rebuildAndEmit() {
+    final now = DateTime.now();
+    final fleet = <EmergencyVehicleData>[];
+    for (final doc in _lastDocs) {
+      final data = doc.data();
+      final updatedAtStr = data['updatedAt'] as String?;
+      final updatedAt =
+          updatedAtStr != null ? DateTime.tryParse(updatedAtStr) : null;
+      // เดิมถ้า updatedAt เป็น null (ไม่มี field/parse ไม่ขึ้น) เงื่อนไขนี้จะ
+      // เป็น false ทันที เท่ากับถือว่า "ยังไม่เก่าเกิน" (ออนไลน์อยู่) ทั้งที่ควร
+      // ระแวงไว้ก่อนมากกว่า — สลับให้ข้อมูลที่ไม่น่าเชื่อถือแบบนี้ถูกตัดออกไปเลย
+      // (ปลอดภัยกว่าตอนใช้เลือกรถไปมอบหมายเคสจริง เจอจาก code review)
+      if (updatedAt == null || now.difference(updatedAt) > _staleTimeout) {
+        continue; // เอกสารเก่าเกินไป/ข้อมูลไม่น่าเชื่อถือ ไม่นับว่าออนไลน์อยู่
+      }
+      try {
+        fleet.add(EmergencyVehicleData.fromMap(data));
+      } catch (_) {
+        // เอกสารรูปแบบผิดปกติ ข้ามไปเฉยๆ ไม่ให้ล้มทั้ง stream
+      }
+    }
+    _controller.add(fleet);
   }
 
   void dispose() {
     _sub?.cancel();
     _sub = null;
+    _recheckTimer?.cancel();
+    _recheckTimer = null;
     _controller.close();
   }
 }

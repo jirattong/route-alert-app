@@ -5,6 +5,7 @@ import '../../../core/services/email_otp_service.dart';
 import '../../../core/services/google_auth_service.dart';
 import '../../../core/services/ambulance_storage_service.dart';
 import '../../../core/services/hospital_location_service.dart';
+import '../../../core/services/push_notification_service.dart';
 import '../../../core/utils/role_screen_resolver.dart';
 import '../../../core/utils/slide_from_right_route.dart';
 import '../../../core/widgets/google_logo.dart';
@@ -14,6 +15,7 @@ import '../../../core/ml/anti_spoofing_service.dart';
 import '../../../core/ml/face_recognition_service.dart';
 import 'face_scan_screen.dart';
 import '../../driver_radar/presentation/driver_main_screen.dart';
+import '../../agency/presentation/hospital_setup_screen.dart';
 
 /// บัญชีทดสอบสำหรับสาธิตโปรเจกต์เท่านั้น (thesis demo) — ต้องปิด (false) ก่อนปล่อยจริง
 ///
@@ -55,6 +57,36 @@ const Map<String, _DemoAccount> _kDemoAccounts = {
     role: 'agency',
     displayName: 'โรงพยาบาลทดสอบ (Admin 3)',
     email: 'admin_3@routealert.test',
+  ),
+  'admin_4': _DemoAccount(
+    role: 'driver',
+    displayName: 'ผู้ใช้ทดสอบ (Admin 4)',
+    email: 'admin_4@routealert.test',
+  ),
+  'admin_5': _DemoAccount(
+    role: 'ambulance',
+    displayName: 'หน่วยรถพยาบาลทดสอบ (Admin 5)',
+    email: 'admin_5@routealert.test',
+  ),
+  'admin_6': _DemoAccount(
+    role: 'agency',
+    displayName: 'โรงพยาบาลทดสอบ (Admin 6)',
+    email: 'admin_6@routealert.test',
+  ),
+  'admin_7': _DemoAccount(
+    role: 'driver',
+    displayName: 'ผู้ใช้ทดสอบ (Admin 7)',
+    email: 'admin_7@routealert.test',
+  ),
+  'admin_8': _DemoAccount(
+    role: 'ambulance',
+    displayName: 'หน่วยรถพยาบาลทดสอบ (Admin 8)',
+    email: 'admin_8@routealert.test',
+  ),
+  'admin_9': _DemoAccount(
+    role: 'agency',
+    displayName: 'โรงพยาบาลทดสอบ (Admin 9)',
+    email: 'admin_9@routealert.test',
   ),
 };
 
@@ -202,6 +234,11 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
 
   void _navigateToRoleScreen(UserFaceProfile user) {
     if (!mounted) return;
+    // ลงทะเบียน push notification ให้บัญชีนี้ทันทีที่ยืนยันว่าล็อกอินสำเร็จ
+    // (เพิ่มตอนทำระบบแจ้งเตือนเบื้องหลัง) — จุดนี้เป็นทางผ่านร่วมของทุกเส้นทาง
+    // ล็อกอินสำเร็จ (ยกเว้นบัญชี agency ที่เพิ่งสมัครใหม่ซึ่งลงทะเบียนแยกไว้ใน
+    // hospital_setup_screen.dart แทน เพราะเส้นทางนั้นไม่ผ่านฟังก์ชันนี้)
+    unawaited(PushNotificationService().initialize(user.email));
     // ใช้ทรานสิชันลากเข้าจากขวาแบบเดียวกับตอนออกจาก AppLoadingScreen ให้ดูต่อเนื่อง
     // เป็นสไตล์เดียวกันทั้งแอป
     Navigator.pushAndRemoveUntil(
@@ -935,6 +972,21 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
 
     await FaceAuthRepository.registerUser(newProfile);
     await FaceAuthRepository.updateUserPassword(email, password);
+
+    // บัญชี agency ใหม่ต้องตั้งค่าโรงพยาบาลของตัวเองก่อนถึงจะใช้งานต่อได้
+    // (เพิ่มตอนทำ multi-hospital — เดิมไม่มีขั้นตอนนี้เลย ทุกบัญชี agency ใช้
+    // HospitalLocationService profile เดียวกันหมด) — เช็คเฉพาะตอนสมัครใหม่
+    // เท่านั้น การล็อกอินปกติของบัญชี agency ที่มีอยู่แล้วยังไปหน้า
+    // AgencyMainScreen ตรงๆ ผ่าน _navigateToRoleScreen() เหมือนเดิมทุกประการ
+    if (_selectedRole == 'agency') {
+      if (!mounted) return;
+      Navigator.pushAndRemoveUntil(
+        context,
+        slideFromRightRoute(HospitalSetupScreen(email: email)),
+        (route) => false,
+      );
+      return;
+    }
 
     _navigateToRoleScreen(newProfile);
   }

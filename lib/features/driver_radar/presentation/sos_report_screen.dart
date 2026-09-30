@@ -7,6 +7,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:latlong2/latlong.dart';
 import '../../../core/localization/app_strings.dart';
+import '../../../core/ml/accident_image_classifier_service.dart';
 import '../../../core/models/incident_report.dart';
 import '../../../core/services/ai_vision_triage_service.dart';
 import '../../../core/services/app_language_service.dart';
@@ -16,6 +17,7 @@ import '../../../core/services/location_service.dart';
 import '../../../core/services/smart_landmark_service.dart';
 import '../../auth_face_login/data/services/face_auth_repository.dart';
 import 'incident_detail_screen.dart';
+import '../../../core/services/sos_location_policy.dart';
 
 class SosReportScreen extends StatefulWidget {
   final VoidCallback onClose;
@@ -64,6 +66,10 @@ class _SosReportScreenState extends State<SosReportScreen> {
   final MapController _mapController = MapController();
   LatLng? _currentGps;
   LatLng? _pinnedGps;
+  // ตำแหน่งมาจากไหน — หา GPS ไม่ได้ต้องให้ผู้แจ้งปักหมุดเอง (ห้ามใช้พิกัดเดา)
+  LocationSource _gpsSource = LocationSource.gps;
+  Duration? _gpsAge;
+  bool _pinnedByUser = false;
   bool _isFetchingLandmark = false;
 
   // AI Vision Triage Analysis State
@@ -77,6 +83,8 @@ class _SosReportScreenState extends State<SosReportScreen> {
   @override
   void initState() {
     super.initState();
+    // โมเดลตรวจอุบัติเหตุไฟล์ใหญ่ — เริ่มโหลดตั้งแต่เปิดหน้านี้ รูปแรกจะได้ไม่ต้องรอ
+    AccidentImageClassifierService().initialize();
     if (widget.initialLocation != null) {
       _currentGps = widget.initialLocation;
       _pinnedGps = widget.initialLocation;
@@ -115,15 +123,22 @@ class _SosReportScreenState extends State<SosReportScreen> {
   }
 
   Future<void> _fetchGpsLocation() async {
-    final pos = await LocationService.getCurrentLocation();
-    final gps = pos ?? widget.initialLocation ?? const LatLng(18.7904, 98.9856);
-    if (mounted) {
-      setState(() {
-        _currentGps = gps;
-        if (_pinnedGps == null || widget.initialLocation == null) {
-          _pinnedGps = gps;
-        }
-      });
+    final fix = await LocationService.resolveFix();
+    if (!mounted) return;
+    final gps = fix.point ?? widget.initialLocation;
+    if (gps == null) {
+      // เดิมปักหมุดไว้ที่พิกัดตายตัวในเชียงใหม่โดยไม่เตือน — ตอนนี้ไม่มีหมุดจนกว่าผู้แจ้งจะปักเอง
+      setState(() => _gpsSource = LocationSource.unavailable);
+      if (!_pinnedByUser) _mapController.move(LocationService.defaultLocation, 13);
+      return;
+    }
+    setState(() {
+      _gpsSource = fix.point != null ? fix.source : LocationSource.lastKnown;
+      _gpsAge = fix.age;
+      _currentGps = gps;
+      if (!_pinnedByUser) _pinnedGps = gps;
+    });
+    if (!_pinnedByUser) {
       _mapController.move(gps, 15.5);
       _autoDetectLandmark(gps);
     }
@@ -144,10 +159,17 @@ class _SosReportScreenState extends State<SosReportScreen> {
   void _onMapMoved(LatLng center) {
     setState(() {
       _pinnedGps = center;
+      _pinnedByUser = true;
     });
   }
 
   void _confirmPinLocation() {
+    if (_pinnedGps == null || _gpsSource == LocationSource.unavailable) {
+      setState(() {
+        _pinnedGps = _mapController.camera.center;
+        _pinnedByUser = true;
+      });
+    }
     if (_pinnedGps != null) {
       HapticFeedback.mediumImpact();
       _autoDetectLandmark(_pinnedGps!);
@@ -237,7 +259,7 @@ class _SosReportScreenState extends State<SosReportScreen> {
     }
   }
 
-  Future<void> _runAiTriage() async {
+  Future<void> _runAiTriage({bool useGemini = false}) async {
     if (_pickedImages.isEmpty) {
       setState(() {
         _isAiAnalyzingImage = false;
@@ -257,13 +279,14 @@ class _SosReportScreenState extends State<SosReportScreen> {
     }
 
     final triageResult =
-        await AiVisionTriageService().analyzeIncidentPhotos(bytesList);
+        await AiVisionTriageService().analyzeIncidentPhotos(bytesList, useGemini: useGemini);
 
     if (mounted) {
       setState(() {
         _isAiAnalyzingImage = false;
         _aiTriageResult = triageResult;
-        if (triageResult.isIncidentDetected) {
+        // 'Unassessed' = โมเดลที่เทรนเองยืนยันแค่ว่าเป็นอุบัติเหตุ ไม่เปลี่ยนความรุนแรงที่ผู้แจ้งเลือกไว้
+        if (triageResult.isIncidentDetected && triageResult.severityCode != 'Unassessed') {
           _selectedSeverity = triageResult.severityLevel;
         }
       });
@@ -323,7 +346,7 @@ class _SosReportScreenState extends State<SosReportScreen> {
               if (key.isNotEmpty) {
                 await AiVisionTriageService.saveGeminiApiKey(key);
                 if (ctx.mounted) Navigator.pop(ctx);
-                _runAiTriage();
+                _runAiTriage(useGemini: true);
               }
             },
             style: ElevatedButton.styleFrom(
@@ -381,6 +404,64 @@ class _SosReportScreenState extends State<SosReportScreen> {
     );
   }
 
+  // ไม่บังคับ — ส่ง SOS ได้เลยโดยไม่ต้องกด ถ้ายังไม่มี key ให้ใส่ก่อน
+  Future<void> _recheckWithGemini() async {
+    final key = await AiVisionTriageService.getGeminiApiKey();
+    if (!mounted) return;
+    if (key == null || key.isEmpty) {
+      _showGeminiKeyDialog();
+      return;
+    }
+    await _runAiTriage(useGemini: true);
+  }
+
+  // ตรวจทานอีกครั้งก่อนส่งจริง — ถ้า AI ไม่พบอุบัติเหตุในภาพ เตือนให้ชัด
+  Future<bool> _confirmBeforeSubmit() async {
+    final ai = _aiTriageResult;
+    final aiRejected = ai != null && !ai.isIncidentDetected;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: Text(ai != null && ai.isAiGenerated
+            ? '⚠️ ภาพนี้อาจสร้างด้วย AI'
+            : (aiRejected ? '⚠️ AI ไม่พบร่องรอยอุบัติเหตุ' : 'ยืนยันการแจ้งเหตุ?')),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('ประเภท: $_selectedIncidentType'),
+            const SizedBox(height: 4),
+            Text('ความรุนแรง: $_selectedSeverity'),
+            const SizedBox(height: 4),
+            Text(ai == null
+                ? 'ภาพประกอบ: ไม่มี'
+                : ai.isAiGenerated
+                    ? 'ผลวิเคราะห์ภาพ: ${ai.aiGeneratedCheck!.summaryLine}'
+                    : 'ผลวิเคราะห์ภาพ: ${ai.isIncidentDetected ? 'พบอุบัติเหตุ' : 'ไม่พบอุบัติเหตุ'} (${ai.modelName})'),
+            if (aiRejected) ...[
+              const SizedBox(height: 10),
+              const Text(
+                'ถ้าเป็นเหตุฉุกเฉินจริง กดยืนยันส่งได้เลย ระบบจะส่งถึงโรงพยาบาลตามปกติ',
+                style: TextStyle(color: Color(0xFFB45309), fontWeight: FontWeight.w600),
+              ),
+            ],
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('กลับไปแก้ไข')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFDC2626), foregroundColor: Colors.white),
+            child: const Text('ยืนยันส่ง SOS'),
+          ),
+        ],
+      ),
+    );
+    return confirmed == true;
+  }
+
   Future<void> _submitReport() async {
     if (_selectedIncidentType == null || _selectedSeverity == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -388,11 +469,25 @@ class _SosReportScreenState extends State<SosReportScreen> {
       );
       return;
     }
+    final locationProblem = sosLocationProblem(
+      source: _gpsSource,
+      pinned: sosReportPoint(pinned: _pinnedGps, gps: _currentGps),
+      pinnedByUser: _pinnedByUser,
+    );
+    if (locationProblem != null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(locationProblem),
+        backgroundColor: const Color(0xFFDC2626),
+        duration: const Duration(seconds: 5),
+      ));
+      return;
+    }
+    if (!await _confirmBeforeSubmit() || !mounted) return;
 
     setState(() => _isSubmitting = true);
 
     // Coordinate & Location
-    final activeCoords = _pinnedGps ?? _currentGps ?? const LatLng(18.7904, 98.9856);
+    final activeCoords = sosReportPoint(pinned: _pinnedGps, gps: _currentGps)!;
     final lat = activeCoords.latitude;
     final lng = activeCoords.longitude;
     final locAddress = _locationNoteController.text.trim().isNotEmpty
@@ -405,7 +500,10 @@ class _SosReportScreenState extends State<SosReportScreen> {
         : '081-234-5678';
 
     String descriptionText = _descController.text.trim();
-    if (_aiTriageResult != null && _aiTriageResult!.isIncidentDetected) {
+    // บอกโรงพยาบาลด้วยว่าภาพประกอบอาจเป็นภาพ AI (ด่าน 1) — ไม่บล็อกการแจ้งเหตุ
+    if (_aiTriageResult != null && _aiTriageResult!.isAiGenerated) {
+      descriptionText = '[⚠️ ภาพอาจสร้างด้วย AI] $descriptionText';
+    } else if (_aiTriageResult != null && _aiTriageResult!.isIncidentDetected) {
       descriptionText =
           '[AI Triage: ${_aiTriageResult!.severityCode} (${(_aiTriageResult!.confidenceScore * 100).toInt()}%)] $descriptionText';
     }
@@ -566,6 +664,21 @@ class _SosReportScreenState extends State<SosReportScreen> {
                     ),
                     const SizedBox(height: 16),
 
+                    if (sosLocationBanner(_gpsSource, age: _gpsAge, pinnedByUser: _pinnedByUser)
+                        case final banner?)
+                      Container(
+                        width: double.infinity,
+                        margin: const EdgeInsets.only(bottom: 10),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFF7ED),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: const Color(0xFFF59E0B)),
+                        ),
+                        child: Text(banner,
+                            style: const TextStyle(
+                                fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF9A3412))),
+                      ),
                     // 1. แผนที่ปักหมุดจุดเกิดเหตุ (Pin-in-Center Map Picker)
                     _buildPinInCenterMapPicker(activeCoords),
                     const SizedBox(height: 10),
@@ -1291,8 +1404,19 @@ class _SosReportScreenState extends State<SosReportScreen> {
               ],
             ),
           )
-        else if (_aiTriageResult != null)
+        else if (_aiTriageResult != null) ...[
           _buildAiVisionTriageResultCard(_aiTriageResult!),
+          if (!_aiTriageResult!.isUsingGemini)
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: _recheckWithGemini,
+                icon: const Icon(Icons.auto_awesome_rounded, size: 16),
+                label: const Text('ประเมินละเอียดด้วย Gemini (ไม่บังคับ)'),
+                style: TextButton.styleFrom(foregroundColor: const Color(0xFF6366F1)),
+              ),
+            ),
+        ],
       ],
     );
   }
@@ -1316,10 +1440,12 @@ class _SosReportScreenState extends State<SosReportScreen> {
                 const Icon(Icons.warning_amber_rounded,
                     color: Color(0xFFD97706), size: 20),
                 const SizedBox(width: 8),
-                const Expanded(
+                Expanded(
                   child: Text(
-                    'AI: ไม่พบร่องรอยอุบัติเหตุในภาพ',
-                    style: TextStyle(
+                    res.isAiGenerated
+                        ? 'AI: ภาพนี้อาจสร้างด้วย AI'
+                        : 'AI: ไม่พบร่องรอยอุบัติเหตุในภาพ',
+                    style: const TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.bold,
                         color: Color(0xFFB45309)),
@@ -1332,7 +1458,11 @@ class _SosReportScreenState extends State<SosReportScreen> {
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Text(
-                    res.isUsingGemini ? 'Gemini 1.5' : 'วิเคราะห์เบื้องต้น (ไม่ใช้ AI)',
+                    res.isAiGenerated
+                        ? 'ด่าน 1: Gemini'
+                        : res.isUsingTrainedModel
+                            ? 'โมเดลที่เทรนเอง'
+                            : (res.isUsingGemini ? 'Gemini' : 'วิเคราะห์เบื้องต้น (ไม่ใช้ AI)'),
                     style: const TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: Color(0xFF78350F)),
                   ),
                 ),
@@ -1398,13 +1528,17 @@ class _SosReportScreenState extends State<SosReportScreen> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(
-                      res.isUsingGemini ? Icons.auto_awesome_rounded : Icons.psychology_rounded,
+                      res.isUsingGemini && !res.isUsingTrainedModel
+                          ? Icons.auto_awesome_rounded
+                          : Icons.psychology_rounded,
                       color: Colors.white,
                       size: 14,
                     ),
                     const SizedBox(width: 4),
                     Text(
-                      res.isUsingGemini ? 'Google Gemini 1.5 Flash Vision' : 'วิเคราะห์ภาพเบื้องต้น (Local, ไม่ใช่ AI)',
+                      res.isUsingTrainedModel
+                          ? (res.isUsingGemini ? 'โมเดลที่เทรนเอง + Gemini' : 'โมเดลที่เทรนเอง (EfficientNetV2)')
+                          : (res.isUsingGemini ? 'Google Gemini Vision' : 'วิเคราะห์ภาพเบื้องต้น (Local, ไม่ใช่ AI)'),
                       style: const TextStyle(
                           color: Colors.white,
                           fontSize: 11,
@@ -1425,7 +1559,9 @@ class _SosReportScreenState extends State<SosReportScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            'ระดับที่ AI ประเมิน: ${res.severityCode} (${res.severityLevel.split(" ")[0]})',
+            res.severityCode == 'Unassessed'
+                ? 'AI ยืนยันว่าเป็นภาพอุบัติเหตุ'
+                : 'ระดับที่ AI ประเมิน: ${res.severityCode} (${res.severityLevel.split(" ")[0]})',
             style: const TextStyle(
                 fontSize: 13.5,
                 fontWeight: FontWeight.w900,

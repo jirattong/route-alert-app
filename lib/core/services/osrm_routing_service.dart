@@ -8,12 +8,15 @@ class RouteResult {
   final double distanceMeters;
   final double durationSeconds;
   final String nextTurnInstruction;
+  // true = ขอเส้นทางไม่สำเร็จ ใช้เส้นตรง + เวลาประมาณจากระยะแทน
+  final bool isEstimate;
 
   const RouteResult({
     required this.points,
     required this.distanceMeters,
     required this.durationSeconds,
     required this.nextTurnInstruction,
+    this.isEstimate = false,
   });
 }
 
@@ -116,11 +119,15 @@ class OsrmRoutingService {
 
     // Fallback: Generate interpolated linear route points if offline
     final fallbackPoints = _generateFallbackInterpolation(start, destination);
+    final straight = const Distance().as(LengthUnit.Meter, start, destination);
     return RouteResult(
       points: fallbackPoints,
-      distanceMeters: const Distance().as(LengthUnit.Meter, start, destination),
-      durationSeconds: 120,
+      distanceMeters: straight,
+      // เดิมตายตัว 120 วิ ไม่ว่าจะไกลแค่ไหน — ประมาณจากระยะเส้นตรง x1.4 (ถนนจริง
+      // อ้อมกว่า) ที่ความเร็วเฉลี่ย 45 กม./ชม.
+      durationSeconds: straight * 1.4 / 12.5,
       nextTurnInstruction: 'กำลังนำทางตามเส้นทางตรง',
+      isEstimate: true,
     );
   }
 

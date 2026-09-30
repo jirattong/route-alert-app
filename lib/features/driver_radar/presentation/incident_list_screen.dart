@@ -202,22 +202,21 @@ class _IncidentListScreenState extends State<IncidentListScreen> {
                       // กรองเคสที่ถูกยกเลิก (cancelled) หรือจบแล้ว (resolved — ส่งถึง
                       // รพ. แล้ว) ออก ไม่ให้ขึ้นมากวนใจ — ข้อมูลยังอยู่ใน Firestore
                       // ตามเดิมสำหรับใช้งานในอนาคต (เช่นเว็บดูสถิติ) แค่ไม่โชว์ในนี้
+                      bool isMine(IncidentReport item) =>
+                          item.reporterEmail.trim().toLowerCase() ==
+                          _currentUserEmail.trim().toLowerCase();
+                      bool isClosed(IncidentReport item) =>
+                          item.status == 'cancelled' || item.status == 'resolved';
                       final filtered = allList.where((item) {
-                        if (item.status == 'cancelled' ||
-                            item.status == 'resolved') {
-                          return false;
-                        }
-
                         if (_selectedTab == 1) {
-                          // My SOS reports — เดิม return true ตรงๆ ทำให้เห็นเคส
-                          // ของผู้ใช้อื่นทุกคนด้วย (บั๊ก: สลับบัญชีในเครื่องเดียวกัน
-                          // แล้วยังเห็นเคสของบัญชีก่อนหน้า) ต้องกรองด้วยอีเมลจริง
-                          // เหมือนแท็บอื่นด้านล่าง
-                          return item.reporterEmail == _currentUserEmail;
-                        } else {
+                          // รายงานของฉัน = ประวัติทั้งหมด รวมเคสที่จบ/ยกเลิกแล้ว
+                          // (เดิมซ่อนไป ทำให้ย้อนดูสถานะเคสตัวเองไม่ได้เลย)
+                          return isMine(item);
+                        }
+                        if (isClosed(item)) return false;
+                        {
                           // เคสที่ผู้ใช้แจ้งเอง จะแสดงเสมอไม่ถูกซ่อนตามรัศมี
-                          final isMyReport =
-                              item.reporterEmail == _currentUserEmail;
+                          final isMyReport = isMine(item);
                           if (isMyReport) return true;
 
                           // Area incidents by radius
@@ -231,11 +230,14 @@ class _IncidentListScreenState extends State<IncidentListScreen> {
                       }).toList();
 
                       // เรียงลำดับ: เคสของผู้ใช้ขึ้นบนสุดเสมอ จากนั้นเรียงตามเวลาล่าสุด
+                      // เคสที่ยังไม่จบขึ้นก่อนเคสที่จบแล้ว
                       filtered.sort((a, b) {
-                        final aIsMine = a.reporterEmail == _currentUserEmail;
-                        final bIsMine = b.reporterEmail == _currentUserEmail;
+                        final aIsMine = isMine(a);
+                        final bIsMine = isMine(b);
                         if (aIsMine && !bIsMine) return -1;
                         if (!aIsMine && bIsMine) return 1;
+                        if (!isClosed(a) && isClosed(b)) return -1;
+                        if (isClosed(a) && !isClosed(b)) return 1;
                         return b.createdAt.compareTo(a.createdAt);
                       });
 
@@ -421,10 +423,12 @@ class _IncidentListScreenState extends State<IncidentListScreen> {
                     item.type,
                     style: TextStyle(fontSize: 13, color: _isNightMode ? Colors.white70 : Colors.black87),
                   ),
-                  if (item.assignedAmbulancePlate != null && item.assignedAmbulancePlate!.isNotEmpty) ...[
+                  if (item.vehicleCount > 0) ...[
                     const SizedBox(height: 2),
                     Text(
-                      'รถกู้ชีพ: ${item.assignedAmbulancePlate}',
+                      item.vehicleCount > 1
+                          ? 'รถกู้ชีพ ${item.vehicleCount} คัน: ${item.vehiclesLabel}'
+                          : 'รถกู้ชีพ: ${item.vehiclesLabel}',
                       style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
                     ),
                   ],

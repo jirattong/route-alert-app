@@ -69,6 +69,10 @@ class EmergencyVehicleData {
             (pt[1] as num).toDouble(),
           );
         }
+        // รูปแบบที่เก็บใน Firestore (ดู _mirrorToFirestore)
+        if (pt is Map && pt['lat'] is num && pt['lng'] is num) {
+          return LatLng((pt['lat'] as num).toDouble(), (pt['lng'] as num).toDouble());
+        }
         return const LatLng(13.7563, 100.5018);
       }).toList();
     }
@@ -331,6 +335,25 @@ class EmergencyMqttService {
   // เขียนพิกัดล่าสุดลง Firestore แบบหน่วงเวลา (ดูคอมเมนต์ที่ _firestoreMirrorInterval)
   // ปิดสัญญาณ (sirenActive:false) ต้องลบทิ้งทันทีไม่รอ throttle ไม่งั้นเว็บแดชบอร์ด
   // จะยังเห็นรถคันนี้ "กำลังวิ่ง" ค้างอยู่นานถึง 4 วิหลังจากที่จริงหยุดไปแล้ว
+  /// ข้อมูลที่เขียนลง Firestore — Firestore ไม่รองรับ array ซ้อน array เดิมส่ง routePoints
+  /// เป็น [[lat, lng], ...] ทำให้ SDK ฝั่ง iOS โยน exception แอปปิดตัวทันทีเมื่อรถได้รับเคส
+  /// (มีเส้นทาง) จึงเก็บเป็น {lat, lng} แทน และลดจำนวนจุดกันเอกสารใหญ่เกิน 1 MB
+  static Map<String, dynamic> firestoreMapFor(EmergencyVehicleData data) {
+    final map = data.toMap();
+    final route = data.routePoints;
+    if (route != null && route.isNotEmpty) {
+      final step = (route.length / 200).ceil().clamp(1, route.length);
+      final sampled = [
+        for (var i = 0; i < route.length; i += step) route[i],
+        if ((route.length - 1) % step != 0) route.last,
+      ];
+      map['routePoints'] = [
+        for (final p in sampled) {'lat': p.latitude, 'lng': p.longitude},
+      ];
+    }
+    return map;
+  }
+
   void _mirrorToFirestore(EmergencyVehicleData data) {
     final now = DateTime.now();
     final lastMirror = _lastFirestoreMirrorAt[data.id];
@@ -345,8 +368,9 @@ class EmergencyMqttService {
     final doc =
         FirebaseFirestore.instance.collection('emergency_fleet').doc(data.id);
     if (data.sirenActive) {
+      final map = firestoreMapFor(data);
       doc.set({
-        ...data.toMap(),
+        ...map,
         'updatedAt': now.toIso8601String(),
       }, SetOptions(merge: true)).catchError((e) {
         debugPrint('[EmergencyMqttService] Firestore mirror write failed: $e');

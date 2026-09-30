@@ -30,6 +30,25 @@ class _AmbulanceProfileScreenState extends State<AmbulanceProfileScreen> {
     super.initState();
     _loadUserData();
     _loadAmbulanceProfile();
+    AmbulanceStorageService.profileNotifier.addListener(_onProfileChanged);
+  }
+
+  @override
+  void dispose() {
+    AmbulanceStorageService.profileNotifier.removeListener(_onProfileChanged);
+    super.dispose();
+  }
+
+  // รหัสหน่วยอาจถูกเปลี่ยนเป็นของบัญชีหลังล็อกอิน (ล็อกอินบัญชีเดิมจากเครื่องใหม่)
+  void _onProfileChanged() {
+    final p = AmbulanceStorageService.profileNotifier.value;
+    final id = p['ambulanceId'] ?? '';
+    if (!mounted || id.isEmpty) return;
+    setState(() {
+      _ambulanceUnitId = id;
+      _ambulanceCallSign = p['callSign'] ?? _ambulanceCallSign;
+      _vehiclePlate = p['plateNumber'] ?? _vehiclePlate;
+    });
   }
 
   Future<void> _loadUserData() async {
@@ -63,7 +82,7 @@ class _AmbulanceProfileScreenState extends State<AmbulanceProfileScreen> {
     final incidents = await IncidentService().getLocalIncidents();
     final count = incidents
         .where((i) =>
-            i.assignedAmbulanceId == _ambulanceUnitId && i.status == 'resolved')
+            i.hasUnit(_ambulanceUnitId, plate: _vehiclePlate) && i.status == 'resolved')
         .length;
     if (mounted) {
       setState(() => _completedCases = count);

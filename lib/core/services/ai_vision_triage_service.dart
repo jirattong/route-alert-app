@@ -7,6 +7,36 @@ import 'package:image/image.dart' as img;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../ml/accident_image_classifier_service.dart';
 
+/// ด่าน 1: ภาพนี้สร้างด้วย AI หรือเปล่า (ตรวจด้วย Gemini) — [checked] = false เมื่อตรวจไม่ได้
+/// (ไม่มี key / ออฟไลน์) ซึ่งไม่ขวางการแจ้งเหตุ
+class AiGeneratedCheck {
+  final bool checked;
+  final bool isAiGenerated;
+  final double confidence;
+  final String reason;
+
+  const AiGeneratedCheck({
+    required this.checked,
+    this.isAiGenerated = false,
+    this.confidence = 0,
+    this.reason = '',
+  });
+
+  static const skipped = AiGeneratedCheck(checked: false);
+
+  /// ถือว่าเป็นภาพ AI เมื่อมั่นใจพอ — ต่ำกว่านี้ให้ผ่านไปด่าน 2 (กันบล็อกภาพจริงผิดๆ ในเหตุฉุกเฉิน)
+  bool get blocks => checked && isAiGenerated && confidence >= 0.7;
+
+  String get summaryLine {
+    if (!checked) return '⚪ ด่าน 1: ข้ามการตรวจภาพ AI (ไม่มี Gemini API Key หรือออฟไลน์)';
+    final percent = (confidence * 100).round();
+    if (blocks) return '🤖 ด่าน 1 (Gemini): ภาพนี้น่าจะสร้างด้วย AI ($percent%)';
+    return isAiGenerated
+        ? '✅ ด่าน 1 (Gemini): ไม่ชัดว่าเป็นภาพ AI ($percent%) — ส่งตรวจต่อ'
+        : '✅ ด่าน 1 (Gemini): เป็นภาพถ่ายจริง ไม่ใช่ภาพ AI';
+  }
+}
+
 class AiTriageResult {
   final bool isIncidentDetected; // มีร่องรอยอุบัติเหตุจริงหรือไม่ (คัดกรองภาพไม่เกี่ยวข้อง)
   final String severityLevel; // 'วิกฤต (Code Red...)' | 'ปานกลาง (Medium...)' | 'เล็กน้อย (Low...)' | 'ไม่พบร่องรอยอุบัติเหตุ'
@@ -17,6 +47,11 @@ class AiTriageResult {
   final String modelName;
   final int photoCount;
   final bool isUsingGemini;
+  // โมเดลที่เทรนเองเป็นตัวตัดสินว่า "เป็นอุบัติเหตุไหม" (null = ไม่ได้ใช้/ยังไม่มีโมเดล)
+  final double? trainedAccidentProbability;
+  bool get isUsingTrainedModel => trainedAccidentProbability != null;
+  final AiGeneratedCheck? aiGeneratedCheck;
+  bool get isAiGenerated => aiGeneratedCheck?.blocks ?? false;
 
   AiTriageResult({
     required this.isIncidentDetected,
@@ -28,7 +63,31 @@ class AiTriageResult {
     this.modelName = 'Local Computer Vision Engine (Heuristic, not ML)',
     this.photoCount = 1,
     this.isUsingGemini = false,
+    this.trainedAccidentProbability,
+    this.aiGeneratedCheck,
   });
+
+  AiTriageResult copyWith({
+    bool? isIncidentDetected,
+    List<String>? detectedFeatures,
+    String? modelName,
+    double? trainedAccidentProbability,
+    AiGeneratedCheck? aiGeneratedCheck,
+  }) =>
+      AiTriageResult(
+        isIncidentDetected: isIncidentDetected ?? this.isIncidentDetected,
+        severityLevel: severityLevel,
+        severityCode: severityCode,
+        confidenceScore: confidenceScore,
+        detectedFeatures: detectedFeatures ?? this.detectedFeatures,
+        clinicalRecommendation: clinicalRecommendation,
+        modelName: modelName ?? this.modelName,
+        photoCount: photoCount,
+        isUsingGemini: isUsingGemini,
+        trainedAccidentProbability:
+            trainedAccidentProbability ?? this.trainedAccidentProbability,
+        aiGeneratedCheck: aiGeneratedCheck ?? this.aiGeneratedCheck,
+      );
 }
 
 /// AI Computer Vision & Gemini Multimodal Service
@@ -74,7 +133,133 @@ class AiVisionTriageService {
   }
 
   /// Analyzes multiple emergency photos with Gemini Vision or Local Engine
-  Future<AiTriageResult> analyzeIncidentPhotos(List<Uint8List> photosBytes) async {
+  /// [useGemini] = ผู้ใช้กด "ประเมินละเอียดด้วย Gemini" เอง — ปกติใช้โมเดลที่เทรนเองอย่างเดียว
+  Future<AiTriageResult> analyzeIncidentPhotos(List<Uint8List> photosBytes,
+      {bool useGemini = false}) async {
+    if (photosBytes.isEmpty) return _analyzeStage2(photosBytes, useGemini: useGemini);
+
+    // ด่าน 1: ภาพนี้สร้างด้วย AI หรือเปล่า (Gemini) → ด่าน 2: เป็นอุบัติเหตุจริงไหม (โมเดลที่เทรนเอง)
+    final aiCheck = await _checkAiGenerated(photosBytes);
+    if (aiCheck.blocks) {
+      return AiTriageResult(
+        isIncidentDetected: false,
+        severityCode: 'AI-Generated',
+        severityLevel: 'ภาพนี้อาจสร้างด้วย AI',
+        confidenceScore: aiCheck.confidence,
+        photoCount: photosBytes.length,
+        detectedFeatures: [
+          aiCheck.summaryLine,
+          if (aiCheck.reason.isNotEmpty) '💬 ${aiCheck.reason}',
+          '📸 ถ้าเป็นเหตุจริง ให้ถ่ายภาพใหม่จากกล้องที่จุดเกิดเหตุ',
+        ],
+        clinicalRecommendation:
+            'ภาพที่สร้างด้วย AI ใช้ยืนยันเหตุไม่ได้ — หากเป็นเหตุฉุกเฉินจริง ยังส่ง SOS ได้ตามปกติ',
+        modelName: 'ด่าน 1: ตรวจภาพ AI ด้วย Gemini',
+        isUsingGemini: true,
+        aiGeneratedCheck: aiCheck,
+      );
+    }
+    final result = await _analyzeStage2(photosBytes, useGemini: useGemini);
+    return result.copyWith(
+      detectedFeatures: [aiCheck.summaryLine, ...result.detectedFeatures],
+      aiGeneratedCheck: aiCheck,
+    );
+  }
+
+  // ผลด่าน 1 ของชุดภาพล่าสุด — กด "ประเมินละเอียดด้วย Gemini" ซ้ำจะได้ไม่ต้องเรียก Gemini ใหม่
+  String? _aiCheckCacheKey;
+  AiGeneratedCheck? _aiCheckCache;
+
+  static String _photosKey(List<Uint8List> photos) => photos.map((b) {
+        var h = b.length;
+        for (var i = 0; i < b.length; i += 997) {
+          h = (h * 31 + b[i]) & 0x3fffffff;
+        }
+        return h.toString();
+      }).join('|');
+
+  Future<AiGeneratedCheck> _checkAiGenerated(List<Uint8List> photosBytes) async {
+    final key = _photosKey(photosBytes);
+    if (key == _aiCheckCacheKey && _aiCheckCache != null) return _aiCheckCache!;
+    final apiKey = await getGeminiApiKey();
+    if (apiKey == null || apiKey.isEmpty) return AiGeneratedCheck.skipped;
+
+    const prompt = '''You are a forensic image analyst for an emergency-reporting app in Thailand.
+For EACH attached image (in order), decide whether it is AI-generated or heavily AI-edited
+(e.g. Midjourney, DALL-E, Stable Diffusion, Imagen/Gemini, Firefly) rather than a real photograph
+taken with a camera or phone. Look for: warped or unreadable text and licence plates, malformed hands,
+faces or vehicles, inconsistent lighting and shadows, impossible geometry or physics, overly smooth
+"plastic" textures, repeated patterns, and watermarks or signatures of AI tools.
+A real but low-quality, blurry, dark or cropped phone photo is NOT AI-generated.
+Answer JSON only, no markdown:
+{"results":[{"index":0,"isAiGenerated":false,"confidence":0.0,"reason":"เหตุผลสั้นๆ เป็นภาษาไทย"}]}
+confidence = how sure you are of your isAiGenerated answer (0.0-1.0).''';
+
+    final parsed = await _geminiJson([
+      {'text': prompt},
+      for (final bytes in photosBytes)
+        {'inlineData': {'mimeType': 'image/jpeg', 'data': base64Encode(bytes)}},
+    ], apiKey);
+    final results = parsed?['results'];
+    if (results is! List || results.isEmpty) return AiGeneratedCheck.skipped;
+
+    // ภาพใดภาพหนึ่งเป็น AI ก็ถือว่าชุดนี้น่าสงสัย — รายงานภาพที่มั่นใจว่าเป็น AI มากที่สุด
+    AiGeneratedCheck best = const AiGeneratedCheck(checked: true, confidence: 1);
+    for (final r in results.whereType<Map>()) {
+      final isAi = r['isAiGenerated'] == true;
+      final conf = ((r['confidence'] as num?)?.toDouble() ?? 0.5).clamp(0.0, 1.0);
+      final check = AiGeneratedCheck(
+        checked: true,
+        isAiGenerated: isAi,
+        confidence: conf,
+        reason: r['reason']?.toString() ?? '',
+      );
+      final score = isAi ? conf : 0.0;
+      final bestScore = best.isAiGenerated ? best.confidence : 0.0;
+      if (score > bestScore || (!best.isAiGenerated && !isAi && conf < best.confidence)) best = check;
+    }
+    _aiCheckCacheKey = key;
+    _aiCheckCache = best;
+    return best;
+  }
+
+  /// เรียก Gemini แล้วคืน JSON ที่ได้ (null ถ้าทุกโมเดลล้มเหลว)
+  Future<Map<String, dynamic>?> _geminiJson(
+      List<Map<String, dynamic>> parts, String apiKey) async {
+    final body = jsonEncode({
+      'contents': [
+        {'parts': parts}
+      ],
+      'generationConfig': {'temperature': 0.0, 'responseMimeType': 'application/json'},
+    });
+    for (final model in const ['gemini-3.5-flash-lite', 'gemini-3.6-flash', 'gemini-flash-latest']) {
+      try {
+        final response = await http.post(
+          Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent'),
+          headers: {'Content-Type': 'application/json', 'x-goog-api-key': apiKey},
+          body: body,
+        ).timeout(const Duration(seconds: 9));
+        if (response.statusCode != 200) {
+          debugPrint('Gemini $model status ${response.statusCode}');
+          continue;
+        }
+        final decoded = jsonDecode(utf8.decode(response.bodyBytes));
+        final text = (decoded['candidates']?[0]?['content']?['parts']?[0]?['text'] ?? '')
+            .toString()
+            .replaceAll('```json', '')
+            .replaceAll('```', '')
+            .trim();
+        final parsed = jsonDecode(text);
+        if (parsed is Map<String, dynamic>) return parsed;
+      } catch (e) {
+        debugPrint('Gemini $model failed: $e');
+      }
+    }
+    return null;
+  }
+
+  Future<AiTriageResult> _analyzeStage2(List<Uint8List> photosBytes,
+      {bool useGemini = false}) async {
     if (photosBytes.isEmpty) {
       return AiTriageResult(
         isIncidentDetected: false,
@@ -87,8 +272,18 @@ class AiVisionTriageService {
       );
     }
 
-    // 1. Check for Google Gemini Vision API Key
-    final geminiKey = await getGeminiApiKey();
+    // 0. โมเดลที่เทรนเองตัดสินก่อนว่าเป็นอุบัติเหตุหรือไม่ — Gemini (ถ้ามี key) ใช้แค่
+    // ช่วยประเมินความรุนแรง/บรรยายภาพเมื่อโมเดลยืนยันแล้วว่าเป็นอุบัติเหตุ
+    final trained = <AccidentClassificationResult?>[];
+    for (final bytes in photosBytes) {
+      trained.add(await _classifyWithTrainedModel(bytes));
+    }
+    if (trained.any((r) => r != null)) {
+      return _analyzeWithTrainedModel(photosBytes, trained, useGemini: useGemini);
+    }
+
+    // 1. ยังไม่มีโมเดลที่เทรนเอง — ใช้ Gemini เมื่อผู้ใช้ขอ แล้วค่อย fallback
+    final geminiKey = useGemini ? await getGeminiApiKey() : null;
     if (geminiKey != null && geminiKey.isNotEmpty) {
       try {
         final geminiResult = await _callGeminiVision(photosBytes, geminiKey);
@@ -114,6 +309,81 @@ class AiVisionTriageService {
     }
     if (!classifier.isModelLoaded) return null;
     return classifier.classify(bytes);
+  }
+
+  static double _accidentProbability(AccidentClassificationResult r) =>
+      r.isAccident ? r.confidence : 1 - r.confidence;
+
+  Future<AiTriageResult> _analyzeWithTrainedModel(List<Uint8List> photosBytes,
+      List<AccidentClassificationResult?> trained,
+      {bool useGemini = false}) async {
+    final probs = trained.whereType<AccidentClassificationResult>()
+        .map(_accidentProbability)
+        .toList();
+    final best = probs.reduce(math.max);
+    final percent = (best * 100).round();
+    const modelLabel = 'โมเดลตรวจอุบัติเหตุที่เทรนเอง (EfficientNetV2)';
+
+    // ผู้ใช้ขอให้ Gemini ช่วยดูด้วย — แสดงความเห็นของทั้งสองโมเดลคู่กัน
+    if (useGemini) {
+      final geminiKey = await getGeminiApiKey();
+      if (geminiKey != null && geminiKey.isNotEmpty) {
+        try {
+          final gemini = await _callGeminiVision(photosBytes, geminiKey);
+          if (gemini != null) {
+            final agree = gemini.isIncidentDetected == (best >= 0.5);
+            return gemini.copyWith(
+              detectedFeatures: [
+                best >= 0.5
+                    ? '🧠 ด่าน 2 (โมเดลที่เทรนเอง): ภาพอุบัติเหตุ ($percent%)'
+                    : '🧠 ด่าน 2 (โมเดลที่เทรนเอง): ไม่ใช่ภาพอุบัติเหตุ (${100 - percent}%)',
+                agree ? '✨ Gemini เห็นตรงกัน' : '⚠️ Gemini ประเมินต่างจากโมเดลที่เทรนเอง',
+                ...gemini.detectedFeatures,
+              ],
+              modelName: '$modelLabel + Gemini',
+              trainedAccidentProbability: best,
+            );
+          }
+        } catch (e) {
+          debugPrint('Gemini re-check failed: $e');
+        }
+      }
+    }
+
+    if (best < 0.5) {
+      return AiTriageResult(
+        isIncidentDetected: false,
+        severityCode: 'Non-Incident',
+        severityLevel: 'ไม่พบร่องรอยอุบัติเหตุในภาพ',
+        confidenceScore: 1 - best,
+        photoCount: photosBytes.length,
+        detectedFeatures: [
+          '🧠 ด่าน 2 (โมเดลที่เทรนเอง): ไม่ใช่ภาพอุบัติเหตุ (${100 - percent}%)',
+          '📸 แนะนำถ่ายภาพตัวรถ, รอยชน, หรือจุดเกิดเหตุที่ชัดเจน',
+        ],
+        clinicalRecommendation:
+            'หากเป็นเหตุฉุกเฉินจริง สามารถเลือกประเภทเหตุและส่ง SOS ได้ตามปกติ',
+        modelName: modelLabel,
+        trainedAccidentProbability: best,
+      );
+    }
+
+    // โมเดลที่เทรนเองตอบได้แค่ "อุบัติเหตุหรือไม่" — ไม่เดาความรุนแรงจากสูตรความคมชัดของภาพ
+    // (เดิมทำให้ภาพหน้าคนชัดๆ ถูกตีเป็น "วิกฤต") ให้ผู้แจ้งเลือกเอง หรือกดให้ Gemini ช่วยประเมิน
+    return AiTriageResult(
+      isIncidentDetected: true,
+      severityCode: 'Unassessed',
+      severityLevel: 'ยังไม่ได้ประเมินความรุนแรง',
+      confidenceScore: best,
+      photoCount: photosBytes.length,
+      detectedFeatures: [
+        '🧠 ด่าน 2 (โมเดลที่เทรนเอง): ภาพอุบัติเหตุ ($percent%)',
+        '📋 ความรุนแรง: เลือกเองในช่องด้านบน หรือกด "ประเมินละเอียดด้วย Gemini"',
+      ],
+      clinicalRecommendation: 'ตรวจสอบระดับความรุนแรงให้ตรงกับสถานการณ์จริงก่อนส่ง SOS',
+      modelName: modelLabel,
+      trainedAccidentProbability: best,
+    );
   }
 
   /// Calls Google Gemini Multimodal Vision API
@@ -229,12 +499,22 @@ class AiVisionTriageService {
   /// ถ้ามีโมเดลที่เทรนเองผ่าน Teachable Machine (assets/models/accident_classifier.tflite)
   /// จะใช้ผลจากโมเดลนั้นช่วยตัดสิน isIncidentScene ร่วมกับ heuristic เดิม
   /// ถ้าไม่มีโมเดล จะ fallback ไปใช้ heuristic ล้วนเหมือนเดิมทุกประการ
-  Future<AiTriageResult> _analyzeWithLocalEngine(
-      List<Uint8List> photosBytes) async {
+  Future<AiTriageResult> _analyzeWithLocalEngine(List<Uint8List> photosBytes,
+      {List<bool?>? trainedOverride}) async {
     final List<_ImageStats> statsList = [];
-    for (final bytes in photosBytes) {
+    for (var i = 0; i < photosBytes.length; i++) {
+      final bytes = photosBytes[i];
       final heuristicStats = _computeImageStats(bytes);
-      final trainedResult = await _classifyWithTrainedModel(bytes);
+      final override = trainedOverride != null && i < trainedOverride.length
+          ? trainedOverride[i]
+          : null;
+      if (override != null) {
+        // โมเดลที่เทรนเองตัดสินแล้ว — ใช้ heuristic แค่ประเมินความรุนแรง
+        statsList.add(heuristicStats.copyWithIncidentOverride(override));
+        continue;
+      }
+      final trainedResult =
+          trainedOverride == null ? await _classifyWithTrainedModel(bytes) : null;
 
       if (trainedResult != null && trainedResult.confidence >= 0.6) {
         // เชื่อผลจากโมเดลที่เทรนเองเป็นหลักเมื่อมั่นใจเพียงพอ (OR กับ heuristic

@@ -10,6 +10,13 @@ class UserFaceProfile {
   final String? phone;
   final String? carPlate;
   final DateTime registeredAt;
+  // มีความหมายเฉพาะ role == 'agency' — โรงพยาบาลที่บัญชีนี้เป็นเจ้าของ/ดูแล
+  // เดิมไม่มีฟิลด์นี้เลย ทุกบัญชี agency เลยใช้ HospitalLocationService
+  // profile เดียวกันหมด (เพิ่มตอนทำ multi-hospital)
+  final String? hospitalId;
+  // token ของ Firebase Cloud Messaging สำหรับส่ง push notification ไปอุปกรณ์
+  // นี้โดยตรง (เพิ่มตอนทำระบบแจ้งเตือนเบื้องหลัง)
+  final String? fcmToken;
 
   UserFaceProfile({
     required this.id,
@@ -21,6 +28,8 @@ class UserFaceProfile {
     this.phone,
     this.carPlate,
     required this.registeredAt,
+    this.hospitalId,
+    this.fcmToken,
   });
 
   Map<String, dynamic> toMap() {
@@ -34,6 +43,8 @@ class UserFaceProfile {
       'phone': phone,
       'carPlate': carPlate,
       'registeredAt': registeredAt.toIso8601String(),
+      'hospitalId': hospitalId,
+      'fcmToken': fcmToken,
     };
   }
 
@@ -53,6 +64,8 @@ class UserFaceProfile {
       registeredAt: map['registeredAt'] != null
           ? DateTime.parse(map['registeredAt'])
           : DateTime.now(),
+      hospitalId: map['hospitalId'],
+      fcmToken: map['fcmToken'],
     );
   }
 
@@ -68,6 +81,8 @@ class UserFaceProfile {
     String? phone,
     String? carPlate,
     DateTime? registeredAt,
+    String? hospitalId,
+    String? fcmToken,
   }) {
     return UserFaceProfile(
       id: id ?? this.id,
@@ -79,6 +94,8 @@ class UserFaceProfile {
       phone: phone ?? this.phone,
       carPlate: carPlate ?? this.carPlate,
       registeredAt: registeredAt ?? this.registeredAt,
+      hospitalId: hospitalId ?? this.hospitalId,
+      fcmToken: fcmToken ?? this.fcmToken,
     );
   }
 

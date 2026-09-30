@@ -1,6 +1,9 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../features/auth_face_login/data/services/face_auth_repository.dart';
+import 'incident_service.dart';
 
 /// เก็บข้อมูลประจำหน่วยรถพยาบาลของเครื่องนี้ (รหัสหน่วย/ทะเบียน/ชื่อเรียกขาน)
 /// เพื่อไม่ให้ทุกเครื่องที่ติดตั้งแอปรายงานตัวเป็น "AMB-1669-01" ซ้ำกันหมด
@@ -92,6 +95,7 @@ class AmbulanceStorageService {
     required String ambulanceId,
     required String plateNumber,
     required String callSign,
+    bool uploadToAccount = true,
   }) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_keyAmbulanceId, ambulanceId);
@@ -103,6 +107,51 @@ class AmbulanceStorageService {
       'plateNumber': plateNumber,
       'callSign': callSign,
     };
+    if (uploadToAccount) unawaited(_uploadToAccount());
+  }
+
+  static Future<void> _uploadToAccount() async {
+    final user = await FaceAuthRepository.getCurrentUser();
+    if (user == null || user.role != 'ambulance') return;
+    final p = profileNotifier.value;
+    await FaceAuthRepository.updateAmbulanceProfile(user.email,
+        unitId: p['ambulanceId'] ?? '',
+        plateNumber: p['plateNumber'] ?? '',
+        callSign: p['callSign'] ?? '');
+  }
+
+  /// หน่วยรถผูกกับ "บัญชี" ไม่ใช่เครื่อง — เดิมรหัสหน่วยสุ่มแยกต่อเครื่อง บัญชีเดียวกัน
+  /// ล็อกอินอีกเครื่องจึงกลายเป็นคนละหน่วย เห็นเคสที่ตัวเองรับว่า "เป็นของหน่วยอื่น"
+  /// เรียกหลังล็อกอิน: บัญชีมีหน่วยแล้ว → ใช้หน่วยของบัญชี, ยังไม่มี → ใช้ของเครื่องนี้
+  static Future<void> syncWithAccount(String email) async {
+    final account = await FaceAuthRepository.fetchAccountData(email);
+    if (account == null) return; // ออฟไลน์ — ใช้ของเครื่องไปก่อน
+    final local = await loadProfile();
+    final localUnit = local['ambulanceId'] ?? '';
+    final accountUnit = (account['ambulanceUnitId'] ?? '').toString();
+
+    if (accountUnit.isNotEmpty && accountUnit != localUnit) {
+      // ข้อมูลก่อนแก้บั๊ก: เครื่องอื่นเคยเขียนทับรหัสหน่วยของบัญชี — ถ้าเครื่องนี้ยังถือเคสค้าง
+      // อยู่ภายใต้รหัสเดิม แต่รหัสของบัญชีไม่มีเคส ให้รหัสของเครื่องนี้ชนะ (เคสจะไม่หาย)
+      final localBusy = await IncidentService().unitHasOpenCase(localUnit);
+      final accountBusy = await IncidentService().unitHasOpenCase(accountUnit);
+      if (localBusy == true && accountBusy != true) {
+        await _uploadToAccount();
+        return;
+      }
+      await saveProfile(
+        ambulanceId: accountUnit,
+        plateNumber: (account['ambulancePlate'] ?? local['plateNumber'] ?? '').toString(),
+        callSign: (account['ambulanceCallSign'] ?? 'หน่วยกู้ชีพ $accountUnit').toString(),
+        uploadToAccount: false,
+      );
+      return;
+    }
+    if (accountUnit.isEmpty ||
+        account['ambulancePlate'] == null ||
+        account['ambulanceCallSign'] == null) {
+      await _uploadToAccount();
+    }
   }
 
   /// โหลดข้อมูลหน่วย ถ้ายังไม่เคยตั้งค่ามาก่อนจะสุ่มสร้างรหัสหน่วยที่ไม่ซ้ำให้อัตโนมัติ

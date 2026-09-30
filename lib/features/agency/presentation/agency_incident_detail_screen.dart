@@ -11,11 +11,14 @@ import '../../../core/services/incident_service.dart';
 class AgencyIncidentDetailScreen extends StatefulWidget {
   final IncidentReport? incident;
   final Map<String, dynamic>? incidentData;
+  // เปิดมาจากปุ่ม "ส่งรถพยาบาล" บนแจ้งเตือน — มอบหมายรถใกล้สุดให้ทันทีที่หน้าจอพร้อม
+  final bool autoDispatch;
 
   const AgencyIncidentDetailScreen({
     super.key,
     this.incident,
     this.incidentData,
+    this.autoDispatch = false,
   });
 
   @override
@@ -54,6 +57,42 @@ class _AgencyIncidentDetailScreenState
         });
       }
     });
+
+    if (widget.autoDispatch) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _autoDispatch());
+    }
+  }
+
+  Future<void> _autoDispatch() async {
+    if (!mounted) return;
+    if (_currentIncident.status != 'pending' ||
+        _currentIncident.vehicleCount > 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('เคสนี้มีรถพยาบาลรับแล้ว')),
+      );
+      return;
+    }
+    // เปิดแอปจากแจ้งเตือนตอนปิดสนิท รายชื่อรถจาก MQTT อาจยังมาไม่ถึง รอสักครู่ก่อน
+    if (EmergencyMqttService().activeFleet.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('กำลังค้นหารถพยาบาลที่ใกล้ที่สุด...'),
+          duration: Duration(seconds: 3),
+        ),
+      );
+      try {
+        await EmergencyMqttService()
+            .activeFleetStream
+            .firstWhere((fleet) => fleet.isNotEmpty)
+            .timeout(const Duration(seconds: 8));
+      } catch (_) {}
+    }
+    if (!mounted || _isDispatching) return;
+    if (_currentIncident.status != 'pending' ||
+        _currentIncident.vehicleCount > 0) {
+      return;
+    }
+    await _handleDispatchCase();
   }
 
   @override
@@ -62,7 +101,9 @@ class _AgencyIncidentDetailScreenState
     super.dispose();
   }
 
-  Future<void> _handleDispatchCase() async {
+  /// [additional] = ส่งรถเพิ่มให้เคสที่มีรถอยู่แล้ว (เคสเดียวรับได้หลายคัน)
+  /// ไม่ใช่ additional = ส่งคันแรก ถ้ามีรถรับตัดหน้าไปแล้วจะไม่ส่งซ้อนโดยไม่ตั้งใจ
+  Future<void> _handleDispatchCase({bool additional = false}) async {
     setState(() => _isDispatching = true);
     final hospital = HospitalLocationService().currentProfile;
 
@@ -89,9 +130,14 @@ class _AgencyIncidentDetailScreenState
 
     // ตัดรถพยาบาลที่กำลังมีเคส active อยู่แล้วออกก่อนหาคันที่ใกล้ที่สุด — กันไม่ให้
     // รถคันเดียวถูกมอบหมาย 2 เคสพร้อมกัน (เดิมไม่มีการเช็คนี้เลย)
+    // (รวมรถที่อยู่ในเคสนี้แล้ว และอีกบัญชีบนรถคันเดียวกัน = ทะเบียนเดียวกัน)
     final busyIds = await IncidentService().getBusyAmbulanceIds();
-    final fleet =
-        onlineFleet.where((a) => !busyIds.contains(a.id)).toList();
+    final busyKeys = await IncidentService().getBusyVehicleKeys();
+    final fleet = onlineFleet
+        .where((a) =>
+            !busyIds.contains(a.id) &&
+            !busyKeys.contains(AssignedUnit.vehicleKeyFor(a.plateNumber, a.id)))
+        .toList();
 
     if (fleet.isEmpty) {
       if (mounted) {
@@ -123,44 +169,57 @@ class _AgencyIncidentDetailScreenState
       }
     }
 
-    final success = await IncidentService().dispatchIncidentByHospital(
+    final result = await IncidentService().assignAmbulance(
       id: _currentIncident.id,
       ambulanceId: nearest.id,
-      ambulancePlate: nearest.plateNumber.isNotEmpty
-          ? nearest.plateNumber
-          : nearest.callSign,
+      // ทะเบียนจริง (ว่างได้) — ใช้นับ "รถ 1 คัน" และล็อกรถ ต้องตรงกับที่รถกดรับเอง
+      ambulancePlate: nearest.plateNumber,
       ambulanceCallSign: nearest.callSign,
-      hospitalName: hospital.hospitalName,
-      hospitalLatitude: hospital.latitude,
-      hospitalLongitude: hospital.longitude,
+      onlyIfUnassigned: !additional,
+      // ไม่ส่ง hospitalName/lat/lng อีกต่อไป — targetHospitalId ที่ระบบเลือกไว้
+      // ถูกต้องแล้วตอนสร้างเคส (ดูคอมเมนต์ที่ dispatchIncidentByHospital) ส่งแค่
+      // hospitalId ของ agency นี้ไว้เตือน (log) เฉยๆ ถ้าไม่ตรงกับที่ระบบเลือกไว้
+      callingHospitalId: hospital.hospitalId,
     );
 
-    if (mounted) {
-      setState(() => _isDispatching = false);
-      if (success) {
-        final distKm = (nearestDistMeters / 1000).toStringAsFixed(1);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-                '✅ ยืนยันรับเคสและส่งต่อให้ ${nearest.callSign} (ใกล้ที่สุด $distKm กม.) เรียบร้อยแล้ว'),
-            backgroundColor: const Color(0xFF00A896),
-          ),
-        );
-      } else {
-        // เดิม dispatchIncidentByHospital คืนค่า true เสมอแม้ Firestore ล้มเหลว
-        // ทำให้ agency เห็นว่ามอบหมายสำเร็จ ทั้งที่รถพยาบาลไม่มีทางรู้เรื่องเลย
-        // (คนละเครื่องกัน สื่อสารผ่าน Firestore เท่านั้น) — ตอนนี้คืนค่าจริงแล้ว
-        // ต้องแจ้งเตือนให้กดใหม่แทนการนิ่งเงียบ
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-                '⚠️ ส่งมอบหมายเคสไม่สำเร็จ (เช็คสัญญาณอินเทอร์เน็ต) กรุณาลองกดใหม่อีกครั้ง'),
-            backgroundColor: Color(0xFFDC2626),
-            duration: Duration(seconds: 4),
-          ),
-        );
-      }
-    }
+    if (!mounted) return;
+    setState(() => _isDispatching = false);
+    final distKm = (nearestDistMeters / 1000).toStringAsFixed(1);
+    final count = result.incident?.vehicleCount ?? 0;
+    final (String text, bool good) = switch (result.outcome) {
+      DispatchOutcome.assigned => (
+          '✅ ยืนยันรับเคสและส่งต่อให้ ${nearest.callSign} (ใกล้ที่สุด $distKm กม.) เรียบร้อยแล้ว',
+          true
+        ),
+      DispatchOutcome.joined => (
+          '✅ ส่ง ${nearest.callSign} ($distKm กม.) เพิ่มแล้ว — ตอนนี้มี $count คันกำลังดำเนินเคส',
+          true
+        ),
+      DispatchOutcome.alreadyMine => ('${nearest.callSign} อยู่ในเคสนี้แล้ว', true),
+      DispatchOutcome.alreadyHasVehicles => (
+          'เคสนี้มีรถพยาบาลรับไปแล้ว $count คัน — ถ้าต้องการรถเพิ่มให้กด "ส่งรถเพิ่ม"',
+          false
+        ),
+      DispatchOutcome.vehicleBusy => (
+          '${nearest.callSign} เพิ่งรับเคสอื่นไป กรุณากดส่งใหม่เพื่อเลือกคันถัดไป',
+          false
+        ),
+      DispatchOutcome.caseClosed => ('เคสนี้ปิดหรือจบไปแล้ว', false),
+      DispatchOutcome.notJoinable => ('เคสนี้เริ่มนำส่งผู้ป่วยแล้ว ไม่ต้องส่งรถเพิ่ม', false),
+      DispatchOutcome.notFound => ('ไม่พบเคสนี้ในระบบแล้ว', false),
+      // เดิม dispatchIncidentByHospital คืนค่า true เสมอแม้ Firestore ล้มเหลว — ต้องบอกให้กดใหม่
+      DispatchOutcome.failed => (
+          '⚠️ ส่งมอบหมายเคสไม่สำเร็จ (เช็คสัญญาณอินเทอร์เน็ต) กรุณาลองกดใหม่อีกครั้ง',
+          false
+        ),
+    };
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(text),
+        backgroundColor: good ? const Color(0xFF00A896) : const Color(0xFFDC2626),
+        duration: const Duration(seconds: 4),
+      ),
+    );
   }
 
   @override
@@ -304,6 +363,60 @@ class _AgencyIncidentDetailScreenState
 
                     const SizedBox(height: 14),
 
+                    // เคสมีรถแล้วแต่ยังไม่เริ่มนำส่ง — ส่งรถเพิ่มได้ (เช่น ผู้บาดเจ็บหลายคน)
+                    if (!isPending && _currentIncident.isJoinable)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 20, vertical: 6),
+                        child: Container(
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFEFF6FF),
+                            borderRadius: BorderRadius.circular(18),
+                            border: Border.all(
+                                color: const Color(0xFF3B82F6), width: 1.2),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '🚑 ตอนนี้มี ${_currentIncident.vehicleCount} คันกำลังดำเนินเคส',
+                                style: const TextStyle(
+                                    fontSize: 13.5,
+                                    fontWeight: FontWeight.bold,
+                                    color: Color(0xFF1E3A8A)),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                _currentIncident.vehiclesLabel,
+                                style: const TextStyle(
+                                    fontSize: 12, color: Color(0xFF1D4ED8)),
+                              ),
+                              const SizedBox(height: 10),
+                              SizedBox(
+                                width: double.infinity,
+                                height: 40,
+                                child: OutlinedButton.icon(
+                                  onPressed: _isDispatching
+                                      ? null
+                                      : () => _handleDispatchCase(additional: true),
+                                  icon: const Icon(Icons.add_rounded, size: 18),
+                                  label: Text(_isDispatching
+                                      ? 'กำลังสั่งการ...'
+                                      : 'ส่งรถเพิ่มอีก 1 คัน (คันว่างที่ใกล้ที่สุด)'),
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: const Color(0xFF1D4ED8),
+                                    side: const BorderSide(color: Color(0xFF3B82F6)),
+                                    shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(14)),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+
                     // 1. Dispatch Button If Case is Pending!
                     if (isPending)
                       Padding(
@@ -427,9 +540,10 @@ class _AgencyIncidentDetailScreenState
                           ),
                           _buildDetailRow(
                             labelTH: 'รถกู้ชีพที่รับเคส',
-                            labelEN: '(Assigned Vehicle)',
-                            value: _currentIncident.assignedAmbulancePlate ??
-                                'ยังไม่ได้มอบหมาย',
+                            labelEN: '(Assigned Vehicles)',
+                            value: _currentIncident.vehicleCount == 0
+                                ? 'ยังไม่ได้มอบหมาย'
+                                : '${_currentIncident.vehicleCount} คัน · ${_currentIncident.vehiclesLabel}',
                             valueColor: const Color(0xFF00A896),
                             isBold: true,
                           ),

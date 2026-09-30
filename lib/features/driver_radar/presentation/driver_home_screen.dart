@@ -6,6 +6,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:tutorial_coach_mark/tutorial_coach_mark.dart';
 import '../../../core/ml/siren_detection_service.dart';
+import '../../../core/services/live_tracking_service.dart';
 import '../../../core/services/location_service.dart';
 import '../../../core/services/driver_storage_service.dart';
 import '../../../core/services/emergency_mqtt_service.dart';
@@ -55,6 +56,8 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
   final MapController _mapController = MapController();
 
   LatLng _currentLocation = const LatLng(19.0284, 99.8962);
+  // ยังไม่เคยได้ตำแหน่งจริง — ไม่ประเมินการเตือนหลบทางจากพิกัดตั้งต้น (ยกเว้นโหมดสาธิต)
+  bool _hasRealFix = false;
   // ทิศทางการเคลื่อนที่จริงของ Driver คำนวณจากพิกัด GPS 2 จุดล่าสุด (0-360 องศา)
   double _driverHeading = 45.0;
   LatLng? _lastDriverHeadingRefPos;
@@ -125,7 +128,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
   // เป็นเคสของเราจริงหรือไม่ (เดิมไม่เช็คเลย หยิบเคส active ล่าสุดของทั้งระบบมาโชว์
   // ตรงๆ ทำให้สลับบัญชีในเครื่องเดียวกันแล้วยังเห็นเคสของบัญชีก่อนหน้าค้างอยู่)
   String? _currentUserEmail;
-  StreamSubscription<HospitalProfile>? _hospitalSub;
+  StreamSubscription<List<HospitalProfile>>? _hospitalSub;
 
   // รีเฟรชแถบ debug เป็นระยะ (ตัวนับข้อความ MQTT ที่ได้รับ อัปเดตอยู่ในตัว service
   // เอง ไม่ได้ผูกกับ setState ของหน้าจอนี้โดยตรง ถ้าเครื่องอยู่นิ่งไม่ขยับเกิน 3m
@@ -253,16 +256,24 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
   // จึงไม่มีวันไหลมาถึงฝั่ง Driver ได้เลย เห็นแค่พิกัด default ที่ hardcode ไว้
   // ในเครื่องตัวเองตลอดไป แม้จะ subscribe profileStream ไว้แล้วก็ตาม (ไม่มีใครยิง
   // event เข้ามาให้ฟัง)
+  //
+  // เดิม (ก่อนวางแผน multi-hospital) ยังผูกกับ HospitalLocationService.currentProfile
+  // ตัวเดียว (HOSP-01 เสมอ) ไม่ว่า driver จะอยู่ที่ไหน — driver ไม่มี "โรงพยาบาล
+  // ของตัวเอง" เหมือน agency จึงไม่ส่ง hospitalId เข้า initialize() เลย ใช้แค่
+  // รายชื่อโรงพยาบาลทั้งหมด (allHospitalsStream) หาโรงพยาบาลที่ใกล้ตัวเองจริง
+  // ด้วย findNearestHospital() แทน
   void _initHospitalSync() async {
     await HospitalLocationService().initialize();
+    _recomputeNearestHospital();
+    _hospitalSub = HospitalLocationService().allHospitalsStream.listen((_) {
+      _recomputeNearestHospital();
+    });
+  }
+
+  void _recomputeNearestHospital() {
     if (!mounted) return;
-    setState(() {
-      _hospitalLocation = HospitalLocationService().hospitalLocation;
-    });
-    _hospitalSub = HospitalLocationService().profileStream.listen((profile) {
-      if (!mounted) return;
-      setState(() => _hospitalLocation = profile.location);
-    });
+    final nearest = HospitalLocationService().findNearestHospital(_currentLocation);
+    setState(() => _hospitalLocation = nearest.profile.location);
   }
 
   void _initSirenDetection() {
@@ -398,22 +409,38 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
     SirenDetectionService().stop();
     DriverStorageService.backgroundAlertEnabledNotifier
         .removeListener(_onBackgroundAlertSettingChanged);
+    LiveTrackingService.instance.keepAlive
+        .removeListener(_onBackgroundAlertSettingChanged);
     super.dispose();
   }
 
   // ผู้ใช้เพิ่งเปิด/ปิดสวิตช์ "แจ้งเตือนพื้นหลัง" จากหน้าตั้งค่า — สมัคร location
   // stream ใหม่ด้วยค่า backgroundMode ล่าสุดทันที (ยกเลิกของเดิมก่อนเสมอกัน
   // subscription ซ้อนกันสอง stream พร้อมกัน)
+  // เปิดเบื้องหลังเมื่อผู้ใช้เปิดสวิตช์ หรือระหว่างรอรถพยาบาลของเคสที่ตัวเองแจ้ง (ให้
+  // Live Activity/Dynamic Island อัปเดต ETA ต่อได้ตอนพับแอป)
+  bool get _wantsBackgroundLocation =>
+      DriverStorageService.backgroundAlertEnabledNotifier.value ||
+      LiveTrackingService.instance.keepAlive.value;
+  bool? _subscribedBackgroundMode;
+
   void _onBackgroundAlertSettingChanged() {
     if (!mounted) return;
+    final background = _wantsBackgroundLocation;
+    if (_locationSubscription != null && background == _subscribedBackgroundMode) return;
+    _subscribedBackgroundMode = background;
     _locationSubscription?.cancel();
     _locationSubscription = LocationService.getLiveLocationStream(
-      backgroundMode: DriverStorageService.backgroundAlertEnabledNotifier.value,
+      backgroundMode: background,
     ).listen((newPos) {
       if (!mounted) return;
       _updateDriverHeadingFromMovement(newPos);
       _updateDriverSpeedFromMovement(newPos);
-      setState(() => _currentLocation = newPos);
+      setState(() {
+        _currentLocation = newPos;
+        _hasRealFix = true;
+      });
+      _recomputeNearestHospital();
       if (_isSimulating || _hasLiveAmbulance) {
         _runAiTrajectoryEvaluation();
       }
@@ -433,6 +460,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
     if (initialPos != null && mounted) {
       setState(() {
         _currentLocation = initialPos;
+        _hasRealFix = true;
       });
       _mapController.move(_currentLocation, 14.5);
       if (_isSimulating || _hasLiveAmbulance) {
@@ -443,15 +471,21 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
     // โหลดค่าที่บันทึกไว้ของสวิตช์ "แจ้งเตือนพื้นหลัง" ก่อนสมัคร stream ครั้งแรก
     // (ถ้าไม่โหลดก่อน ทุกครั้งที่เปิดแอปใหม่จะกลับไปใช้ backgroundMode: false เสมอ
     // แม้ผู้ใช้จะเปิดสวิตช์ไว้ก่อนหน้านี้แล้วก็ตาม)
-    final backgroundEnabled = await DriverStorageService.getBackgroundAlertEnabled();
+    final backgroundEnabled = await DriverStorageService.getBackgroundAlertEnabled() ||
+        LiveTrackingService.instance.keepAlive.value;
     if (!mounted) return;
+    _subscribedBackgroundMode = backgroundEnabled;
     _locationSubscription =
         LocationService.getLiveLocationStream(backgroundMode: backgroundEnabled)
             .listen((newPos) {
       if (!mounted) return;
       _updateDriverHeadingFromMovement(newPos);
       _updateDriverSpeedFromMovement(newPos);
-      setState(() => _currentLocation = newPos);
+      setState(() {
+        _currentLocation = newPos;
+        _hasRealFix = true;
+      });
+      _recomputeNearestHospital();
       if (_isSimulating || _hasLiveAmbulance) {
         _runAiTrajectoryEvaluation();
       }
@@ -461,6 +495,8 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
     // สมัคร stream ครั้งแรกเสร็จแล้วเท่านั้น ไม่งั้นการโหลดค่าเริ่มต้นด้านบน (ถ้า
     // ค่าที่บันทึกไว้เป็น true) จะยิง listener ซ้ำซ้อนโดยไม่จำเป็น
     DriverStorageService.backgroundAlertEnabledNotifier
+        .addListener(_onBackgroundAlertSettingChanged);
+    LiveTrackingService.instance.keepAlive
         .addListener(_onBackgroundAlertSettingChanged);
   }
 
@@ -727,7 +763,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
   /// AI Deep Learning & Route-Aware Trajectory Evaluation
   void _runAiTrajectoryEvaluation() {
     final ambPos = _ambulanceLocation;
-    if (ambPos == null && !_isSimulating) {
+    if ((ambPos == null || !_hasRealFix) && !_isSimulating) {
       setState(() {
         _isInBlueZone = false;
         _isInRedZone = false;
@@ -832,20 +868,28 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
     }
   }
 
+  // เดิมยิงทันทีตอนแอปยังเปิดอยู่ จึงไม่ได้ทดสอบเบื้องหลังจริง — รอ 8 วิให้ผู้ใช้พับแอป/ล็อกจอ
+  // ก่อน ถ้าแอปยังทำงานอยู่เบื้องหลังจริง (เปิดแจ้งเตือนพื้นหลัง) แจ้งเตือนจะเด้งขึ้นมา
   void _triggerTestBackgroundNotification() async {
+    await CriticalNotificationService().initialize();
+    final backgroundOn = DriverStorageService.backgroundAlertEnabledNotifier.value;
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(backgroundOn
+              ? '🔔 จะเด้งใน 8 วินาที — พับแอปหรือล็อกจอได้เลย'
+              : '⚠️ ยังไม่ได้เปิด "แจ้งเตือนพื้นหลัง" ในหน้าตั้งค่า — ถ้าพับแอป iPhone จะหยุดแอปและไม่เด้ง (จะเด้งใน 8 วินาที)'),
+          backgroundColor: const Color(0xFF2563EB),
+          duration: const Duration(seconds: 6),
+        ),
+      );
+    }
+    await Future.delayed(const Duration(seconds: 8));
     await CriticalNotificationService().showRadarAlert(
       title: '🚨 ทดสอบการแจ้งเตือนเบื้องหลัง (Background Alert)',
       body: 'ระบบเตือนภัยฉุกเฉินทำงานสมบูรณ์ แม้คุณจะพับแอพหรือล็อกหน้าจอ!',
       isCritical: true,
     );
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('🔔 ยิง Notification ทดสอบเบื้องหลังแล้ว! ลองพับแอพเพื่อดูการแจ้งเตือนได้เลย'),
-          backgroundColor: Color(0xFF2563EB),
-        ),
-      );
-    }
   }
 
   @override
@@ -936,7 +980,8 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                               (i) =>
                                   i.status != 'resolved' &&
                                   i.status != 'cancelled' &&
-                                  i.reporterEmail == _currentUserEmail,
+                                  i.reporterEmail.trim().toLowerCase() ==
+                                      (_currentUserEmail ?? "").trim().toLowerCase(),
                             ).toList();
                             if (activeReports.isEmpty) return const SizedBox.shrink();
                             final top = activeReports.first;

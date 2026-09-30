@@ -74,6 +74,16 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // 5. Ambulance Locks — รถ 1 คัน (ต่อทะเบียน) ถือเคสที่ยังไม่จบได้ทีละเคส transaction รับเคส
+    // อ่านเอกสารนี้คู่กับเอกสารเคส กันโรงพยาบาลสองแห่งส่งรถคันเดียวกันไปคนละเคสพร้อมกัน
+    // ล็อกที่ชี้ไปเคสที่จบแล้วถือว่าว่าง จึงไม่ต้องลบ
+    match /ambulance_locks/{vehicleKey} {
+      allow read: if true;
+      allow create, update: if request.resource.data.vehicleKey == vehicleKey
+                            && request.resource.data.openCaseId is string;
+      allow delete: if false;
+    }
+
     // ปิดกั้น collection อื่นๆ ที่ไม่รู้จักทั้งหมดโดย default (Firestore rules
     // เป็น default-deny อยู่แล้วถ้าไม่มี match ใดตรง แต่เขียนไว้ให้ชัดเจน)
   }

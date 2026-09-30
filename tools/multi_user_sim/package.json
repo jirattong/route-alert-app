@@ -1,0 +1,21 @@
+{
+  "name": "routealert-multi-user-sim",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ตัวจำลองผู้ใช้หลายคนพร้อมกันสำหรับทดสอบระบบ RouteAlert (Firestore + MQTT)",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "aedes": "^1.2.0",
+    "firebase": "^12.19.0",
+    "mqtt": "^5.16.0"
+  },
+  "scripts": {
+    "sim": "node src/cli.mjs",
+    "emu": "firebase emulators:exec --only firestore --project demo-routealert",
+    "test:emulator": "firebase emulators:exec --only firestore --project demo-routealert \"$(which node) src/cli.mjs all --target=emulator\"",
+    "test:unit": "node --test test/unit.test.mjs"
+  }
+}

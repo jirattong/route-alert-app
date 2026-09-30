@@ -157,21 +157,111 @@ class HospitalLocationService {
 
   final StreamController<HospitalProfile> _profileStreamController =
       StreamController<HospitalProfile>.broadcast();
+  final StreamController<List<HospitalProfile>> _allHospitalsController =
+      StreamController<List<HospitalProfile>>.broadcast();
+
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _allHospitalsSub;
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _profileSub;
+  String? _boundHospitalId;
 
   Stream<HospitalProfile> get profileStream => _profileStreamController.stream;
+  Stream<List<HospitalProfile>> get allHospitalsStream => _allHospitalsController.stream;
   HospitalProfile get currentProfile => _currentProfile;
   LatLng get hospitalLocation => _currentProfile.location;
   List<HospitalProfile> get allHospitals => List.unmodifiable(_registeredHospitals);
 
-  Future<void> initialize({String hospitalId = 'HOSP-01'}) async {
-    await _loadFromLocal();
-    _initFirestoreListener(hospitalId);
+  /// [hospitalId] คือ "โรงพยาบาลของบัญชีนี้เอง" — มีความหมายเฉพาะบัญชี role
+  /// agency เท่านั้น (ผูกกับ hospitalId ที่เก็บไว้ใน users/{email} ตอนสมัคร)
+  /// ส่ง null ได้สำหรับ driver/ambulance ที่ไม่มี "โรงพยาบาลของตัวเอง" — จะได้
+  /// แค่รายชื่อโรงพยาบาลทั้งหมดไว้ใช้กับ findNearestHospital()/
+  /// getHospitalsSortedByDistance() เท่านั้น ไม่ได้ผูก currentProfile กับ
+  /// โรงพยาบาลไหนเป็นพิเศษ
+  ///
+  /// เดิม default เป็น 'HOSP-01' เสมอ (ไม่ว่าจะเป็นบัญชี agency ของโรงพยาบาลไหน
+  /// ก็ได้ profile เดียวกันหมด) — จุดนี้คือสาเหตุหลักที่ระบบเป็น single-hospital
+  /// มาตลอด (เจอตอนวางแผน multi-hospital)
+  Future<void> initialize({String? hospitalId}) async {
+    // โหลดรายชื่อโรงพยาบาลทั้งหมดเสมอ ไม่ว่า caller จะมี "โรงพยาบาลของตัวเอง"
+    // หรือไม่ — driver/ambulance ใช้ตรงนี้หาโรงพยาบาลใกล้ที่สุดได้โดยไม่ต้อง
+    // ผูกบัญชีกับโรงพยาบาลเดียว
+    loadAllHospitals();
+
+    if (hospitalId == null) return;
+
+    // เดิมไม่เช็คเลยว่า bind hospitalId เดิมซ้ำหรือเปล่า ทำให้ทุกครั้งที่หน้าจอ
+    // ไหนเรียก initialize() (มีหลายจุดเรียกซ้ำในหลายหน้าจอ agency) จะสร้าง
+    // Firestore listener ใหม่ซ้อนทับกันไปเรื่อยๆ ไม่เคยถูกยกเลิกเลย รั่วไปตลอด
+    // session (เจอระหว่างแก้ไขรอบนี้) — ถ้า hospitalId เดิม ไม่ต้องทำอะไรซ้ำ
+    if (_boundHospitalId == hospitalId && _profileSub != null) return;
+
+    await _loadFromLocal(hospitalId);
+    _boundHospitalId = hospitalId;
+    await _profileSub?.cancel();
+    _profileSub = _initFirestoreListener(hospitalId);
   }
 
-  Future<void> _loadFromLocal() async {
+  /// โหลดรายชื่อโรงพยาบาลทั้งหมดจาก Firestore จริงแบบสด (เดิม
+  /// _registeredHospitals เป็น list 4 ตัวตายตัวในโค้ด ไม่เคยอัปเดตจาก Firestore
+  /// เลยนอกจากตัวเดียวที่ตรงกับ hospitalId ที่ initialize() ผูกไว้) ยังคง 4
+  /// โรงพยาบาลตั้งต้นไว้เป็น fallback ถ้า Firestore ยังว่างเปล่าอยู่
+  void loadAllHospitals() {
+    _allHospitalsSub ??= FirebaseFirestore.instance
+        .collection(_collectionName)
+        .snapshots()
+        .listen((snapshot) {
+      if (snapshot.docs.isEmpty) {
+        _allHospitalsController.add(List.unmodifiable(_registeredHospitals));
+        return;
+      }
+      final fromFirestore =
+          snapshot.docs.map((d) => HospitalProfile.fromMap(d.data())).toList();
+      _registeredHospitals
+        ..clear()
+        ..addAll(fromFirestore);
+      _allHospitalsController.add(List.unmodifiable(_registeredHospitals));
+    }, onError: (err) {
+      debugPrint('loadAllHospitals error: $err');
+    });
+  }
+
+  /// สร้างโรงพยาบาลใหม่ในระบบ — ใช้ตอนสมัครบัญชี agency ใหม่ เพราะแต่ละบัญชี
+  /// ต้องมีโรงพยาบาลเป็นของตัวเอง ไม่ใช้ profile ร่วมกับบัญชี agency อื่นเหมือน
+  /// เดิม คืนค่า hospitalId ที่สร้างขึ้นให้ caller เอาไปบันทึกลงบัญชีผู้ใช้ต่อ
+  Future<String> createHospital({
+    required LatLng location,
+    required String hospitalName,
+    required String address,
+    required String erPhone,
+  }) async {
+    final newHospitalId = 'HOSP-${DateTime.now().millisecondsSinceEpoch}';
+    final profile = HospitalProfile(
+      hospitalId: newHospitalId,
+      hospitalName: hospitalName,
+      latitude: location.latitude,
+      longitude: location.longitude,
+      address: address,
+      erPhone: erPhone,
+      lastUpdated: DateTime.now(),
+    );
+
+    await FirebaseFirestore.instance
+        .collection(_collectionName)
+        .doc(newHospitalId)
+        .set(profile.toMap());
+
+    _registeredHospitals.add(profile);
+    _currentProfile = profile;
+    _boundHospitalId = newHospitalId;
+    await _saveToLocal(profile);
+    _profileStreamController.add(profile);
+
+    return newHospitalId;
+  }
+
+  Future<void> _loadFromLocal(String hospitalId) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final savedJson = prefs.getString(_prefKey);
+      final savedJson = prefs.getString('${_prefKey}_$hospitalId');
       if (savedJson != null && savedJson.isNotEmpty) {
         _currentProfile = HospitalProfile.fromJson(savedJson);
         _profileStreamController.add(_currentProfile);
@@ -189,27 +279,26 @@ class HospitalLocationService {
     }
   }
 
-  void _initFirestoreListener(String hospitalId) {
-    try {
-      FirebaseFirestore.instance
-          .collection(_collectionName)
-          .doc(hospitalId)
-          .snapshots()
-          .listen((doc) {
-        if (doc.exists && doc.data() != null) {
-          try {
-            final profile = HospitalProfile.fromMap(doc.data()!);
-            _currentProfile = profile;
-            _saveToLocal(profile);
-            _profileStreamController.add(_currentProfile);
-          } catch (e) {
-            debugPrint('Error parsing hospital profile from Firestore: $e');
-          }
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>> _initFirestoreListener(
+      String hospitalId) {
+    return FirebaseFirestore.instance
+        .collection(_collectionName)
+        .doc(hospitalId)
+        .snapshots()
+        .listen((doc) {
+      if (doc.exists && doc.data() != null) {
+        try {
+          final profile = HospitalProfile.fromMap(doc.data()!);
+          _currentProfile = profile;
+          _saveToLocal(profile);
+          _profileStreamController.add(_currentProfile);
+        } catch (e) {
+          debugPrint('Error parsing hospital profile from Firestore: $e');
         }
-      }, onError: (err) {
-        debugPrint('Firestore hospital profile error: $err');
-      });
-    } catch (_) {}
+      }
+    }, onError: (err) {
+      debugPrint('Firestore hospital profile error: $err');
+    });
   }
 
   /// 🏥 AI Nearest Hospital Matcher: Calculates distance and returns nearest hospital to user's GPS
@@ -338,11 +427,18 @@ class HospitalLocationService {
   Future<void> _saveToLocal(HospitalProfile profile) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_prefKey, profile.toJson());
+      // เดิม key เดียวใช้ร่วมกันทุกโรงพยาบาล (ไม่ scope ตาม hospitalId) —
+      // ถ้าเครื่องเดียวกันเคยล็อกอินเป็น agency ของโรงพยาบาลอื่นมาก่อน จะเห็น
+      // ข้อมูลโรงพยาบาลเก่าค้างแวบหนึ่งก่อน Firestore listener จะแก้ให้ถูก
+      // (เจอระหว่างแก้ไขรอบ multi-hospital) — scope คีย์ตาม hospitalId แทน
+      await prefs.setString('${_prefKey}_${profile.hospitalId}', profile.toJson());
     } catch (_) {}
   }
 
   void dispose() {
     _profileStreamController.close();
+    _allHospitalsController.close();
+    _profileSub?.cancel();
+    _allHospitalsSub?.cancel();
   }
 }

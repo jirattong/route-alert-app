@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../core/services/notification_router.dart';
 import '../../../core/services/onboarding_service.dart';
 import '../../onboarding/presentation/onboarding_screen.dart';
 import 'agency_home_screen.dart';
@@ -34,6 +35,15 @@ class _AgencyMainScreenState extends State<AgencyMainScreen> {
       const AgencyProfileScreen(), // Index 3: ข้อมูลสถิติ (Dashboard)
     ];
     _maybeShowOnboarding();
+    // กดแจ้งเตือนตอนแอปปิดอยู่ → ค่อยเปิดหน้าเคสหลังหน้าหลักแสดงแล้ว
+    WidgetsBinding.instance
+        .addPostFrameCallback((_) => NotificationRouter.instance.onHomeShown());
+  }
+
+  @override
+  void dispose() {
+    NotificationRouter.instance.onHomeHidden();
+    super.dispose();
   }
 
   // โชว์หน้าแนะนำการใช้งานแบบละเอียด (Onboarding) เฉพาะครั้งแรกที่เข้าหน้าหลักของ

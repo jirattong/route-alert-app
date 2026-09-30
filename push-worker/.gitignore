@@ -1,0 +1,4 @@
+node_modules/
+.wrangler/
+*.json.key
+service-account*.json

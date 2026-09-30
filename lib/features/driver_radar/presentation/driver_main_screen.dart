@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../core/services/notification_router.dart';
 import '../../../core/services/driver_storage_service.dart';
 import '../../../core/services/location_service.dart';
 import '../../../core/services/onboarding_service.dart';
@@ -47,6 +48,15 @@ class _DriverMainScreenState extends State<DriverMainScreen> {
       const DriverProfileScreen(),
     ];
     _maybeShowOnboarding();
+    // กดแจ้งเตือนตอนแอปปิดอยู่ → ค่อยเปิดหน้าเคสหลังหน้าหลักแสดงแล้ว
+    WidgetsBinding.instance
+        .addPostFrameCallback((_) => NotificationRouter.instance.onHomeShown());
+  }
+
+  @override
+  void dispose() {
+    NotificationRouter.instance.onHomeHidden();
+    super.dispose();
   }
 
   // โชว์หน้าแนะนำการใช้งานแบบละเอียด (Onboarding) เฉพาะครั้งแรกที่เข้าหน้าหลักของ

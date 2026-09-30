@@ -6,6 +6,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../core/ml/face_recognition_service.dart';
 import '../../../../core/services/onboarding_service.dart';
+import '../../../../core/services/push_notification_service.dart';
 import '../models/user_face_profile.dart';
 
 class FaceAuthMatchResult {
@@ -478,6 +479,110 @@ class FaceAuthRepository {
     return true;
   }
 
+  /// อัปเดต hospitalId ให้บัญชี agency (ผูกบัญชีกับโรงพยาบาลที่สร้าง/เลือกไว้ —
+  /// เพิ่มตอนทำ multi-hospital) sync ทั้ง Firestore และ local cache ของ session
+  /// ปัจจุบันด้วยถ้าบัญชีนี้คือผู้ใช้ที่ล็อกอินอยู่ตอนนี้พอดี กันหน้าจอถัดไปที่
+  /// เรียก getCurrentUser() เห็นค่าเก่าค้างอยู่จนกว่าจะ logout/login ใหม่
+  static Future<bool> updateHospitalId(String email, String hospitalId) async {
+    final cleanEmail = email.trim().toLowerCase();
+    try {
+      final fs = _firestore;
+      if (fs != null) {
+        await fs.collection(_firestoreCollection).doc(cleanEmail).set({
+          'hospitalId': hospitalId,
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true)).timeout(const Duration(seconds: 2));
+      }
+    } catch (_) {}
+
+    final current = await getCurrentUser();
+    if (current != null && current.email.trim().toLowerCase() == cleanEmail) {
+      await setCurrentUser(current.copyWith(hospitalId: hospitalId));
+    }
+
+    return true;
+  }
+
+  /// อัปเดต FCM token ของอุปกรณ์นี้ไว้ส่ง push notification ตรงเข้าเครื่อง
+  /// (เพิ่มตอนทำระบบแจ้งเตือนเบื้องหลัง)
+  static Future<bool> updateFcmToken(String email, String token) async {
+    final cleanEmail = email.trim().toLowerCase();
+    try {
+      final fs = _firestore;
+      if (fs != null) {
+        await fs.collection(_firestoreCollection).doc(cleanEmail).set({
+          'fcmToken': token,
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true)).timeout(const Duration(seconds: 2));
+        // เครื่องเดียว = token เดียว: ลบออกจากบัญชีอื่นที่เคยล็อกอินเครื่องนี้ (logout แล้ว
+        // ลบไม่ทัน) ไม่งั้นเครื่องนี้จะได้แจ้งเตือนของบัญชีเก่าปนมาด้วย
+        final stale = await fs
+            .collection(_firestoreCollection)
+            .where('fcmToken', isEqualTo: token)
+            .get()
+            .timeout(const Duration(seconds: 3));
+        for (final doc in stale.docs.where((d) => d.id != cleanEmail)) {
+          await doc.reference.update({'fcmToken': FieldValue.delete()});
+        }
+      }
+    } catch (_) {}
+
+    final current = await getCurrentUser();
+    if (current != null && current.email.trim().toLowerCase() == cleanEmail) {
+      await setCurrentUser(current.copyWith(fcmToken: token));
+    }
+
+    return true;
+  }
+
+  /// รหัสหน่วยรถพยาบาล (AMB-xxxx) เก็บอยู่ในเครื่องเท่านั้น — ต้องบันทึกคู่กับ
+  /// บัญชีด้วย Cloud Function ถึงจะหา token ของรถที่ได้รับมอบหมายเคสเจอ
+  static Future<void> updateAmbulanceProfile(String email,
+      {required String unitId, required String plateNumber, required String callSign}) async {
+    try {
+      await _firestore
+          ?.collection(_firestoreCollection)
+          .doc(email.trim().toLowerCase())
+          .set({
+            'ambulanceUnitId': unitId,
+            'ambulancePlate': plateNumber,
+            'ambulanceCallSign': callSign,
+          }, SetOptions(merge: true))
+          .timeout(const Duration(seconds: 3));
+    } catch (_) {}
+  }
+
+  /// ข้อมูลบัญชีบน Firestore (null ถ้าอ่านไม่ได้ เช่นออฟไลน์)
+  static Future<Map<String, dynamic>?> fetchAccountData(String email) async {
+    try {
+      final snap = await _firestore
+          ?.collection(_firestoreCollection)
+          .doc(email.trim().toLowerCase())
+          .get()
+          .timeout(const Duration(seconds: 4));
+      return snap?.data();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// ลบ token ออกจากบัญชีตอน logout แต่เฉพาะถ้ายังเป็น token ของเครื่องนี้ —
+  /// ถ้าบัญชีนี้ไปล็อกอินเครื่องอื่นแล้ว token ใหม่ต้องไม่โดนลบทิ้ง
+  static Future<void> clearFcmTokenIfMatches(String email, String token) async {
+    try {
+      final ref = _firestore
+          ?.collection(_firestoreCollection)
+          .doc(email.trim().toLowerCase());
+      if (ref == null) return;
+      final snap = await ref.get().timeout(const Duration(seconds: 2));
+      if (snap.data()?['fcmToken'] == token) {
+        await ref
+            .update({'fcmToken': FieldValue.delete()})
+            .timeout(const Duration(seconds: 2));
+      }
+    } catch (_) {}
+  }
+
   /// สร้าง Salt แบบสุ่มด้วย CSPRNG (16 ไบต์)
   static String _generateSalt() {
     final random = math.Random.secure();
@@ -506,6 +611,9 @@ class FaceAuthRepository {
   static Future<void> logout() async {
     final prefs = await SharedPreferences.getInstance();
     final current = await getCurrentUser();
+    if (current != null) {
+      await PushNotificationService().detach(current.email);
+    }
     await prefs.remove(_currentUserKey);
     if (current != null) {
       await OnboardingService.clearOnboardingSeen(current.role);

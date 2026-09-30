@@ -80,3 +80,8 @@ ui-debug.log
 # Symbolication & Obfuscation
 app.*.symbols
 app.*.map.json
+
+# โมเดลตรวจอุบัติเหตุ 470 MB — เกินขีดจำกัด 100 MB ของ GitHub แชร์ผ่าน Drive แล้ววางที่ assets/models/
+# (โมเดลที่เทรนด้วย scripts/train_accident_classifier_v2_colab.ipynb มีขนาด ~6 MB ใส่ git ได้)
+assets/models/accident_classifier.tflite
+scripts/*.bak

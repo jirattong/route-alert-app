@@ -12,6 +12,7 @@ import '../../../core/services/incident_service.dart';
 import '../../../core/services/location_service.dart';
 import '../../../core/services/osrm_routing_service.dart';
 import '../../../core/widgets/status_confirm_dialog.dart';
+import 'ambulance_case_actions.dart';
 
 class AmbulanceHomeScreen extends StatefulWidget {
   /// เรียกครั้งเดียวตอน initState เพื่อส่งฟังก์ชันเปิด Coach Mark ขึ้นไปให้
@@ -52,6 +53,8 @@ class _AmbulanceHomeScreenState extends State<AmbulanceHomeScreen> {
 
   // ข้อมูลพิกัดรถพยาบาล
   LatLng _ambulanceLocation = const LatLng(19.0350, 99.8962);
+  // ยังไม่เคยได้ตำแหน่งจริงจาก GPS — ห้ามประกาศตำแหน่งตั้งต้นข้างบนให้ศูนย์ (สถานการณ์ G07)
+  bool _hasRealFix = false;
   LatLng _incidentLocation = const LatLng(19.0284, 99.8962);
   late LatLng _hospitalLocation;
 
@@ -80,8 +83,18 @@ class _AmbulanceHomeScreenState extends State<AmbulanceHomeScreen> {
   int _etaMinutes = 2;
 
   StreamSubscription<LatLng>? _locationSub;
+  // เคสที่แจ้ง "ใกล้ถึงจุดเกิดเหตุ" ไปแล้ว — กันเขียนซ้ำทุกครั้งที่ GPS อัปเดต
+  final Set<String> _nearSceneReported = {};
+  // GPS อัปเดตทุก 3 ม. — จำกัดการขอเส้นทาง/ส่ง ETA ไม่ให้ถี่เกิน (ยิ่งตอนทำงานเบื้องหลัง)
+  String? _lastRouteKey;
+  DateTime? _lastRouteFetchAt;
+  String? _lastEtaSentKey;
+  DateTime? _lastEtaSentAt;
+  int? _lastEtaSentMinutes;
+  int? _lastEtaSentMeters;
+  DateTime? _lastEtaHeartbeatAt;
   StreamSubscription<List<IncidentReport>>? _incidentSub;
-  StreamSubscription<HospitalProfile>? _hospitalSub;
+  StreamSubscription<List<HospitalProfile>>? _hospitalSub;
   Timer? _broadcastTimer;
 
   // Coach Mark: ชี้ตำแหน่งปุ่มจริงบนหน้าจอพร้อมคำอธิบาย โชว์แค่ครั้งแรกที่เข้าหน้านี้
@@ -95,6 +108,7 @@ class _AmbulanceHomeScreenState extends State<AmbulanceHomeScreen> {
     _hospitalLocation = HospitalLocationService().hospitalLocation;
 
     _loadAmbulanceProfile();
+    AmbulanceStorageService.profileNotifier.addListener(_onProfileChanged);
     _initAmbulanceTracking();
     _initHospitalListener();
     _initIncidentListener();
@@ -216,30 +230,60 @@ class _AmbulanceHomeScreenState extends State<AmbulanceHomeScreen> {
     });
   }
 
+  // เดิม (ก่อนวางแผน multi-hospital) ผูกกับ HospitalLocationService.currentProfile
+  // ตัวเดียว (HOSP-01 เสมอ) ไม่ว่าเคสที่รับมอบหมายจะถูกส่งไปโรงพยาบาลไหนจริงก็ตาม
+  // — ตอนนี้แยก 2 กรณี: (1) มีเคสที่กำลังทำอยู่ → ไปโรงพยาบาลที่ระบบเลือกไว้ให้
+  // เคสนั้นโดยเฉพาะ (targetHospitalId/hospitalLatitude/hospitalLongitude ที่
+  // ตั้งไว้ถูกต้องแล้วตอนสร้างเคส) (2) ว่าง ไม่มีเคส → โชว์โรงพยาบาลใกล้ตัวเองที่สุด
+  // ไว้อ้างอิงเฉยๆ ผ่าน findNearestHospital()
   void _initHospitalListener() async {
-    // เดิมไม่เคยเรียก initialize() เลย ทำให้ไม่มีการต่อ Firestore listener
-    // ของหน่วยงานนี้จริง — ปักหมุดโรงพยาบาลใหม่จาก Agency (เครื่องอื่น) จึงไม่มีวัน
-    // ไหลมาถึงฝั่ง Ambulance ได้เลย (profileStream ไม่เคยมีใครยิง event เข้ามา)
-    // เห็นแค่พิกัด default ที่ hardcode ไว้ในเครื่องตัวเองตลอดไป
     await HospitalLocationService().initialize();
-    if (!mounted) return;
-    setState(() {
-      _hospitalLocation = HospitalLocationService().hospitalLocation;
+    _recomputeHospitalLocation();
+    _hospitalSub = HospitalLocationService().allHospitalsStream.listen((_) {
+      _recomputeHospitalLocation();
     });
-    _updateRoute();
+  }
 
-    _hospitalSub = HospitalLocationService().profileStream.listen((profile) {
-      if (!mounted) return;
-      setState(() {
-        _hospitalLocation = profile.location;
-      });
-      _updateRoute();
-    });
+  void _recomputeHospitalLocation() {
+    if (!mounted) return;
+    final incident = _activeIncident;
+    if (incident != null &&
+        incident.hospitalLatitude != null &&
+        incident.hospitalLongitude != null) {
+      setState(() => _hospitalLocation =
+          LatLng(incident.hospitalLatitude!, incident.hospitalLongitude!));
+    } else {
+      final nearest =
+          HospitalLocationService().findNearestHospital(_ambulanceLocation);
+      setState(() => _hospitalLocation = nearest.profile.location);
+    }
+    _updateRoute();
   }
 
   void _initIncidentListener() async {
     await IncidentService().initialize();
-    _incidentSub = IncidentService().incidentsStream.listen((list) {
+    _incidentSub = IncidentService().incidentsStream.listen(_handleIncidents);
+  }
+
+  List<IncidentReport>? _lastIncidents;
+
+  // รหัสหน่วยเปลี่ยนเป็นของบัญชีหลังล็อกอิน (ล็อกอินบัญชีเดิมจากเครื่องใหม่) — ต้องหาเคส
+  // ของหน่วยใหม่ทันที ไม่งั้นเคสที่บัญชีนี้รับไว้จะดูเหมือนเป็นของหน่วยอื่น
+  void _onProfileChanged() {
+    final p = AmbulanceStorageService.profileNotifier.value;
+    final id = p['ambulanceId'] ?? '';
+    if (!mounted || id.isEmpty || id == _ambulanceUnitId) return;
+    setState(() {
+      _ambulanceUnitId = id;
+      _ambulancePlateNumber = p['plateNumber'] ?? _ambulancePlateNumber;
+      _ambulanceCallSign = p['callSign'] ?? _ambulanceCallSign;
+    });
+    final last = _lastIncidents;
+    if (last != null) _handleIncidents(last);
+  }
+
+  void _handleIncidents(List<IncidentReport> list) {
+      _lastIncidents = list;
       if (!mounted) return;
       // Find active incident assigned to THIS ambulance unit specifically.
       // เดิม: ใช้ OR ทำให้เคสของหน่วยอื่นที่ status เป็น assigned/at_scene/
@@ -253,16 +297,16 @@ class _AmbulanceHomeScreenState extends State<AmbulanceHomeScreen> {
             (i) =>
                 i!.status != 'resolved' &&
                 i.status != 'cancelled' &&
-                i.assignedAmbulanceId == _ambulanceUnitId,
+                i.hasUnit(_ambulanceUnitId, plate: _ambulancePlateNumber),
             orElse: () => null,
           );
 
       // เปิดสัญญาณเตือนอัตโนมัติทันทีที่มีเคสมอบหมายให้หน่วยนี้จริง (เดิมต้องกดเปิดเอง
       // เสมอ แม้จะมีเคสมาแล้วก็ตาม) — เช็คจาก transition ว่าเพิ่งได้รับมอบหมายเคสใหม่
-      final wasAssignedToThisUnit =
-          _activeIncident?.assignedAmbulanceId == _ambulanceUnitId;
-      final isNowAssignedToThisUnit =
-          assigned?.assignedAmbulanceId == _ambulanceUnitId;
+      final wasAssignedToThisUnit = _activeIncident != null &&
+          _activeIncident!.id == assigned?.id &&
+          _activeIncident!.hasUnit(_ambulanceUnitId, plate: _ambulancePlateNumber);
+      final isNowAssignedToThisUnit = assigned != null;
 
       setState(() {
         if (isNowAssignedToThisUnit && !wasAssignedToThisUnit) {
@@ -281,39 +325,80 @@ class _AmbulanceHomeScreenState extends State<AmbulanceHomeScreen> {
           _incidentLocation = LatLng(assigned.latitude, assigned.longitude);
         }
       });
-      _updateRoute();
+      // เคสที่รับมอบหมายเปลี่ยนไป (ได้เคสใหม่/เคสจบ) ต้องคำนวณโรงพยาบาลปลายทาง
+      // ใหม่ด้วย เพราะแต่ละเคสอาจถูกส่งไปคนละโรงพยาบาลกัน (เจอตอนวางแผน
+      // multi-hospital) — _recomputeHospitalLocation() เรียก _updateRoute() ให้
+      // เองอยู่แล้ว ไม่ต้องเรียกซ้ำ
+      _recomputeHospitalLocation();
       if (_isNotificationAlert) {
         _broadcastCurrentLocation();
       }
-    });
   }
 
   void _initAmbulanceTracking() async {
     await EmergencyMqttService().initialize();
     final pos = await LocationService.getCurrentLocation();
     if (pos != null && mounted) {
-      setState(() => _ambulanceLocation = pos);
+      setState(() {
+        _ambulanceLocation = pos;
+        _hasRealFix = true;
+      });
     }
     await _updateRoute();
+    // ออกจากหน้านี้ระหว่างรอ MQTT/GPS — ห้ามเปิด GPS เบื้องหลังค้างไว้
+    if (!mounted) return;
 
-    _locationSub =
-        LocationService.getLiveLocationStream().listen((newPos) async {
-      if (!mounted) return;
-      _updateHeadingFromMovement(newPos);
-      _updateSpeedFromMovement(newPos);
-      setState(() => _ambulanceLocation = newPos);
-      await _updateRoute();
-      if (_isNotificationAlert) {
-        _broadcastCurrentLocation();
-      }
-    });
+    _subscribeLocation();
+    AmbulanceStorageService.onDutyNotifier.addListener(_onDutyChanged);
 
     // Heartbeat broadcast every 3s when alert is active
     _broadcastTimer = Timer.periodic(const Duration(seconds: 3), (timer) {
       if (_isNotificationAlert && mounted) {
         _broadcastCurrentLocation();
       }
+      // รถจอดนิ่ง (รถติด) GPS ไม่ขยับ = ไม่มีการคำนวณเส้นทาง — ส่ง ETA heartbeat ทุก 60 วิ
+      // (ลองได้ไม่เกินทุก 30 วิ และเฉพาะช่วงที่มี ETA ให้ส่ง)
+      final incident = _activeIncident;
+      final now = DateTime.now();
+      final lastSent = _lastEtaSentAt;
+      final lastTry = _lastEtaHeartbeatAt;
+      if (mounted &&
+          incident != null &&
+          incident.statusStep != 2 &&
+          incident.status != 'resolved' &&
+          incident.status != 'cancelled' &&
+          (lastSent == null || now.difference(lastSent) >= const Duration(seconds: 60)) &&
+          (lastTry == null || now.difference(lastTry) >= const Duration(seconds: 30))) {
+        _lastEtaHeartbeatAt = now;
+        _updateRoute();
+      }
     });
+  }
+
+  // เข้าเวร = ติดตามตำแหน่งต่อแม้พับแอป/ล็อกจอ (ศูนย์เห็นรถ, ผู้แจ้งเห็น ETA,
+  // ระบบ "รถใกล้ถึง" ทำงานได้) พักเวร = เฉพาะตอนเปิดแอป
+  void _subscribeLocation() {
+    _locationSub?.cancel();
+    _locationSub = LocationService.getLiveLocationStream(
+      backgroundMode: AmbulanceStorageService.onDutyNotifier.value,
+      backgroundNotificationText: 'กำลังส่งตำแหน่งรถพยาบาลให้ศูนย์สั่งการ (เข้าเวรอยู่)',
+    ).listen((newPos) async {
+      if (!mounted) return;
+      _updateHeadingFromMovement(newPos);
+      _updateSpeedFromMovement(newPos);
+      setState(() {
+        _ambulanceLocation = newPos;
+        _hasRealFix = true;
+      });
+      await _updateRoute();
+      if (_isNotificationAlert) {
+        _broadcastCurrentLocation();
+      }
+    });
+  }
+
+  void _onDutyChanged() {
+    if (mounted) _subscribeLocation();
   }
 
   // อัปเดตทิศทางการเคลื่อนที่จริงจากพิกัด GPS 2 จุดล่าสุด
@@ -374,11 +459,24 @@ class _AmbulanceHomeScreenState extends State<AmbulanceHomeScreen> {
     final LatLng destination =
         step >= 3 ? _hospitalLocation : _incidentLocation;
 
+    // ปลายทางเดิมและเพิ่งขอเส้นทางไปไม่ถึง 4 วิ — ข้าม (ปลายทางเปลี่ยนขอใหม่ทันที)
+    final routeKey = '${_activeIncident!.id}|${step >= 3}|'
+        '${destination.latitude},${destination.longitude}';
+    final now = DateTime.now();
+    if (routeKey == _lastRouteKey &&
+        _lastRouteFetchAt != null &&
+        now.difference(_lastRouteFetchAt!) < const Duration(seconds: 4)) {
+      return;
+    }
+    _lastRouteKey = routeKey;
+    _lastRouteFetchAt = now;
+
     final route = await OsrmRoutingService().getDrivingRoute(
       start: _ambulanceLocation,
       destination: destination,
     );
-    if (!mounted) return;
+    // ระหว่างรอ เคส/ช่วงเดินทางเปลี่ยนไปแล้ว (เช่นรับผู้ป่วยแล้วไปโรงพยาบาล) — ทิ้งผลเก่า
+    if (!mounted || routeKey != _lastRouteKey) return;
     setState(() {
       _routePoints = route.points;
       _turnInstruction = route.nextTurnInstruction;
@@ -386,16 +484,81 @@ class _AmbulanceHomeScreenState extends State<AmbulanceHomeScreen> {
       _etaMinutes = (route.durationSeconds / 60.0).ceil();
     });
 
+    _maybeSendEta(step >= 3 ? 'hospital' : 'scene', isEstimate: route.isEstimate);
+
+    // เหลือไม่ถึง 500 ม. (ตามถนน) ระหว่างไปรับเคส → บอกผู้แจ้งเหตุว่ารถใกล้ถึงแล้ว
+    // ครั้งเดียวต่อเคส ถ้าบันทึกไม่สำเร็จ (เน็ตหลุด) ปล่อยให้ลองใหม่รอบ GPS ถัดไป
+    final active = _activeIncident;
+    if (active != null &&
+        active.status == 'assigned' &&
+        active.statusStep <= 1 &&
+        active.ambulanceNearSceneAt == null &&
+        _distanceKm <= 0.5 &&
+        _nearSceneReported.add(active.id)) {
+      IncidentService()
+          .markAmbulanceNearScene(active.id,
+              etaMinutes: _etaMinutes, callSign: _ambulanceCallSign)
+          .then((ok) {
+        if (!ok) _nearSceneReported.remove(active.id);
+      });
+    }
+
     // Auto trigger "Approaching Hospital" when step is 3 and distance <= 1.5 km
     if (step == 3 && _distanceKm <= 1.5 && _activeIncident != null) {
       IncidentService().reportAmbulanceApproachingHospital(_activeIncident!.id);
     }
   }
 
+  // ส่ง ETA ให้ผู้แจ้งเหตุ: เมื่อค่าเปลี่ยน (ไม่ถี่กว่า 10 วิ) หรือทุก 60 วิเป็น heartbeat
+  // ให้ฝั่งผู้แจ้งรู้ว่าข้อมูลยังสด — ถึงจุดเกิดเหตุแล้ว (step 2) ไม่มี ETA ให้ส่ง
+  void _maybeSendEta(String target, {bool isEstimate = false}) {
+    final incident = _activeIncident;
+    if (incident == null ||
+        incident.status == 'resolved' ||
+        incident.status == 'cancelled' ||
+        incident.statusStep == 2) {
+      return;
+    }
+    final meters = (_distanceKm * 1000).round();
+    final eta = _etaMinutes;
+    final key = '${incident.id}|$target';
+    // ขอเส้นทางไม่สำเร็จชั่วคราว — ถ้าเคยส่งค่าจริงของช่วงนี้แล้ว ไม่เอาค่าประมาณไปทับ
+    if (isEstimate && key == _lastEtaSentKey) return;
+    final now = DateTime.now();
+    final since = _lastEtaSentAt == null ? null : now.difference(_lastEtaSentAt!);
+    final changed = eta != _lastEtaSentMinutes ||
+        ((_lastEtaSentMeters ?? -100000) - meters).abs() >= 150;
+    final due = key != _lastEtaSentKey ||
+        since == null ||
+        (changed && since >= const Duration(seconds: 10)) ||
+        since >= const Duration(seconds: 60);
+    if (!due) return;
+    // เคสนี้มีหลายคัน: ส่งเฉพาะเมื่อคันนี้ใกล้ที่สุด (หรือคันที่ส่งอยู่หยุดส่งไปแล้ว)
+    if (!incident.shouldPublishEta(
+        unitId: _ambulanceUnitId, etaMinutes: eta, target: target, now: now)) {
+      return;
+    }
+    _lastEtaSentKey = key;
+    _lastEtaSentAt = now;
+    _lastEtaSentMinutes = eta;
+    _lastEtaSentMeters = meters;
+    IncidentService().updateAmbulanceEta(
+      incident.id,
+      etaMinutes: eta,
+      distanceMeters: meters,
+      target: target,
+      unitId: _ambulanceUnitId,
+      callSign: _ambulanceCallSign,
+    );
+  }
+
   void _broadcastCurrentLocation() {
     // พักเวร (Off Duty) จริง = ไม่ broadcast พิกัด/ไซเรน เลย เพื่อไม่ให้ฝั่ง Agency
     // เลือกรถคันนี้เป็น "รถพยาบาลที่ใกล้ที่สุด" ระหว่างพักเวรอยู่
     if (!AmbulanceStorageService.onDutyNotifier.value) return;
+    // ยังไม่มีตำแหน่งจริง (ไม่มีสิทธิ์ GPS/ยังจับสัญญาณไม่ได้) — ไม่ประกาศพิกัดตั้งต้นที่ไม่ใช่ตำแหน่งรถ
+    // ไม่งั้นโรงพยาบาลอาจเลือกรถคันนี้เป็น "คันใกล้สุด" จากพิกัดปลอม
+    if (!_hasRealFix) return;
 
     final int step = _activeIncident?.statusStep ?? 1;
     // ยังไม่มีเคสจริง = บอกตรงๆ ว่ากำลังลาดตระเวน ไม่ใช่มุ่งหน้าไปเคสปลอม
@@ -438,6 +601,8 @@ class _AmbulanceHomeScreenState extends State<AmbulanceHomeScreen> {
 
   @override
   void dispose() {
+    AmbulanceStorageService.onDutyNotifier.removeListener(_onDutyChanged);
+    AmbulanceStorageService.profileNotifier.removeListener(_onProfileChanged);
     _locationSub?.cancel();
     _incidentSub?.cancel();
     _hospitalSub?.cancel();
@@ -985,16 +1150,18 @@ class _AmbulanceHomeScreenState extends State<AmbulanceHomeScreen> {
                                 nextDesc: 'กำลังปฐมพยาบาลและประเมินผู้ป่วย',
                                 onConfirmed: () async {
                                   if (_activeIncident != null) {
-                                    final ok = await IncidentService()
-                                        .reportAmbulanceAtScene(
-                                            _activeIncident!.id);
+                                    final outcome = await IncidentService()
+                                        .advanceIncidentStatus(
+                                            id: _activeIncident!.id,
+                                            status: 'at_scene');
                                     HapticFeedback.heavyImpact();
-                                    if (mounted && !ok) {
+                                    final problem =
+                                        AmbulanceCaseActions.progressProblem(outcome);
+                                    if (mounted && problem != null) {
                                       ScaffoldMessenger.of(context)
-                                          .showSnackBar(const SnackBar(
-                                        content: Text(
-                                            '⚠️ อัปเดตสถานะไม่สำเร็จ เช็คสัญญาณอินเทอร์เน็ตแล้วลองใหม่'),
-                                        backgroundColor: Color(0xFFDC2626),
+                                          .showSnackBar(SnackBar(
+                                        content: Text(problem),
+                                        backgroundColor: const Color(0xFFDC2626),
                                       ));
                                     }
                                   }
@@ -1027,16 +1194,18 @@ class _AmbulanceHomeScreenState extends State<AmbulanceHomeScreen> {
                                 nextDesc: 'นำทางและแจ้งห้อง ER เตรียมรับสาย',
                                 onConfirmed: () async {
                                   if (_activeIncident != null) {
-                                    final ok = await IncidentService()
-                                        .reportAmbulanceTransporting(
-                                            _activeIncident!.id);
+                                    final outcome = await IncidentService()
+                                        .advanceIncidentStatus(
+                                            id: _activeIncident!.id,
+                                            status: 'transporting');
                                     HapticFeedback.heavyImpact();
-                                    if (mounted && !ok) {
+                                    final problem =
+                                        AmbulanceCaseActions.progressProblem(outcome);
+                                    if (mounted && problem != null) {
                                       ScaffoldMessenger.of(context)
-                                          .showSnackBar(const SnackBar(
-                                        content: Text(
-                                            '⚠️ อัปเดตสถานะไม่สำเร็จ เช็คสัญญาณอินเทอร์เน็ตแล้วลองใหม่'),
-                                        backgroundColor: Color(0xFFDC2626),
+                                          .showSnackBar(SnackBar(
+                                        content: Text(problem),
+                                        backgroundColor: const Color(0xFFDC2626),
                                       ));
                                     }
                                   }
@@ -1069,15 +1238,18 @@ class _AmbulanceHomeScreenState extends State<AmbulanceHomeScreen> {
                                 nextDesc: 'ส่งมอบผู้ป่วยและปิดภารกิจ',
                                 onConfirmed: () async {
                                   if (_activeIncident != null) {
-                                    final ok = await IncidentService()
-                                        .resolveIncident(_activeIncident!.id);
+                                    final outcome = await IncidentService()
+                                        .advanceIncidentStatus(
+                                            id: _activeIncident!.id,
+                                            status: 'resolved');
                                     HapticFeedback.heavyImpact();
-                                    if (mounted && !ok) {
+                                    final problem =
+                                        AmbulanceCaseActions.progressProblem(outcome);
+                                    if (mounted && problem != null) {
                                       ScaffoldMessenger.of(context)
-                                          .showSnackBar(const SnackBar(
-                                        content: Text(
-                                            '⚠️ อัปเดตสถานะไม่สำเร็จ เช็คสัญญาณอินเทอร์เน็ตแล้วลองใหม่'),
-                                        backgroundColor: Color(0xFFDC2626),
+                                          .showSnackBar(SnackBar(
+                                        content: Text(problem),
+                                        backgroundColor: const Color(0xFFDC2626),
                                       ));
                                     }
                                   }
