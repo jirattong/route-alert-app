@@ -1301,3 +1301,10 @@ getter ใหม่: `units`, `vehicles`, `vehicleCount`, `vehiclesLabel`, `hasU
 - `tools/ios_signing.sh` แสดงทีมจากใบรับรองในเครื่อง แล้วเลือกด้วยลำดับ — bundle id อัตโนมัติ `com.routealert.app.<รหัสทีม>` ไม่ซ้ำกันต่อทีม
   (เจ้าของ: `tools/ios_signing.sh VV37M7LD96 com.yuttapat.routealert` เพื่อใช้ id เดิม)
 - ห้ามเปลี่ยน Team ในหน้า Signing ของ Xcode (จะแก้ไฟล์โปรเจกต์ที่ใช้ร่วมกัน) — ใช้สคริปต์แทน
+
+## 61. อัปเดตการตั้งค่า Android ให้ build APK ได้กับ Flutter 3.47
+
+Flutter 3.47 ไม่ยอม build ถ้า Gradle < 8.14, AGP < 8.11.1, Kotlin < 2.2.20, Java < 17 (ของเดิม 7.6.3 / 7.3.0 / 1.9.20 / 1.8)
+- `android/settings.gradle`: AGP 8.11.1, Kotlin 2.2.20 · `gradle-wrapper.properties`: Gradle 8.14.3
+- `android/app/build.gradle`: Java/Kotlin target 17, minSdk 24, เปิด core library desugaring (flutter_local_notifications บังคับ)
+- ยังไม่ได้ทดสอบ build บน Mac เครื่องนี้ (ไม่มี Android SDK/Java)
