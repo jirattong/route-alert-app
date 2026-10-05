@@ -56,15 +56,20 @@ class _AgencyIncidentListScreenState extends State<AgencyIncidentListScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        title: const Text('ปิดเคสนี้?'),
+        title: const Text('เอาเคสนี้ออก?'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('${item.type} · ${item.address.isNotEmpty ? item.address : item.province}'),
             const SizedBox(height: 10),
-            const Text('ปิดเคส = ยกเลิกเคสนี้ในระบบ โรงพยาบาลและรถพยาบาลทุกคันจะไม่เห็นเคสนี้อีก '
-                'ผู้แจ้งจะเห็นว่าเคสถูกยกเลิก'),
+            const Text.rich(TextSpan(children: [
+              TextSpan(text: 'ปิดเคส (ทุกฝั่ง)', style: TextStyle(fontWeight: FontWeight.bold)),
+              TextSpan(text: ' — ยกเลิกเคสในระบบ หายจากโรงพยาบาลและรถพยาบาลทุกเครื่อง '
+                  'ผู้แจ้งเห็นในประวัติว่า "ยกเลิก" (ข้อมูลยังเก็บไว้ทำสถิติ)\n\n'),
+              TextSpan(text: 'ซ่อนเฉพาะเครื่องนี้', style: TextStyle(fontWeight: FontWeight.bold)),
+              TextSpan(text: ' — เคสยังเปิดอยู่ เครื่องอื่นยังเห็นและรถยังรับได้ แค่ไม่แสดงบนเครื่องนี้'),
+            ])),
             if (hasAmbulance) ...[
               const SizedBox(height: 10),
               Text(
@@ -113,7 +118,9 @@ class _AgencyIncidentListScreenState extends State<AgencyIncidentListScreen> {
     await AgencyStorageService.setDismissedIncidentIds(next);
     scaffoldMessenger.showSnackBar(
       SnackBar(
-        content: const Text('ซ่อนเคสนี้จากหน้าจอแล้ว (ข้อมูลยังเก็บไว้ในระบบครบ)'),
+        content: const Text('ซ่อนจากเครื่องนี้แล้ว — เคสยังเปิดอยู่ เครื่องอื่นยังเห็น '
+            '(ถ้าต้องการให้หายทุกฝั่ง กด "เลิกทำ" หรือ "แสดงอีกครั้ง" แล้วเลือก "ปิดเคส")'),
+        duration: const Duration(seconds: 6),
         backgroundColor: Colors.grey.shade800,
         action: SnackBarAction(
           label: 'เลิกทำ',
@@ -196,9 +203,17 @@ class _AgencyIncidentListScreenState extends State<AgencyIncidentListScreen> {
                           ))
                       .toList();
 
+                  // เคสที่ซ่อนจากเครื่องนี้แต่ยังเปิดอยู่ในระบบ — ต้องเอากลับมาได้ (เพื่อปิดเคสให้หายทุกฝั่ง)
+                  final hiddenOpen = rawList
+                      .where((i) =>
+                          !i.isClosed &&
+                          _dismissedIds.contains(i.id) &&
+                          (_myHospitalId == null || i.targetHospitalId == _myHospitalId))
+                      .toList();
+                  final Widget body;
                   if (list.isEmpty) {
                     final hiddenByFilter = activeList.isNotEmpty;
-                    return Center(
+                    body = Center(
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
@@ -215,14 +230,48 @@ class _AgencyIncidentListScreenState extends State<AgencyIncidentListScreen> {
                         ],
                       ),
                     );
+                  } else {
+                    body = ListView.builder(
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                      itemCount: list.length,
+                      itemBuilder: (context, index) {
+                        return _buildAgencyIncidentCard(list[index]);
+                      },
+                    );
                   }
-
-                  return ListView.builder(
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-                    itemCount: list.length,
-                    itemBuilder: (context, index) {
-                      return _buildAgencyIncidentCard(list[index]);
-                    },
+                  if (hiddenOpen.isEmpty) return body;
+                  return Column(
+                    children: [
+                      Container(
+                        margin: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF1F5F9),
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.visibility_off_rounded, size: 18, color: Color(0xFF64748B)),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'ซ่อนไว้ ${hiddenOpen.length} เคส (ยังเปิดอยู่ในระบบ)',
+                                style: const TextStyle(fontSize: 13, color: Color(0xFF475569)),
+                              ),
+                            ),
+                            TextButton(
+                              onPressed: () async {
+                                final next = {..._dismissedIds}..removeAll(hiddenOpen.map((i) => i.id));
+                                setState(() => _dismissedIds = next);
+                                await AgencyStorageService.setDismissedIncidentIds(next);
+                              },
+                              child: const Text('แสดงอีกครั้ง'),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Expanded(child: body),
+                    ],
                   );
                 },
               ),

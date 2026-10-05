@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'driver_presence.dart';
 
 class DriverStorageService {
   static const String _keyBackground = 'driver_bg_mode';
@@ -134,5 +135,33 @@ class DriverStorageService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_keyBackgroundAlertEnabled, enabled);
     backgroundAlertEnabledNotifier.value = enabled;
+  }
+
+  // แชร์ตำแหน่ง (ไม่ระบุตัวตน) ให้ผู้ขับขี่คนอื่นเห็นบนแผนที่ — เปิดไว้เป็นค่าเริ่มต้น ปิดได้ที่หน้าตั้งค่า
+  // ส่งเฉพาะตอนเปิดหน้าแผนที่อยู่ ไม่มีชื่อ/อีเมล/เบอร์ ใช้รหัสสุ่มประจำเครื่อง
+  static const String _keySharePresence = 'driver_share_presence';
+  static const String _keyPresenceId = 'driver_presence_id';
+  static final ValueNotifier<bool> sharePresenceNotifier = ValueNotifier<bool>(true);
+
+  static Future<bool> getSharePresence() async {
+    final prefs = await SharedPreferences.getInstance();
+    final enabled = prefs.getBool(_keySharePresence) ?? true;
+    sharePresenceNotifier.value = enabled;
+    return enabled;
+  }
+
+  static Future<void> setSharePresence(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keySharePresence, enabled);
+    sharePresenceNotifier.value = enabled;
+  }
+
+  static Future<String> getPresenceId() async {
+    final prefs = await SharedPreferences.getInstance();
+    final existing = prefs.getString(_keyPresenceId);
+    if (existing != null && existing.isNotEmpty) return existing;
+    final id = DriverPresence.newAnonymousId();
+    await prefs.setString(_keyPresenceId, id);
+    return id;
   }
 }

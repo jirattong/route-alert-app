@@ -85,3 +85,6 @@ app.*.map.json
 # (โมเดลที่เทรนด้วย scripts/train_accident_classifier_v2_colab.ipynb มีขนาด ~6 MB ใส่ git ได้)
 assets/models/accident_classifier.tflite
 scripts/*.bak
+
+# ทีม/bundle id ของแต่ละเครื่อง (tools/ios_signing.sh)
+ios/Flutter/Signing.xcconfig

@@ -20,6 +20,7 @@ import '../../../core/services/theme_settings_service.dart';
 import '../../../core/models/emergency_proximity_tier.dart';
 import '../../auth_face_login/data/services/face_auth_repository.dart';
 import 'incident_detail_screen.dart';
+import '../../../core/services/driver_presence.dart';
 
 /// แถบ debug สถานะ MQTT ชั่วคราว — เปิดไว้ตอนไล่บั๊กเชื่อมต่อ 2 เครื่อง ตอนนี้บั๊กที่
 /// ใช้วินิจฉัยแก้แล้ว (ดู CHANGES_SUMMARY.md หัวข้อ 11.1/11.2) ปิดไว้เป็น false โดย
@@ -99,6 +100,12 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
   StreamSubscription<LatLng>? _locationSubscription;
   StreamSubscription<EmergencyVehicleData>? _mqttSubscription;
   StreamSubscription<List<EmergencyVehicleData>>? _fleetSubscription;
+  // ผู้ขับขี่คนอื่นบนแผนที่ (ไม่ระบุตัวตน) และการแชร์ตำแหน่งของเครื่องนี้
+  StreamSubscription<List<DriverPresence>>? _driversSubscription;
+  List<DriverPresence> _otherDrivers = [];
+  String? _presenceId;
+  DateTime? _presenceSentAt;
+  LatLng? _presenceSentPos;
   Timer? _simulationTimer;
   bool _isSimulating = false;
   bool _isNightMode = false; // Night Driving Dark Map Mode
@@ -333,6 +340,16 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
 
   void _initMqttRadar() async {
     await EmergencyMqttService().initialize();
+    if (!mounted) return;
+    _presenceId = await DriverStorageService.getPresenceId();
+    await DriverStorageService.getSharePresence();
+    if (!mounted) return;
+    EmergencyMqttService().subscribeDriverPresence(_presenceId!);
+    _driversSubscription = EmergencyMqttService().driversStream.listen((drivers) {
+      if (mounted) setState(() => _otherDrivers = drivers);
+    });
+    DriverStorageService.sharePresenceNotifier.addListener(_onSharePresenceChanged);
+    _maybePublishPresence();
 
     _mqttSubscription = EmergencyMqttService().emergencyStream.listen((data) {
       if (!mounted) return;
@@ -391,8 +408,49 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
     });
   }
 
+  /// ส่งตำแหน่งตัวเองให้ผู้ขับขี่คนอื่น — เฉพาะตอนเปิดแอปอยู่ มีตำแหน่งจริง และเปิดสวิตช์แชร์
+  void _maybePublishPresence() {
+    final id = _presenceId;
+    if (id == null || !_hasRealFix || !DriverStorageService.sharePresenceNotifier.value) return;
+    if (WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) return;
+    final now = DateTime.now();
+    if (!shouldPublishPresence(
+        now: now, position: _currentLocation, lastSentAt: _presenceSentAt, lastSentPosition: _presenceSentPos)) {
+      return;
+    }
+    _presenceSentAt = now;
+    _presenceSentPos = _currentLocation;
+    EmergencyMqttService().publishDriverPresence(DriverPresence(
+      id: id,
+      latitude: _currentLocation.latitude,
+      longitude: _currentLocation.longitude,
+      heading: _driverHeading,
+      speedKmh: _driverSpeed,
+    ));
+  }
+
+  void _publishOffline() {
+    final id = _presenceId;
+    if (id == null) return;
+    _presenceSentAt = null;
+    EmergencyMqttService().publishDriverPresence(DriverPresence(
+      id: id, latitude: _currentLocation.latitude, longitude: _currentLocation.longitude, online: false));
+  }
+
+  void _onSharePresenceChanged() {
+    if (DriverStorageService.sharePresenceNotifier.value) {
+      _maybePublishPresence();
+    } else {
+      _publishOffline(); // ปิดการแชร์ = หายจากแผนที่ของคนอื่นทันที
+    }
+  }
+
   @override
   void dispose() {
+    _publishOffline();
+    _driversSubscription?.cancel();
+    EmergencyMqttService().unsubscribeDriverPresence();
+    DriverStorageService.sharePresenceNotifier.removeListener(_onSharePresenceChanged);
     ThemeSettingsService.isNightMode.removeListener(_onNightModeChanged);
     _headsUpDismissTimer?.cancel();
     _headsUpSubscription?.cancel();
@@ -440,6 +498,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
         _currentLocation = newPos;
         _hasRealFix = true;
       });
+      _maybePublishPresence();
       _recomputeNearestHospital();
       if (_isSimulating || _hasLiveAmbulance) {
         _runAiTrajectoryEvaluation();
@@ -485,6 +544,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
         _currentLocation = newPos;
         _hasRealFix = true;
       });
+      _maybePublishPresence();
       _recomputeNearestHospital();
       if (_isSimulating || _hasLiveAmbulance) {
         _runAiTrajectoryEvaluation();
@@ -1039,7 +1099,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                               ),
                               const SizedBox(width: 6),
                               Text(
-                                'ออนไลน์: ${1 + _activeFleet.length} หน่วย',
+                                'ออนไลน์: รถพยาบาล ${_activeFleet.length} · ผู้ขับขี่ ${1 + _otherDrivers.length}',
                                 style: TextStyle(
                                   fontSize: 11,
                                   fontWeight: FontWeight.bold,
@@ -2574,6 +2634,24 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
 
         MarkerLayer(
           markers: [
+            // 0. ผู้ขับขี่คนอื่น (ไม่ระบุตัวตน) — วาดก่อนให้หมุดของเราและรถพยาบาลอยู่ด้านบน
+            for (final d in _otherDrivers)
+              Marker(
+                point: d.point,
+                width: 30,
+                height: 30,
+                child: Transform.rotate(
+                  angle: d.heading * math.pi / 180,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: _isNightMode ? const Color(0xFF334155) : Colors.white,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: const Color(0xFF94A3B8), width: 1.5),
+                    ),
+                    child: const Center(child: Text('🚗', style: TextStyle(fontSize: 14))),
+                  ),
+                ),
+              ),
             // 1. User Driver Marker (คุณ)
             Marker(
               point: _currentLocation,

@@ -29,6 +29,7 @@ class _DriverSettingsScreenState extends State<DriverSettingsScreen> {
   bool _isEnglish = false;
   bool _isNightMode = false;
   bool _isSirenDetectionEnabled = false;
+  bool _isSharePresence = true;
   bool _isSirenModelLoaded = false;
   bool _isBackgroundAlertEnabled = false;
   bool _isRequestingBackgroundPermission = false;
@@ -52,6 +53,9 @@ class _DriverSettingsScreenState extends State<DriverSettingsScreen> {
     _isNightMode = ThemeSettingsService.isNightMode.value;
     ThemeSettingsService.isNightMode.addListener(_onNightModeChanged);
 
+    DriverStorageService.getSharePresence().then((value) {
+      if (mounted) setState(() => _isSharePresence = value);
+    });
     DriverStorageService.getSirenDetectionEnabled().then((value) {
       if (mounted) setState(() => _isSirenDetectionEnabled = value);
     });
@@ -519,6 +523,63 @@ class _DriverSettingsScreenState extends State<DriverSettingsScreen> {
                                 ? (_isNightMode ? Colors.white60 : Colors.black54)
                                 : const Color(0xFFEA580C),
                             fontWeight: _isSirenModelLoaded ? FontWeight.normal : FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+
+                  // แชร์ตำแหน่งให้ผู้ขับขี่คนอื่นเห็นบนแผนที่ (ไม่ระบุตัวตน)
+                  _buildCard(
+                    borderColor: const Color(0xFF64748B),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'แสดงตำแหน่งของฉันให้ผู้ขับขี่คนอื่นเห็น',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                      color: primaryTextColor,
+                                    ),
+                                  ),
+                                  const Text(
+                                    'Share location with other drivers',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: Color(0xFF64748B),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Switch(
+                              value: _isSharePresence,
+                              activeThumbColor: Colors.white,
+                              activeTrackColor: const Color(0xFF64748B),
+                              onChanged: (val) async {
+                                setState(() => _isSharePresence = val);
+                                await DriverStorageService.setSharePresence(val);
+                              },
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'แสดงเป็นไอคอนรถบนแผนที่ของผู้ขับขี่คนอื่น ไม่มีชื่อหรือเบอร์โทร '
+                          'ส่งเฉพาะตอนเปิดหน้าแผนที่ และหายจากแผนที่ทันทีเมื่อปิดสวิตช์หรือออกจากแอป '
+                          'รถพยาบาลไม่เห็นตำแหน่งนี้',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            color: _isNightMode ? Colors.white60 : Colors.black54,
                           ),
                         ),
                       ],

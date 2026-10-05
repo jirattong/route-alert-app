@@ -1,5 +1,5 @@
 #!/bin/zsh
-# รันการทดสอบอัตโนมัติทุกสถานการณ์ (S01–S19 หลายผู้ใช้ + G01–G20 GPS) แล้วรวมผลเป็นรายงานเดียว
+# รันการทดสอบอัตโนมัติทุกสถานการณ์ (S01–S20 หลายผู้ใช้ + G01–G20 GPS) แล้วรวมผลเป็นรายงานเดียว
 #   tools/run_all_scenarios.sh            ทุกชุด: Dart + Worker + ตัวจำลองหลายเครื่องบน emulator
 #   tools/run_all_scenarios.sh --quick    เฉพาะ Dart + Worker (ไม่ต้องมี Java)
 #   tools/run_all_scenarios.sh --legacy   ตัวจำลองใช้ตรรกะก่อนแก้ (แสดงว่าชุดทดสอบจับบั๊กเดิมได้)

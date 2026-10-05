@@ -66,12 +66,19 @@ class AgencyStorageService {
   /// ข้อมูลใน Firestore เลย) — สำหรับซ่อนเคสที่ยังไม่ resolved ออกจากรายการเมื่อ
   /// agency ไม่ต้องการเห็นแล้ว ข้อมูลจริงยังอยู่ครบใน database เผื่อใช้กับ heatmap/
   /// เว็บดูข้อมูลย้อนหลังในอนาคต
+  /// เคสที่ซ่อนจากเครื่องนี้ — หน้ารายการและหน้าหลัก (แบนเนอร์/ตัวนับ/แผนที่) ใช้ชุดเดียวกัน
+  /// เดิมซ่อนได้แค่หน้ารายการ หน้าหลักยังโชว์เคสที่ซ่อนแล้ว
+  static final ValueNotifier<Set<String>> dismissedNotifier = ValueNotifier<Set<String>>(const {});
+
   static Future<Set<String>> loadDismissedIncidentIds() async {
     final prefs = await SharedPreferences.getInstance();
-    return (prefs.getStringList(_keyDismissedIncidentIds) ?? const []).toSet();
+    final ids = (prefs.getStringList(_keyDismissedIncidentIds) ?? const []).toSet();
+    dismissedNotifier.value = ids;
+    return ids;
   }
 
   static Future<void> setDismissedIncidentIds(Set<String> ids) async {
+    dismissedNotifier.value = {...ids};
     final prefs = await SharedPreferences.getInstance();
     await prefs.setStringList(_keyDismissedIncidentIds, ids.toList());
   }

@@ -1,0 +1,4 @@
+// ตั้งค่าของ target RouteAlertLiveActivity — ทีมและ bundle id มาจาก Signing.xcconfig เหมือนตัวแอป
+// (Live Activity ต้องอยู่ทีมเดียวกับแอป และ bundle id ต้องขึ้นต้นด้วย bundle id ของแอป)
+APP_BUNDLE_ID = com.yuttapat.routealert
+#include? "Signing.xcconfig"

@@ -1,2 +1,7 @@
 #include? "Pods/Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig"
 #include "Generated.xcconfig"
+
+// ทีมและ bundle id ของเครื่องนี้ — สร้างด้วย tools/ios_signing.sh (ไฟล์ Signing.xcconfig ไม่ขึ้น git)
+// ไม่มีไฟล์ = ใช้ bundle id ตั้งต้นด้านล่าง และเลือกทีมเองใน Xcode
+APP_BUNDLE_ID = com.yuttapat.routealert
+#include? "Signing.xcconfig"

@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:latlong2/latlong.dart';
 import 'package:mqtt_client/mqtt_client.dart';
 import 'package:mqtt_client/mqtt_server_client.dart';
+import 'driver_presence.dart';
 
 class EmergencyVehicleData {
   final String id;
@@ -126,6 +127,18 @@ class EmergencyMqttService {
   // clone repo นี้ไปทดสอบบน broker.emqx.io สาธารณะตัวเดียวกัน
   static const String topicAmbulanceBroadcast =
       'routealert-ccf91/emergency/ambulance';
+  // ตำแหน่งผู้ขับขี่ (ไม่ระบุตัวตน) — เฉพาะแอปผู้ขับขี่ที่ subscribe รถพยาบาลไม่รับ topic นี้
+  static const String topicDriverPresence = 'routealert-ccf91/presence/driver';
+
+  final DriverPresenceRegistry _drivers = DriverPresenceRegistry();
+  final StreamController<List<DriverPresence>> _driversController =
+      StreamController<List<DriverPresence>>.broadcast();
+  bool _wantDriverPresence = false;
+  String? _selfDriverId;
+
+  /// ผู้ขับขี่คนอื่นที่ออนไลน์ (ไม่รวมเครื่องนี้)
+  Stream<List<DriverPresence>> get driversStream => _driversController.stream;
+  List<DriverPresence> get activeDrivers => _drivers.others(_selfDriverId);
 
   final StreamController<EmergencyVehicleData> _emergencyStreamController =
       StreamController<EmergencyVehicleData>.broadcast();
@@ -206,7 +219,10 @@ class EmergencyMqttService {
         _lastError = null;
         _subscribeToEmergency();
         _staleCheckTimer ??= Timer.periodic(
-            const Duration(seconds: 5), (_) => _purgeStaleVehicles());
+            const Duration(seconds: 5), (_) {
+          _purgeStaleVehicles();
+          if (_drivers.purge()) _driversController.add(activeDrivers);
+        });
       } else {
         _lastError =
             'ต่อไม่สำเร็จ: สถานะ=${_client!.connectionStatus?.state}, '
@@ -265,12 +281,28 @@ class EmergencyMqttService {
   void _subscribeToEmergency() {
     debugPrint('[EmergencyMqttService] subscribing to $topicAmbulanceBroadcast');
     _client?.subscribe(topicAmbulanceBroadcast, MqttQos.atLeastOnce);
+    if (_wantDriverPresence) _client?.subscribe(topicDriverPresence, MqttQos.atMostOnce);
     _client?.updates?.listen((List<MqttReceivedMessage<MqttMessage>> messages) {
-      _messagesReceivedCount++;
-      final recMess = messages[0].payload as MqttPublishMessage;
+      for (final m in messages) {
+        _handleMessage(m);
+      }
+    });
+  }
+
+  void _handleMessage(MqttReceivedMessage<MqttMessage> message) {
+    {
+      final recMess = message.payload as MqttPublishMessage;
       // ต้องถอดรหัสด้วย UTF-8 คู่กับฝั่งส่งที่เข้ารหัสด้วย addUTF8String() ข้างบน
       // (bytesToStringAsString() ของแพ็กเกจไม่ใช่ UTF-8 จริง ใช้ไม่ได้กับข้อความไทย)
       final payload = utf8.decode(recMess.payload.message.toList());
+      if (message.topic == topicDriverPresence) {
+        final p = DriverPresence.tryParse(payload);
+        if (p != null && p.id != _selfDriverId && _drivers.update(p)) {
+          _driversController.add(activeDrivers);
+        }
+        return;
+      }
+      _messagesReceivedCount++;
       debugPrint('[EmergencyMqttService] received #$_messagesReceivedCount: '
           '${payload.length > 120 ? payload.substring(0, 120) : payload}');
 
@@ -292,7 +324,32 @@ class EmergencyMqttService {
         _lastParseError = 'parse error: $e';
         debugPrint('[EmergencyMqttService] $_lastParseError | payload=$payload');
       }
-    });
+    }
+  }
+
+  /// แอปผู้ขับขี่: เริ่มรับตำแหน่งผู้ขับขี่คนอื่น ([selfId] = รหัสสุ่มของเครื่องนี้ ไม่แสดงตัวเองซ้ำ)
+  void subscribeDriverPresence(String selfId) {
+    _selfDriverId = selfId;
+    if (_wantDriverPresence) return;
+    _wantDriverPresence = true;
+    if (_isConnected) _client?.subscribe(topicDriverPresence, MqttQos.atMostOnce);
+  }
+
+  void unsubscribeDriverPresence() {
+    if (!_wantDriverPresence) return;
+    _wantDriverPresence = false;
+    if (_isConnected) _client?.unsubscribe(topicDriverPresence);
+    _drivers.clear();
+    _driversController.add(const []);
+  }
+
+  /// แอปผู้ขับขี่: ส่งตำแหน่งตัวเอง (QoS 0 — ตำแหน่งถัดไปมาแทนอยู่แล้ว ไม่ต้องรับประกัน)
+  void publishDriverPresence(DriverPresence presence) {
+    if (!_isConnected || _client == null) return;
+    try {
+      final builder = MqttClientPayloadBuilder()..addUTF8String(presence.toJson());
+      _client!.publishMessage(topicDriverPresence, MqttQos.atMostOnce, builder.payload!);
+    } catch (_) {}
   }
 
   /// Broadcasts ambulance live location to other drivers on the road

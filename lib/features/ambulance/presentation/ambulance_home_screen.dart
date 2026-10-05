@@ -13,6 +13,7 @@ import '../../../core/services/location_service.dart';
 import '../../../core/services/osrm_routing_service.dart';
 import '../../../core/widgets/status_confirm_dialog.dart';
 import 'ambulance_case_actions.dart';
+import '../../../core/services/driver_presence.dart' show otherAmbulances;
 
 class AmbulanceHomeScreen extends StatefulWidget {
   /// เรียกครั้งเดียวตอน initState เพื่อส่งฟังก์ชันเปิด Coach Mark ขึ้นไปให้
@@ -55,6 +56,9 @@ class _AmbulanceHomeScreenState extends State<AmbulanceHomeScreen> {
   LatLng _ambulanceLocation = const LatLng(19.0350, 99.8962);
   // ยังไม่เคยได้ตำแหน่งจริงจาก GPS — ห้ามประกาศตำแหน่งตั้งต้นข้างบนให้ศูนย์ (สถานการณ์ G07)
   bool _hasRealFix = false;
+  // รถพยาบาลคันอื่นที่ออนไลน์ (เห็นเฉพาะรถพยาบาลด้วยกัน — ไม่รับตำแหน่งผู้ขับขี่)
+  List<EmergencyVehicleData> _otherAmbulances = [];
+  StreamSubscription<List<EmergencyVehicleData>>? _fleetSub;
   LatLng _incidentLocation = const LatLng(19.0284, 99.8962);
   late LatLng _hospitalLocation;
 
@@ -337,6 +341,15 @@ class _AmbulanceHomeScreenState extends State<AmbulanceHomeScreen> {
 
   void _initAmbulanceTracking() async {
     await EmergencyMqttService().initialize();
+    _fleetSub = EmergencyMqttService().activeFleetStream.listen((fleet) {
+      if (!mounted) return;
+      setState(() => _otherAmbulances =
+          otherAmbulances(fleet, ownUnitId: _ambulanceUnitId, ownPlate: _ambulancePlateNumber));
+    });
+    if (mounted) {
+      setState(() => _otherAmbulances = otherAmbulances(EmergencyMqttService().activeFleet,
+          ownUnitId: _ambulanceUnitId, ownPlate: _ambulancePlateNumber));
+    }
     final pos = await LocationService.getCurrentLocation();
     if (pos != null && mounted) {
       setState(() {
@@ -604,6 +617,7 @@ class _AmbulanceHomeScreenState extends State<AmbulanceHomeScreen> {
     AmbulanceStorageService.onDutyNotifier.removeListener(_onDutyChanged);
     AmbulanceStorageService.profileNotifier.removeListener(_onProfileChanged);
     _locationSub?.cancel();
+    _fleetSub?.cancel();
     _incidentSub?.cancel();
     _hospitalSub?.cancel();
     _broadcastTimer?.cancel();
@@ -987,6 +1001,42 @@ class _AmbulanceHomeScreenState extends State<AmbulanceHomeScreen> {
                 ),
               ),
             ),
+
+            // 1.1 รถพยาบาลคันอื่น (ชื่อเรียกขานใต้หมุด)
+            for (final other in _otherAmbulances)
+              Marker(
+                point: LatLng(other.latitude, other.longitude),
+                width: 110,
+                height: 54,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(3),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: const Color(0xFF5B9EE1), width: 1.5),
+                      ),
+                      child: const Text('🚑', style: TextStyle(fontSize: 16)),
+                    ),
+                    Container(
+                      margin: const EdgeInsets.only(top: 2),
+                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1E3A8A).withValues(alpha: 0.85),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        other.callSign,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 9, color: Colors.white, fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
 
             // 2. Incident Location Marker (เฉพาะตอนมีเคสจริงเท่านั้น)
             if (hasCase)

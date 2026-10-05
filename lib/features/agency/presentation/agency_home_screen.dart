@@ -186,9 +186,25 @@ class _AgencyHomeScreenState extends State<AgencyHomeScreen>
     return list.where((i) => i.targetHospitalId == _myHospitalId).toList();
   }
 
+  // รายการล่าสุดก่อนกรอง — กรองใหม่ได้ทันทีเมื่อซ่อนเคสจากหน้ารายการ
+  List<IncidentReport> _rawIncidents = [];
+
+  /// เคสของโรงพยาบาลนี้ที่ยังไม่ถูกซ่อนจากเครื่องนี้
+  List<IncidentReport> _visible(List<IncidentReport> list) {
+    final hidden = AgencyStorageService.dismissedNotifier.value;
+    return _filterByMyHospital(list).where((i) => !hidden.contains(i.id)).toList();
+  }
+
+  void _onDismissedChanged() {
+    if (mounted) setState(() => _incidents = _visible(_rawIncidents));
+  }
+
   void _initIncidentStream() async {
     await IncidentService().initialize();
-    final initial = _filterByMyHospital(await IncidentService().getLocalIncidents());
+    await AgencyStorageService.loadDismissedIncidentIds();
+    AgencyStorageService.dismissedNotifier.addListener(_onDismissedChanged);
+    _rawIncidents = await IncidentService().getLocalIncidents();
+    final initial = _visible(_rawIncidents);
     // เคสที่มีอยู่แล้วตอนเปิดหน้าครั้งแรกไม่นับเป็น "เคสใหม่" (ไม่งั้นเปิดแอปทีไร
     // จะโดนแจ้งเตือนเสียง/กะพริบจอทุกเคสเก่าที่ค้างอยู่ในระบบทันที)
     _knownIncidentIds = initial.map((i) => i.id).toSet();
@@ -198,7 +214,8 @@ class _AgencyHomeScreenState extends State<AgencyHomeScreen>
     }
     _incidentSub = IncidentService().incidentsStream.listen((rawList) {
       if (!mounted) return;
-      final list = _filterByMyHospital(rawList);
+      _rawIncidents = rawList;
+      final list = _visible(rawList);
       _handleNewIncidentAlerts(list);
       setState(() => _incidents = list);
     });
@@ -287,6 +304,7 @@ class _AgencyHomeScreenState extends State<AgencyHomeScreen>
 
   @override
   void dispose() {
+    AgencyStorageService.dismissedNotifier.removeListener(_onDismissedChanged);
     _profileSub?.cancel();
     _mqttSub?.cancel();
     _incidentSub?.cancel();
